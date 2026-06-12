@@ -109,6 +109,12 @@ input:focus, select:focus, textarea:focus {
 
 .row input { flex: 1; }
 .row.wrap { flex-wrap: wrap; }
+
+.settings-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1.5rem 0 0.5rem;
+}
 .space-between { justify-content: space-between; }
 
 .field-inline {

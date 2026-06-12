@@ -72,6 +72,16 @@
         <button id="btn-cancel-settings" class="ghost">Abbrechen</button>
       </div>
       <p class="hint"><a href="#" id="link-onboarding">Wie bekomme ich einen API-Schlüssel? Zur Schritt-für-Schritt-Anleitung</a></p>
+
+      <hr class="settings-divider">
+      <label>Daten sichern und übertragen</label>
+      <p class="hint">Sichert deinen Verlauf und deine Einstellungen als Datei – praktisch für den Umzug auf eine neue Adresse oder einen anderen Browser. Die Datei enthält auch deinen API-Key, also vertraulich behandeln.</p>
+      <div class="row wrap">
+        <button id="btn-export" class="ghost" type="button">Daten exportieren</button>
+        <button id="btn-import" class="ghost" type="button">Daten importieren</button>
+      </div>
+      <input type="file" id="import-file" accept="application/json,.json" hidden>
+      <p id="data-status" class="hint" role="status"></p>
     </section>
 
     <!-- Stellenbeschreibung -->

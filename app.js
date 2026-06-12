@@ -1265,6 +1265,106 @@ $("btn-save-settings").addEventListener("click", () => {
 
 $("btn-cancel-settings").addEventListener("click", () => showView("view-input"));
 
+/* ---------- Daten-Export / -Import (Umzug zwischen Adressen/Browsern) ---------- */
+
+// Sichert beide localStorage-Bestaende in eine versionierte JSON-Datei
+function exportData() {
+  const data = {
+    app: "bewerbungstool",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    settings: loadSettings(),
+    history: loadHistory(),
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "jobreif-backup-" + new Date().toISOString().slice(0, 10) + ".json";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Fuehrt eine Sicherung wieder ein. Bewusst nicht-destruktiv: Einstellungen
+// werden feldweise ergaenzt, Stellen per key und Versuche per Datum
+// zusammengefuehrt - vorhandene Daten gehen nie verloren.
+function importData(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error("Die Datei ist kein gültiges JSON.");
+  }
+  if (!data || typeof data !== "object" || (!data.settings && !data.history)) {
+    throw new Error("Die Datei enthält keine erkennbaren Bewerbungstool-Daten.");
+  }
+
+  let settingsImported = false;
+  if (data.settings && typeof data.settings === "object") {
+    settings = { ...loadSettings(), ...data.settings };
+    saveSettings(settings);
+    settingsImported = true;
+  }
+
+  let newJobs = 0;
+  let newAttempts = 0;
+  if (data.history && Array.isArray(data.history.jobs)) {
+    const h = loadHistory();
+    data.history.jobs.forEach((impJob) => {
+      if (!impJob || !impJob.key || !Array.isArray(impJob.attempts)) return;
+      const existing = h.jobs.find((j) => j.key === impJob.key);
+      if (!existing) {
+        h.jobs.push(impJob);
+        newJobs++;
+        newAttempts += impJob.attempts.length;
+        return;
+      }
+      const seen = new Set(existing.attempts.map((a) => a.date));
+      impJob.attempts.forEach((a) => {
+        if (a && !seen.has(a.date)) {
+          existing.attempts.push(a);
+          newAttempts++;
+        }
+      });
+      existing.attempts.sort((a, b) => a.date - b.date);
+    });
+    // Neueste Stelle zuerst, wie beim normalen Speichern
+    h.jobs.sort((j1, j2) => {
+      const last = (j) => Math.max(0, ...j.attempts.map((a) => a.date || 0));
+      return last(j2) - last(j1);
+    });
+    saveHistory(h);
+  }
+
+  const parts = [];
+  if (settingsImported) parts.push("Einstellungen übernommen");
+  parts.push(
+    (newJobs === 1 ? "1 neue Stelle" : newJobs + " neue Stellen") +
+      ", " +
+      (newAttempts === 1 ? "1 neuer Versuch" : newAttempts + " neue Versuche")
+  );
+  return parts.join("; ") + ".";
+}
+
+$("btn-export").addEventListener("click", exportData);
+$("btn-import").addEventListener("click", () => $("import-file").click());
+$("import-file").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = ""; // erlaubt erneuten Import derselben Datei
+  if (!file) return;
+  const status = $("data-status");
+  status.textContent = "Datei wird gelesen...";
+  try {
+    const summary = importData(await file.text());
+    status.textContent = "Import erfolgreich: " + summary + " Die Seite wird neu geladen...";
+    setTimeout(() => location.reload(), 1500);
+  } catch (err) {
+    status.textContent = "Import fehlgeschlagen: " + err.message;
+  }
+});
+
 // Quelle der Stellenbeschreibung: entweder URL oder manuell eingefuegter Text
 function setSourceTab(which) {
   $("tab-url").classList.toggle("active", which === "url");
