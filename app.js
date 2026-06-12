@@ -80,6 +80,7 @@ let quiz = null;      // { titel, fragen: [...] }
 let answers = [];     // index-paralleles Array mit Antworttexten
 let current = 0;
 let mode = "lernen";  // "lernen" | "pruefung"
+let reviewing = false; // Durchgehen eines bereits bewerteten Fragebogens (keine erneute Auswertung)
 let revealed = [];    // Lernmodus: welche Fragen bereits aufgeloest wurden
 let startTime = 0;
 const timer = { intervalId: null, deadline: 0, overtime: false, limitMin: 0 };
@@ -527,6 +528,7 @@ async function generateQuiz() {
     answers = new Array(quiz.fragen.length).fill("");
     revealed = new Array(quiz.fragen.length).fill(false);
     current = 0;
+    reviewing = false;
     startTime = Date.now();
 
     if (mode === "pruefung") {
@@ -631,6 +633,9 @@ function renderQuestion() {
   const area = $("answer-area");
   area.innerHTML = "";
 
+  // Beim Durchgehen eines bewerteten Fragebogens sind Antworten gesperrt
+  const locked = isRevealed || reviewing;
+
   if (q.typ === "multiple_choice") {
     q.optionen.forEach((opt) => {
       const btn = document.createElement("button");
@@ -642,7 +647,7 @@ function renderQuestion() {
       }
       btn.className = cls;
       btn.textContent = opt;
-      if (!isRevealed) {
+      if (!locked) {
         btn.addEventListener("click", () => {
           answers[current] = opt;
           renderQuestion();
@@ -657,7 +662,7 @@ function renderQuestion() {
     ta.rows = 6;
     ta.placeholder = "Deine Antwort...";
     ta.value = answers[current];
-    ta.readOnly = isRevealed;
+    ta.readOnly = locked;
     ta.addEventListener("input", () => (answers[current] = ta.value));
     area.appendChild(ta);
   }
@@ -665,7 +670,8 @@ function renderQuestion() {
   renderLearnArea(q, isRevealed);
 
   $("btn-prev").disabled = current === 0;
-  $("btn-next").textContent = current === total - 1 ? "Auswerten" : "Weiter";
+  $("btn-next").textContent =
+    current === total - 1 ? (reviewing ? "Zur Auswertung" : "Auswerten") : "Weiter";
 }
 
 // Quelle als klickbarer Link: direkte URL, wenn das Modell sich sicher war,
@@ -757,6 +763,9 @@ function nextQuestion() {
   if (current < quiz.fragen.length - 1) {
     current++;
     renderQuestion();
+  } else if (reviewing) {
+    // Bereits bewertet: zurueck zur gespeicherten Auswertung, keine neue Bewertung
+    showView("view-result");
   } else {
     evaluateQuiz();
   }
@@ -1259,6 +1268,7 @@ $("btn-restart").addEventListener("click", () => {
   quiz = null;
   answers = [];
   revealed = [];
+  reviewing = false;
   stopTimer();
   $("quiz-timer").classList.add("hidden");
   showView("view-input");
@@ -1266,11 +1276,12 @@ $("btn-restart").addEventListener("click", () => {
 
 $("btn-print").addEventListener("click", () => window.print());
 
-// Beantworteten Fragebogen erneut durchgehen (immer im Lernmodus, ohne Timer)
+// Beantworteten Fragebogen erneut durchgehen (Lernmodus, ohne Timer,
+// ohne erneute Bewertung - die Auswertung existiert ja bereits)
 $("btn-review-questions").addEventListener("click", () => {
   if (!quiz) return;
   mode = "lernen";
-  startTime = Date.now();
+  reviewing = true;
   stopTimer();
   $("quiz-timer").classList.add("hidden");
   current = 0;
