@@ -4,23 +4,31 @@
 
 // Bewusst nur große Modelle: Das Erstellen eines stimmigen Fragenkatalogs und
 // die differenzierte Bewertung freier Antworten überfordern kleine Modelle.
+//
+// preis: Richtpreis des Anbieters in USD je 1 Mio. Tokens (Stand 2026). Dient
+// nur der Kostenanzeige und -schätzung im Tool; abgerechnet wird immer direkt
+// beim Anbieter. Bei den Anthropic-Modellen sind die Denk-Tokens ("thinking")
+// in den Output-Tokens enthalten und damit bereits eingepreist.
 const MODELS = {
   anthropic: [
     {
       id: "claude-opus-4-8",
       label: "Claude Opus 4.8 (empfohlen)",
       desc: "Stärkstes reguläres Claude-Modell. Sehr gute, stellenspezifische Fragen und differenziertes, faires Feedback - der beste Standard für dieses Tool.",
+      preis: { in: 5, out: 25 },
     },
     {
       id: "claude-fable-5",
       label: "Claude Fable 5",
       desc: "Anthropics fähigstes Modell. Noch gründlichere Auswertung, aber deutlich teurer und mit längeren Antwortzeiten - lohnt sich vor allem für anspruchsvolle Fach-Stellen.",
+      preis: { in: 10, out: 50 },
     },
     {
       id: "claude-sonnet-4-6",
       label: "Claude Sonnet 4.6 (günstig)",
       desc: "Günstiger als Opus. Läuft hier mit mittlerer Gründlichkeit (effort medium), weil es sonst vor der Ausgabe minutenlang nachdenkt - leichte Qualitätsabstriche gegenüber Opus sind möglich.",
       effort: "medium",
+      preis: { in: 3, out: 15 },
     },
   ],
   openai: [
@@ -28,16 +36,19 @@ const MODELS = {
       id: "gpt-5.1",
       label: "GPT-5.1 (empfohlen)",
       desc: "Aktuelles Spitzenmodell von OpenAI. Sehr gute Fragenqualität und zuverlässige strukturierte Ausgabe.",
+      preis: { in: 1.25, out: 10 },
     },
     {
       id: "gpt-5",
       label: "GPT-5",
       desc: "Sehr leistungsfähig und etwas günstiger als GPT-5.1. Solide Wahl für Generierung und Auswertung.",
+      preis: { in: 1.25, out: 10 },
     },
     {
       id: "gpt-4.1",
       label: "GPT-4.1",
       desc: "Bewährtes großes Modell mit gutem Preis-Leistungs-Verhältnis. Für Standard-Stellen völlig ausreichend.",
+      preis: { in: 2, out: 8 },
     },
   ],
   deepseek: [
@@ -45,11 +56,13 @@ const MODELS = {
       id: "deepseek-chat",
       label: "DeepSeek V3 (empfohlen)",
       desc: "Großes, sehr günstiges Modell. Gute Fragenqualität bei einem Bruchteil der Kosten - kleinere Abstriche bei Feinheiten im Deutschen.",
+      preis: { in: 0.27, out: 1.1 },
     },
     {
       id: "deepseek-reasoner",
       label: "DeepSeek R1 (Reasoning)",
       desc: "Denkt vor der Antwort ausführlich nach: besonders gründliche Bewertung, dafür spürbar langsamer.",
+      preis: { in: 0.55, out: 2.19 },
     },
   ],
 };
@@ -58,24 +71,7 @@ function modelsFor(provider) {
   return MODELS[provider] || MODELS.anthropic;
 }
 
-/* ---------- Kosten (US-Dollar je 1 Mio. Tokens) ---------- */
-
-// Richtpreise der Anbieter (Stand 2026). Dienen nur der Kostenanzeige und
-// -schätzung im Tool; abgerechnet wird immer direkt beim Anbieter. Bei den
-// Anthropic-Modellen sind die Denk-Tokens ("thinking") in den Output-Tokens
-// enthalten und damit bereits eingepreist. Unbekannte Modelle (z. B. eigene
-// Eintraege) liefern null und werden in der Anzeige stillschweigend
-// uebersprungen.
-const PRICING = {
-  "claude-opus-4-8": { in: 5, out: 25 },
-  "claude-fable-5": { in: 10, out: 50 },
-  "claude-sonnet-4-6": { in: 3, out: 15 },
-  "gpt-5.1": { in: 1.25, out: 10 },
-  "gpt-5": { in: 1.25, out: 10 },
-  "gpt-4.1": { in: 2, out: 8 },
-  "deepseek-chat": { in: 0.27, out: 1.1 },
-  "deepseek-reasoner": { in: 0.55, out: 2.19 },
-};
+/* ---------- Kosten (US-Dollar) ---------- */
 
 // Grobe Annahme fuer den Token-Verbrauch eines kompletten Tests mit etwa
 // 10 Fragen (Fragen erstellen inkl. Stellenanzeige + Antworten auswerten),
@@ -83,21 +79,31 @@ const PRICING = {
 // Kostenorientierung im Modell-Picker.
 const COST_ESTIMATE_TOKENS = { input: 4000, output: 9000 };
 
+// Preis eines Modells aus dem Katalog; null fuer unbekannte Modelle oder
+// Eintraege ohne Preis — die Anzeige laesst die Kosten dann stillschweigend weg.
+function pricingFor(modelId) {
+  for (const list of Object.values(MODELS)) {
+    const m = list.find((e) => e.id === modelId);
+    if (m) return m.preis || null;
+  }
+  return null;
+}
+
 // Errechnet die Kosten in USD aus Token-Verbrauch und Modellpreis; null, wenn
 // fuer das Modell kein Preis hinterlegt ist.
 function costForUsage(modelId, inputTokens, outputTokens) {
-  const p = PRICING[modelId];
+  const p = pricingFor(modelId);
   if (!p) return null;
   return ((inputTokens || 0) * p.in + (outputTokens || 0) * p.out) / 1e6;
 }
 
-// Verbrauchsobjekt mit eingerechneten Kosten (cost ggf. null)
-function usageWithCost(modelId, inputTokens, outputTokens) {
-  return {
-    inputTokens: inputTokens || 0,
-    outputTokens: outputTokens || 0,
-    cost: costForUsage(modelId, inputTokens, outputTokens),
-  };
+// Kosten eines einzelnen API-Aufrufs; null bei unbekanntem Preis oder wenn der
+// Stream keine Verbrauchsdaten geliefert hat (manche OpenAI-kompatible
+// Endpunkte ignorieren stream_options) — sonst wuerden faelschlich 0 $
+// gespeichert und angezeigt.
+function callCost(modelId, inputTokens, outputTokens) {
+  if (!inputTokens && !outputTokens) return null;
+  return costForUsage(modelId, inputTokens, outputTokens);
 }
 
 // Ungefaehre Kosten eines Standard-Tests fuer den Modell-Picker; null bei
@@ -451,7 +457,7 @@ async function callLLM(systemPrompt, userPrompt, schema, onProgress) {
       throw new Error("Die Anfrage wurde vom Modell abgelehnt. Bitte Stellenbeschreibung prüfen.");
     }
     if (!text) throw new Error("Leere Antwort vom Modell erhalten.");
-    return { data: parseJsonLoose(text), usage: usageWithCost(model, inputTokens, outputTokens) };
+    return { data: parseJsonLoose(text), cost: callCost(model, inputTokens, outputTokens) };
   }
 
   // OpenAI und DeepSeek (OpenAI-kompatible API)
@@ -517,7 +523,7 @@ async function callLLM(systemPrompt, userPrompt, schema, onProgress) {
   );
 
   if (!text) throw new Error("Leere Antwort vom Modell erhalten.");
-  return { data: parseJsonLoose(text), usage: usageWithCost(model, inputTokens, outputTokens) };
+  return { data: parseJsonLoose(text), cost: callCost(model, inputTokens, outputTokens) };
 }
 
 // Toleriert Markdown-Zaeune und Text um das JSON herum (noetig fuer DeepSeek)
@@ -738,7 +744,7 @@ async function generateQuiz() {
 
     const total = Number(numQuestions);
     setLoadingProgress(0, total, "Das Modell liest die Stellenanzeige...");
-    const { data: result, usage: genUsage } = await callLLM(system, user, QUESTIONS_SCHEMA, (acc) => {
+    const { data: result, cost: genCost } = await callLLM(system, user, QUESTIONS_SCHEMA, (acc) => {
       // Jede fertige Frage hat im gestreamten JSON genau einen "frage"-Schluessel
       const seen = (acc.match(/"frage"\s*:/g) || []).length;
       setLoadingProgress(seen, total, seen > 0
@@ -755,7 +761,7 @@ async function generateQuiz() {
     // Kosten der Fragenerstellung (inkl. Verarbeitung der Stellenanzeige) bis
     // zur Auswertung am Quiz mitfuehren, damit der Gesamtpreis je Fragebogen
     // gespeichert werden kann
-    quiz.genUsage = genUsage;
+    quiz.genCost = genCost;
     answers = new Array(quiz.fragen.length).fill("");
     revealed = new Array(quiz.fragen.length).fill(false);
     current = 0;
@@ -1054,13 +1060,13 @@ async function evaluateQuiz() {
 
     const total = quiz.fragen.length;
     setLoadingProgress(0, total, "Das Modell prüft deine Antworten...");
-    const { data: result, usage: evalUsage } = await callLLM(system, user, EVAL_SCHEMA, (acc) => {
+    const { data: result, cost: evalCost } = await callLLM(system, user, EVAL_SCHEMA, (acc) => {
       const seen = (acc.match(/"feedback"\s*:/g) || []).length;
       setLoadingProgress(seen, total, seen > 0
         ? `Antwort ${Math.min(seen, total)} von ${total} wird bewertet...`
         : "Antworten werden ausgewertet...");
     });
-    saveAttempt(result, durationMs, evalUsage);
+    saveAttempt(result, durationMs, evalCost);
     renderResult(result, durationMs);
     showView("view-result");
   } catch (e) {
@@ -1216,15 +1222,15 @@ function jobKey(text) {
 }
 
 // Gesamtkosten eines Fragebogens aus Erstellung und Auswertung; null, wenn
-// fuer keinen der beiden Aufrufe ein Preis bekannt ist (z. B. eigenes Modell)
-function buildCost(genUsage, evalUsage) {
-  const gen = genUsage && typeof genUsage.cost === "number" ? genUsage.cost : null;
-  const ev = evalUsage && typeof evalUsage.cost === "number" ? evalUsage.cost : null;
+// fuer keinen der beiden Aufrufe Kosten bekannt sind (z. B. eigenes Modell)
+function buildCost(genCost, evalCost) {
+  const gen = typeof genCost === "number" ? genCost : null;
+  const ev = typeof evalCost === "number" ? evalCost : null;
   if (gen === null && ev === null) return null;
   return { gen, eval: ev, total: (gen || 0) + (ev || 0) };
 }
 
-function saveAttempt(result, durationMs, evalUsage) {
+function saveAttempt(result, durationMs, evalCost) {
   const h = loadHistory();
   const key = jobKey(quiz.jobText);
   let job = h.jobs.find((j) => j.key === key);
@@ -1234,11 +1240,11 @@ function saveAttempt(result, durationMs, evalUsage) {
   }
   job.titel = quiz.titel;
 
-  const cost = buildCost(quiz.genUsage, evalUsage);
+  const cost = buildCost(quiz.genCost, evalCost);
 
   const quizCopy = JSON.parse(JSON.stringify(quiz));
   delete quizCopy.jobText; // liegt schon auf dem Job, spart Speicher
-  delete quizCopy.genUsage; // liegt als cost am Versuch, nicht doppelt sichern
+  delete quizCopy.genCost; // liegt als cost am Versuch, nicht doppelt sichern
 
   job.attempts.push({
     date: Date.now(),
