@@ -146,6 +146,22 @@ header {
   flex-wrap: wrap;
 }
 
+.header-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+}
+
+.header-logo {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: 11px;
+}
+.header-logo .field { fill: #ffffff; }
+.header-logo .glyph { fill: var(--primary); }
+
 header h1 {
   margin: 0;
   font-family: var(--display);
@@ -153,6 +169,8 @@ header h1 {
   font-size: 1.3rem;
   letter-spacing: -0.01em;
 }
+header h1 .brand-dot { color: oklch(0.9 0.07 45); }
+header h1 .brand-tld { font-weight: 500; opacity: 0.82; }
 header .subtitle { margin: 0.15rem 0 0; font-size: 0.85rem; opacity: 0.85; }
 
 .header-actions {
@@ -902,6 +920,8 @@ button.ghost {
   header { padding: 0.8rem 1rem; padding-top: calc(0.8rem + env(safe-area-inset-top)); }
   header h1 { font-size: 1.1rem; }
   header .subtitle { font-size: 0.75rem; }
+  .header-logo { width: 33px; height: 33px; border-radius: 9px; }
+  .header-brand { gap: 0.55rem; }
   .header-actions button { padding: 0.5rem 0.75rem; font-size: 0.85rem; }
 
   main { margin: 0.9rem auto; padding: 0 0.7rem calc(2rem + env(safe-area-inset-bottom)); }
