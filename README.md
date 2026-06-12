@@ -1,4 +1,6 @@
-# <img src="icon.svg" alt="" width="28" height="28"> jobreif.de
+![jobreif.de – Einstellungstest-Simulator](social-preview.png)
+
+# jobreif.de
 
 Eine kleine PWA, die aus einer Stellenbeschreibung einen interaktiven, simulierten Einstellungstest erstellt. Läuft komplett im Browser, ohne Backend. Erreichbar unter [jobreif.de](https://jobreif.de).
 
