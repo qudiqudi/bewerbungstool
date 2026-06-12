@@ -32,6 +32,13 @@ Unterstützte Anbieter und Modelle:
 
 Die Auswahl ist bewusst auf leistungsstarke Modelle beschränkt: Kleine Modelle (Haiku, Mini-Varianten) erzeugen keine zuverlässig strukturierten Fragenkataloge und bewerten freie Antworten zu oberflächlich. Zu jedem Modell zeigt das Dropdown eine kurze Einordnung, wofür es sich eignet.
 
+## Daten sichern und übertragen
+
+Über den Bereich „Daten sichern und übertragen" in den Einstellungen lassen sich alle lokal gespeicherten Daten exportieren und auf einem anderen Gerät oder einer anderen Domain importieren.
+
+- Export legt eine Datei `jobreif-backup-<datum>.json` mit Einstellungen und Verlauf ab. Der API-Key ist bewusst enthalten, damit der Umzug nahtlos ist – die Datei ist als vertraulich gekennzeichnet.
+- Import ist nicht-destruktiv: Einstellungen werden feldweise ergänzt, Stellen per Key und Versuche per Datum zusammengeführt. Vorhandene Daten gehen nie verloren; doppelte Versuche werden zusammengeführt. Ungültige oder fremde Dateien werden mit einer klaren Meldung abgewiesen.
+
 ## Historie
 
 Jede Auswertung wird automatisch lokal gespeichert (localStorage), gruppiert pro Stelle &ndash; dieselbe Stellenanzeige landet immer beim selben Eintrag. Die Historie zeigt den Verlauf der Ergebnisse als Balken, sodass Verbesserungen sichtbar werden. Jeder Versuch lässt sich wieder öffnen: Auswertung ansehen, den beantworteten Fragebogen im Lernmodus erneut durchgehen oder über &bdquo;Weiter üben&ldquo; einen neuen Test zur selben Stelle erstellen. Bei vollem Speicher werden die ältesten Versuche automatisch verworfen.
