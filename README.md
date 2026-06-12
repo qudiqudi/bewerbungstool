@@ -1,6 +1,8 @@
-# Bewerbungstool
+![jobreif.de – Einstellungstest-Simulator](social-preview.png)
 
-Eine kleine PWA, die aus einer Stellenbeschreibung einen interaktiven, simulierten Einstellungstest erstellt. Läuft komplett im Browser, ohne Backend.
+# jobreif.de
+
+Eine kleine PWA, die aus einer Stellenbeschreibung einen interaktiven, simulierten Einstellungstest erstellt. Läuft komplett im Browser, ohne Backend. Erreichbar unter [jobreif.de](https://jobreif.de).
 
 ## Funktionsweise
 
@@ -31,6 +33,13 @@ Unterstützte Anbieter und Modelle:
 - DeepSeek: V3 (empfohlen), R1
 
 Die Auswahl ist bewusst auf leistungsstarke Modelle beschränkt: Kleine Modelle (Haiku, Mini-Varianten) erzeugen keine zuverlässig strukturierten Fragenkataloge und bewerten freie Antworten zu oberflächlich. Zu jedem Modell zeigt das Dropdown eine kurze Einordnung, wofür es sich eignet.
+
+## Daten sichern und übertragen
+
+Über den Bereich „Daten sichern und übertragen" in den Einstellungen lassen sich alle lokal gespeicherten Daten exportieren und auf einem anderen Gerät oder einer anderen Domain importieren.
+
+- Export legt eine Datei `jobreif-backup-<datum>.json` mit Einstellungen und Verlauf ab. Der API-Key ist bewusst enthalten, damit der Umzug nahtlos ist – die Datei ist als vertraulich gekennzeichnet.
+- Import ist nicht-destruktiv: Einstellungen werden feldweise ergänzt, Stellen per Key und Versuche per Datum zusammengeführt. Vorhandene Daten gehen nie verloren; doppelte Versuche werden zusammengeführt. Ungültige oder fremde Dateien werden mit einer klaren Meldung abgewiesen.
 
 ## Historie
 

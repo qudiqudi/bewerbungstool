@@ -3,20 +3,42 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="theme-color" content="#1a4a8a">
-  <title>Bewerbungstool – Einstellungstest-Simulator</title>
+  <meta name="theme-color" content="#c5543a" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#3a2a25" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#c5543a">
+  <title>jobreif.de – Einstellungstest-Simulator</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="stylesheet" href="style.css">
+  <script>
+    // Farbschema-Override (Auto/Hell/Dunkel) frueh setzen, damit beim Laden
+    // kein Farbsprung entsteht. Kein/ungueltiger Wert => Auto (folgt dem System).
+    try {
+      var __t = localStorage.getItem("bewerbungstool.theme");
+      if (__t === "light" || __t === "dark") document.documentElement.dataset.theme = __t;
+    } catch (e) {}
+  </script>
 </head>
 <body>
   <header>
-    <div class="header-text">
-      <h1>Bewerbungstool</h1>
-      <p class="subtitle">Simulierter Einstellungstest zu einer Stellenausschreibung</p>
+    <div class="header-brand">
+      <svg class="header-logo" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+        <rect class="field" width="100" height="100" rx="22"/>
+        <g class="glyph" transform="translate(29.25 67.93) scale(0.6346)">
+          <path d="M3.77 -54.72L26.77 -54.72L26.77 1.53L26.40 5.03L25.77 7.90L24.90 10.40L23.27 13.28L21.27 15.53L19.27 17.03L17.15 18.15L13.90 19.28L10.15 20.03L6.15 20.40L0.40 20.40L0.40 7.03L4.65 7.03L6.40 6.78L7.78 6.28L8.78 5.65L10.03 4.40L10.78 3.15L11.28 1.53L11.40 -42.97L3.77 -43.10L3.77 -54.60ZM15.28 -76.97L18.90 -76.97L21.02 -76.47L22.90 -75.47L24.65 -73.47L25.52 -71.22L25.77 -67.97L25.27 -65.47L24.02 -63.22L22.90 -62.10L21.40 -61.22L19.02 -60.60L16.02 -60.47L13.78 -60.85L11.53 -61.85L10.28 -62.97L9.53 -63.97L8.65 -65.97L8.28 -68.47L8.40 -70.47L8.90 -72.35L9.78 -73.97L11.40 -75.60L12.78 -76.35L15.15 -76.85Z"/>
+          <circle cx="53.00" cy="-22.25" r="13"/>
+        </g>
+      </svg>
+      <div class="header-text">
+        <h1>jobreif<span class="brand-dot">.</span><span class="brand-tld">de</span></h1>
+        <p class="subtitle">Simulierter Einstellungstest zu einer Stellenausschreibung</p>
+      </div>
     </div>
     <div class="header-actions">
+      <button id="btn-theme" class="ghost" type="button" aria-label="Farbschema: Auto"></button>
       <button id="btn-history" class="ghost" title="Historie">Historie</button>
       <button id="btn-settings" class="ghost" title="Einstellungen">Einstellungen</button>
     </div>
@@ -72,6 +94,16 @@
         <button id="btn-cancel-settings" class="ghost">Abbrechen</button>
       </div>
       <p class="hint"><a href="#" id="link-onboarding">Wie bekomme ich einen API-Schlüssel? Zur Schritt-für-Schritt-Anleitung</a></p>
+
+      <hr class="settings-divider">
+      <label>Daten sichern und übertragen</label>
+      <p class="hint">Sichert deinen Verlauf und deine Einstellungen als Datei – praktisch für den Umzug auf eine neue Adresse oder einen anderen Browser. Die Datei enthält auch deinen API-Key, also vertraulich behandeln.</p>
+      <div class="row wrap">
+        <button id="btn-export" class="ghost" type="button">Daten exportieren</button>
+        <button id="btn-import" class="ghost" type="button">Daten importieren</button>
+      </div>
+      <input type="file" id="import-file" accept="application/json,.json" hidden>
+      <p id="data-status" class="hint" role="status"></p>
     </section>
 
     <!-- Stellenbeschreibung -->
@@ -129,8 +161,13 @@
           <label for="num-questions">Fragen</label>
           <select id="num-questions">
             <option value="6">6</option>
+            <option value="8">8</option>
             <option value="10" selected>10</option>
+            <option value="12">12</option>
             <option value="15">15</option>
+            <option value="20">20</option>
+            <option value="25">25</option>
+            <option value="30">30</option>
           </select>
         </div>
         <button id="btn-generate" class="primary">Test erstellen</button>
@@ -233,6 +270,19 @@
       <button id="btn-error-close" class="ghost">Schließen</button>
     </div>
   </main>
+
+  <footer class="site-footer">
+    <p>
+      <strong>jobreif.de</strong> &ndash; Einstellungstest-Simulator
+      <span class="footer-sep">&middot;</span>
+      <a href="https://github.com/qudiqudi/bewerbungstool" target="_blank" rel="noopener">GitHub</a>
+      <span class="footer-sep">&middot;</span>
+      <a href="https://github.com/qudiqudi/bewerbungstool/blob/main/LICENSE" target="_blank" rel="noopener">Lizenz (AGPL-3.0)</a>
+      <span class="footer-sep">&middot;</span>
+      <a href="https://github.com/qudiqudi/bewerbungstool/issues" target="_blank" rel="noopener">Fehler melden</a>
+    </p>
+    <p>Läuft vollständig in deinem Browser: kein Konto, keine Server. API-Schlüssel und Historie bleiben lokal auf deinem Gerät.</p>
+  </footer>
 
   <script src="app.js"></script>
 </body>

@@ -74,6 +74,68 @@ function saveSettings(s) {
 
 let settings = loadSettings();
 
+/* ---------- Farbschema (Auto / Hell / Dunkel) ---------- */
+// Eigener, additiver Key - die Einstellungen (settings) bleiben unberuehrt.
+// Kein/ungueltiger Wert => "auto" (folgt dem System per prefers-color-scheme).
+// Das Attribut data-theme wird bereits per Inline-Skript im <head> gesetzt
+// (kein Farbsprung beim Laden); hier nur Umschalten, Persistenz und das Icon.
+const THEME_KEY = "bewerbungstool.theme";
+const THEME_CYCLE = ["auto", "light", "dark"];
+const THEME_LABEL = { auto: "Auto", light: "Hell", dark: "Dunkel" };
+const THEME_ICON = {
+  auto: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg>',
+  light: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></svg>',
+  dark: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>',
+};
+
+function loadTheme() {
+  try {
+    const t = localStorage.getItem(THEME_KEY);
+    return t === "light" || t === "dark" ? t : "auto";
+  } catch {
+    return "auto";
+  }
+}
+
+function applyTheme(t) {
+  if (t === "light" || t === "dark") {
+    document.documentElement.dataset.theme = t;
+    try { localStorage.setItem(THEME_KEY, t); } catch {}
+  } else {
+    delete document.documentElement.dataset.theme;
+    try { localStorage.removeItem(THEME_KEY); } catch {}
+  }
+  syncThemeButton(t);
+  syncThemeColorMeta(t);
+}
+
+function syncThemeButton(t) {
+  const btn = $("btn-theme");
+  if (!btn) return;
+  btn.innerHTML = THEME_ICON[t] || THEME_ICON.auto;
+  const label = THEME_LABEL[t] || THEME_LABEL.auto;
+  btn.setAttribute("aria-label", `Farbschema: ${label}`);
+  btn.title = `Farbschema: ${label} (klicken zum Wechseln)`;
+}
+
+// Adressleisten-Farbe an das erzwungene Schema anpassen. Bei "auto" uebernehmen
+// wieder die statischen <meta media>-Tags (das Override-Tag wird entfernt).
+function syncThemeColorMeta(t) {
+  const id = "tc-override";
+  let m = document.getElementById(id);
+  if (t !== "light" && t !== "dark") {
+    if (m) m.remove();
+    return;
+  }
+  if (!m) {
+    m = document.createElement("meta");
+    m.name = "theme-color";
+    m.id = id;
+    document.head.appendChild(m);
+  }
+  m.setAttribute("content", t === "dark" ? "#3a2a25" : "#c5543a");
+}
+
 /* ---------- App-Zustand ---------- */
 
 let quiz = null;      // { titel, fragen: [...] }
@@ -484,11 +546,40 @@ function looksBlocked(text) {
 
 // Heuristik: App-Hüllen sind kurz oder tragen Jina-Warnungen zu iframes/Shadow DOM
 function looksLikeRealContent(text) {
+  // Fehlgeschlagene Zielabrufe ("Warning: Target URL returned error <code>")
+  // und Bot-Schutz-Seiten fängt looksBlocked ab - sonst rutscht eine plausibel
+  // lange 404-/Challenge-Seite ungewarnt als Stellentext durch.
   return text.length > 1200 && !looksBlocked(text) && !/contains (iframe|shadow DOM)/i.test(text);
+}
+
+// LinkedIn-Anzeigen kommen mit enormem Rauschen (wiederholte Sign-in-Blöcke,
+// "Similar jobs", "People also viewed", Footer, Sprachliste). Diese Funktion
+// schneidet auf den eigentlichen Anzeigentext zu. Wird nur für linkedin.com
+// angewandt, damit andere Portale unberührt bleiben.
+function cleanLinkedIn(text) {
+  let t = text;
+  // Sign-in-/Join-Blöcke (Überschrift bis zur "By clicking Continue..."-Zeile)
+  t = t.replace(
+    /^#{1,6}\s*(?:Join or sign in|Sign in to)[\s\S]*?By clicking Continue to join or sign in[^\n]*\n?/gim,
+    ""
+  );
+  // Alles ab dem Empfehlungs-/Footer-Bereich abschneiden (kommt nach dem Text).
+  // Seniority/Employment/Job function/Industries bleiben so erhalten.
+  const cut = t.search(
+    /Referrals increase your chances|^##\s*Similar jobs|^##\s*People also viewed/im
+  );
+  if (cut > 0) t = t.slice(0, cut);
+  return t;
 }
 
 async function fetchJobFromUrl(url) {
   // r.jina.ai liefert beliebige Webseiten als Markdown-Text mit offenen CORS-Headern
+  let isLinkedIn = false;
+  try {
+    isLinkedIn = new URL(url).hostname.endsWith("linkedin.com");
+  } catch {
+    // ungültige URL: keine Sonderbehandlung
+  }
   let best = "";
   let lastStatus = 0;
   let blocked = false;
@@ -498,7 +589,8 @@ async function fetchJobFromUrl(url) {
       lastStatus = res.status;
       continue;
     }
-    const text = await res.text();
+    let text = await res.text();
+    if (isLinkedIn) text = cleanLinkedIn(text);
     if (looksLikeRealContent(text)) return text;
     if (looksBlocked(text)) {
       blocked = true;
@@ -894,9 +986,49 @@ async function evaluateQuiz() {
   }
 }
 
+// Score-Ring (SVG) in #result-score zeichnen. Liest defensiv: Prozent ist
+// immer vorhanden; die Punkte-Unterzeile wird nur gezeigt, wenn ergebnisse da
+// sind (alte Historie-Eintraege bleiben damit kompatibel).
+function renderScoreRing(prozent, ergebnisse) {
+  const el = $("result-score");
+  const pct = Math.max(0, Math.min(100, Math.round(Number(prozent) || 0)));
+  const C = 364.42; // Umfang bei r=58
+  const target = C * (1 - pct / 100);
+
+  let sub = "";
+  if (Array.isArray(ergebnisse) && ergebnisse.length) {
+    const sum = ergebnisse.reduce((a, e) => a + (e && typeof e.punkte === "number" ? e.punkte : 0), 0);
+    sub = `${sum} / ${ergebnisse.length * 10} Punkte`;
+  }
+
+  el.setAttribute("role", "img");
+  el.setAttribute("aria-label", `Ergebnis ${pct} Prozent`);
+  el.innerHTML = `
+    <svg class="score-ring-svg" width="152" height="152" viewBox="0 0 152 152" aria-hidden="true">
+      <circle class="score-ring-track" cx="76" cy="76" r="58"></circle>
+      <circle class="score-ring-progress" cx="76" cy="76" r="58" stroke-dasharray="${C}" stroke-dashoffset="${C}"></circle>
+    </svg>
+    <div class="score-ring-center">
+      <span class="score-ring-pct">${pct}<i>%</i></span>
+      ${sub ? `<span class="score-ring-sub">${sub}</span>` : ""}
+    </div>`;
+
+  const prog = el.querySelector(".score-ring-progress");
+  const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduce) {
+    prog.style.strokeDashoffset = String(target);
+  } else {
+    // zwei Frames warten, damit der Browser den Startzustand (voller Offset)
+    // uebernimmt und dann zum Ziel animiert
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      prog.style.strokeDashoffset = String(target);
+    }));
+  }
+}
+
 function renderResult(result, durationMs) {
   const g = result.gesamt;
-  $("result-score").textContent = `${g.prozent}%`;
+  renderScoreRing(g.prozent, result.ergebnisse);
   $("result-summary").textContent = g.zusammenfassung;
 
   const modeLabel = mode === "pruefung" ? "Prüfungsmodus" : "Lernmodus";
@@ -1287,6 +1419,106 @@ $("btn-save-settings").addEventListener("click", () => {
 
 $("btn-cancel-settings").addEventListener("click", () => showView("view-input"));
 
+/* ---------- Daten-Export / -Import (Umzug zwischen Adressen/Browsern) ---------- */
+
+// Sichert beide localStorage-Bestaende in eine versionierte JSON-Datei
+function exportData() {
+  const data = {
+    app: "bewerbungstool",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    settings: loadSettings(),
+    history: loadHistory(),
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "jobreif-backup-" + new Date().toISOString().slice(0, 10) + ".json";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Fuehrt eine Sicherung wieder ein. Bewusst nicht-destruktiv: Einstellungen
+// werden feldweise ergaenzt, Stellen per key und Versuche per Datum
+// zusammengefuehrt - vorhandene Daten gehen nie verloren.
+function importData(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error("Die Datei ist kein gültiges JSON.");
+  }
+  if (!data || typeof data !== "object" || (!data.settings && !data.history)) {
+    throw new Error("Die Datei enthält keine erkennbaren Bewerbungstool-Daten.");
+  }
+
+  let settingsImported = false;
+  if (data.settings && typeof data.settings === "object") {
+    settings = { ...loadSettings(), ...data.settings };
+    saveSettings(settings);
+    settingsImported = true;
+  }
+
+  let newJobs = 0;
+  let newAttempts = 0;
+  if (data.history && Array.isArray(data.history.jobs)) {
+    const h = loadHistory();
+    data.history.jobs.forEach((impJob) => {
+      if (!impJob || !impJob.key || !Array.isArray(impJob.attempts)) return;
+      const existing = h.jobs.find((j) => j.key === impJob.key);
+      if (!existing) {
+        h.jobs.push(impJob);
+        newJobs++;
+        newAttempts += impJob.attempts.length;
+        return;
+      }
+      const seen = new Set(existing.attempts.map((a) => a.date));
+      impJob.attempts.forEach((a) => {
+        if (a && !seen.has(a.date)) {
+          existing.attempts.push(a);
+          newAttempts++;
+        }
+      });
+      existing.attempts.sort((a, b) => a.date - b.date);
+    });
+    // Neueste Stelle zuerst, wie beim normalen Speichern
+    h.jobs.sort((j1, j2) => {
+      const last = (j) => Math.max(0, ...j.attempts.map((a) => a.date || 0));
+      return last(j2) - last(j1);
+    });
+    saveHistory(h);
+  }
+
+  const parts = [];
+  if (settingsImported) parts.push("Einstellungen übernommen");
+  parts.push(
+    (newJobs === 1 ? "1 neue Stelle" : newJobs + " neue Stellen") +
+      ", " +
+      (newAttempts === 1 ? "1 neuer Versuch" : newAttempts + " neue Versuche")
+  );
+  return parts.join("; ") + ".";
+}
+
+$("btn-export").addEventListener("click", exportData);
+$("btn-import").addEventListener("click", () => $("import-file").click());
+$("import-file").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = ""; // erlaubt erneuten Import derselben Datei
+  if (!file) return;
+  const status = $("data-status");
+  status.textContent = "Datei wird gelesen...";
+  try {
+    const summary = importData(await file.text());
+    status.textContent = "Import erfolgreich: " + summary + " Die Seite wird neu geladen...";
+    setTimeout(() => location.reload(), 1500);
+  } catch (err) {
+    status.textContent = "Import fehlgeschlagen: " + err.message;
+  }
+});
+
 // Quelle der Stellenbeschreibung: entweder URL oder manuell eingefuegter Text
 function setSourceTab(which) {
   $("tab-url").classList.toggle("active", which === "url");
@@ -1350,6 +1582,14 @@ $("btn-history").addEventListener("click", () => {
 });
 
 $("btn-history-back").addEventListener("click", () => showView("view-input"));
+
+// Farbschema-Schalter (Auto -> Hell -> Dunkel -> Auto)
+syncThemeButton(loadTheme());
+syncThemeColorMeta(loadTheme());
+$("btn-theme").addEventListener("click", () => {
+  const cur = loadTheme();
+  applyTheme(THEME_CYCLE[(THEME_CYCLE.indexOf(cur) + 1) % THEME_CYCLE.length]);
+});
 
 // Zeit abgelaufen: auswerten oder bewusst überziehen
 $("btn-timeout-submit").addEventListener("click", () => {
