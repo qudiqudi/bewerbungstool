@@ -1,6 +1,8 @@
 "use strict";
 
-const CACHE = "bewerbungstool-v18";
+// __BUILD__ wird beim Deploy durch den Commit-Hash ersetzt (GitHub Action);
+// lokal bleibt der Platzhalter stehen, was als Cache-Name ebenfalls funktioniert
+const CACHE = "bewerbungstool-__BUILD__";
 const ASSETS = [
   ".",
   "index.html",

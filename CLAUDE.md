@@ -20,9 +20,9 @@ Regeln:
 
 ## Deployment-Ritual
 
-- Bei jeder Änderung an ausgelieferten Dateien die `CACHE`-Konstante in `sw.js` hochzählen.
+- Deploy läuft über GitHub Actions (`.github/workflows/deploy.yml`): Push auf main genügt. Die Action ersetzt den Platzhalter `__BUILD__` in `sw.js` durch den Commit-Hash — kein manuelles Hochzählen der Cache-Version mehr, den Platzhalter nie entfernen.
 - Vor dem Push lokal testen (`python3 -m http.server`, UI-Flows per Browser durchklicken; Zustand lässt sich über die globalen Variablen quiz/answers/mode/revealed in der Konsole injizieren).
-- Deploy verifizieren mit Cache-Buster: `curl "https://qudiqudi.github.io/bewerbungstool/app.js?t=$RANDOM" | grep <neues Symbol>`.
+- Deploy verifizieren: `gh run watch` bzw. mit Cache-Buster `curl "https://qudiqudi.github.io/bewerbungstool/sw.js?t=$RANDOM" | grep bewerbungstool-` (muss den Commit-Hash zeigen, nicht `__BUILD__`).
 
 ## API-Aufrufe
 
