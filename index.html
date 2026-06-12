@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#c5543a" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#3a2a25" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#c5543a">
+  <title>jobreif.de – Einstellungstest-Simulator</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="assets/icons/icon.svg" type="image/svg+xml">
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/icons/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="assets/icons/favicon-16.png">
+  <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="style.css">
+  <script>
+    // Farbschema-Override (Auto/Hell/Dunkel) frueh setzen, damit beim Laden
+    // kein Farbsprung entsteht. Kein/ungueltiger Wert => Auto (folgt dem System).
+    try {
+      var __t = localStorage.getItem("bewerbungstool.theme");
+      if (__t === "light" || __t === "dark") document.documentElement.dataset.theme = __t;
+    } catch (e) {}
+  </script>
+</head>
+<body>
+  <header>
+    <div class="header-brand">
+      <svg class="header-logo" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+        <rect class="field" width="100" height="100" rx="22"/>
+        <g class="glyph" transform="translate(29.25 67.93) scale(0.6346)">
+          <path d="M3.77 -54.72L26.77 -54.72L26.77 1.53L26.40 5.03L25.77 7.90L24.90 10.40L23.27 13.28L21.27 15.53L19.27 17.03L17.15 18.15L13.90 19.28L10.15 20.03L6.15 20.40L0.40 20.40L0.40 7.03L4.65 7.03L6.40 6.78L7.78 6.28L8.78 5.65L10.03 4.40L10.78 3.15L11.28 1.53L11.40 -42.97L3.77 -43.10L3.77 -54.60ZM15.28 -76.97L18.90 -76.97L21.02 -76.47L22.90 -75.47L24.65 -73.47L25.52 -71.22L25.77 -67.97L25.27 -65.47L24.02 -63.22L22.90 -62.10L21.40 -61.22L19.02 -60.60L16.02 -60.47L13.78 -60.85L11.53 -61.85L10.28 -62.97L9.53 -63.97L8.65 -65.97L8.28 -68.47L8.40 -70.47L8.90 -72.35L9.78 -73.97L11.40 -75.60L12.78 -76.35L15.15 -76.85Z"/>
+          <circle cx="53.00" cy="-22.25" r="13"/>
+        </g>
+      </svg>
+      <div class="header-text">
+        <h1>jobreif<span class="brand-dot">.</span><span class="brand-tld">de</span></h1>
+        <p class="subtitle">Simulierter Einstellungstest zu einer Stellenausschreibung</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button id="btn-theme" class="ghost" type="button" aria-label="Farbschema: Auto"></button>
+      <button id="btn-history" class="ghost" title="Historie">Historie</button>
+      <button id="btn-settings" class="ghost" title="Einstellungen">Einstellungen</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Onboarding (erster Start) -->
+    <section id="view-onboarding" class="card hidden">
+      <h2>Willkommen</h2>
+      <p>Dieses Tool erstellt aus einer Stellenanzeige einen simulierten Einstellungstest und wertet deine Antworten aus. Dafür nutzt es eine KI direkt von deinem Browser aus &ndash; du brauchst einmalig einen eigenen API-Schlüssel eines KI-Anbieters. Du zahlst nur die tatsächliche Nutzung direkt an den Anbieter (je nach Modell wenige Cent bis ca. 30&nbsp;Cent pro kompletten Test). Es gibt kein Konto bei diesem Tool, der Schlüssel bleibt in deinem Browser.</p>
+
+      <h3><span class="step-num">1</span> Anbieter wählen</h3>
+      <select id="ob-provider">
+        <option value="anthropic">Claude (Anthropic) – empfohlen, beste Ergebnisse</option>
+        <option value="openai">OpenAI (ChatGPT-Modelle)</option>
+        <option value="deepseek">DeepSeek – am günstigsten</option>
+      </select>
+
+      <h3><span class="step-num">2</span> API-Schlüssel erstellen</h3>
+      <ol id="ob-steps"></ol>
+
+      <h3><span class="step-num">3</span> Schlüssel einfügen und testen</h3>
+      <input type="password" id="ob-key" placeholder="API-Schlüssel hier einfügen" autocomplete="off">
+      <p id="ob-status" class="hint"></p>
+
+      <div class="row">
+        <button id="btn-ob-test" class="primary">Verbindung testen und loslegen</button>
+        <button id="btn-ob-skip" class="ghost">Ich kenne mich aus &ndash; direkt zu den Einstellungen</button>
+      </div>
+    </section>
+
+    <!-- Einstellungen -->
+    <section id="view-settings" class="card hidden">
+      <h2>Einstellungen</h2>
+      <label for="provider">Anbieter</label>
+      <select id="provider">
+        <option value="anthropic">Claude (Anthropic)</option>
+        <option value="openai">OpenAI</option>
+        <option value="deepseek">DeepSeek</option>
+      </select>
+
+      <label for="api-key">API-Key</label>
+      <input type="password" id="api-key" placeholder="sk-..." autocomplete="off">
+      <p class="hint">Der Key wird nur lokal in deinem Browser gespeichert und direkt an den Anbieter gesendet.</p>
+
+      <label for="model">Modell</label>
+      <select id="model"></select>
+      <p id="model-desc" class="hint"></p>
+      <p class="hint">Die Kostenangabe je Modell ist eine grobe Schätzung für einen Test mit etwa 10 Fragen (Erstellen samt Stellenanzeige und Auswerten). Die tatsächlichen Kosten hängen von Länge der Anzeige, Anzahl der Fragen und Denkaufwand des Modells ab; abgerechnet wird direkt beim Anbieter.</p>
+      <p class="hint">Es stehen bewusst nur leistungsstarke Modelle zur Auswahl: Kleine Modelle (z.&nbsp;B. Haiku oder die Mini-Varianten) erzeugen keine zuverlässig strukturierten Fragenkataloge und bewerten Antworten zu oberflächlich.</p>
+
+      <div class="row">
+        <button id="btn-save-settings" class="primary">Speichern</button>
+        <button id="btn-cancel-settings" class="ghost">Abbrechen</button>
+      </div>
+      <p class="hint"><a href="#" id="link-onboarding">Wie bekomme ich einen API-Schlüssel? Zur Schritt-für-Schritt-Anleitung</a></p>
+
+      <hr class="settings-divider">
+      <label>Daten sichern und übertragen</label>
+      <p class="hint">Sichert deinen Verlauf und deine Einstellungen als Datei – praktisch für den Umzug auf eine neue Adresse oder einen anderen Browser. Die Datei enthält auch deinen API-Key, also vertraulich behandeln.</p>
+      <div class="row wrap">
+        <button id="btn-export" class="ghost" type="button">Daten exportieren</button>
+        <button id="btn-import" class="ghost" type="button">Daten importieren</button>
+      </div>
+      <input type="file" id="import-file" accept="application/json,.json" hidden>
+      <p id="data-status" class="hint" role="status"></p>
+    </section>
+
+    <!-- Stellenbeschreibung -->
+    <section id="view-input" class="card">
+      <h2>Stellenbeschreibung</h2>
+      <p class="hint">Entweder die Anzeige per URL laden oder den Text direkt einfügen.</p>
+
+      <div class="tabs">
+        <button id="tab-url" class="tab active">Per URL laden</button>
+        <button id="tab-text" class="tab">Text einfügen</button>
+      </div>
+
+      <div id="source-url">
+        <label for="job-url">URL der Stellenanzeige</label>
+        <div class="row">
+          <input type="url" id="job-url" placeholder="https://beispiel.de/stellenanzeige">
+          <button id="btn-fetch-url">Laden</button>
+        </div>
+        <p class="hint">Die Seite wird über den Jina-Reader als Text geladen und danach unter &bdquo;Text einfügen&ldquo; zur Kontrolle angezeigt. Falls das Laden fehlschlägt, dort den Text manuell einfügen.</p>
+      </div>
+
+      <div id="source-text" class="hidden">
+        <label for="job-text">Stellenbeschreibung</label>
+        <textarea id="job-text" rows="12" placeholder="Stellenbeschreibung hier einfügen..."></textarea>
+      </div>
+
+      <label>Modus</label>
+      <div class="mode-row">
+        <label class="mode-option">
+          <input type="radio" name="mode" value="lernen" checked>
+          <span>
+            <strong>Lernmodus</strong>
+            Jede Frage lässt sich direkt auflösen: richtige Antwort, Erklärungen, Hintergrund und Quellen zur Vertiefung.
+          </span>
+        </label>
+        <label class="mode-option">
+          <input type="radio" name="mode" value="pruefung">
+          <span>
+            <strong>Prüfungsmodus</strong>
+            Mit Zeitlimit (richtet sich nach Anzahl und Umfang der Fragen, kann überzogen werden). Auflösung erst in der Auswertung.
+          </span>
+        </label>
+      </div>
+
+      <label>Schwierigkeitsgrad</label>
+      <div class="diff-row">
+        <label class="diff-option"><input type="radio" name="difficulty" value="leicht"> Leicht</label>
+        <label class="diff-option"><input type="radio" name="difficulty" value="mittel" checked> Mittel</label>
+        <label class="diff-option"><input type="radio" name="difficulty" value="schwer"> Schwer</label>
+      </div>
+      <p class="hint">&bdquo;Schwer&ldquo; sind Fragen, wie sie im echten Auswahlverfahren für diese Stelle am wahrscheinlichsten gestellt werden &ndash; die Stufe steuert ihren Anteil im Test. Im Lernmodus wird die Schwierigkeit jeder Frage angezeigt.</p>
+
+      <div class="row space-between">
+        <div class="field-inline">
+          <label for="num-questions">Fragen</label>
+          <select id="num-questions">
+            <option value="6">6</option>
+            <option value="8">8</option>
+            <option value="10" selected>10</option>
+            <option value="12">12</option>
+            <option value="15">15</option>
+            <option value="20">20</option>
+            <option value="25">25</option>
+            <option value="30">30</option>
+          </select>
+        </div>
+        <button id="btn-generate" class="primary">Test erstellen</button>
+      </div>
+    </section>
+
+    <!-- Quiz -->
+    <section id="view-quiz" class="card hidden">
+      <div class="quiz-header">
+        <span id="quiz-title"></span>
+        <span class="quiz-header-right">
+          <span id="quiz-timer" class="hidden"></span>
+          <span id="quiz-progress"></span>
+        </span>
+      </div>
+      <div class="progress-bar"><div id="progress-fill"></div></div>
+
+      <p class="category"><span id="question-category"></span><span id="question-difficulty" class="diff-badge hidden"></span></p>
+      <h2 id="question-text"></h2>
+
+      <div id="answer-area"></div>
+      <div id="learn-area"></div>
+
+      <div class="row space-between">
+        <button id="btn-prev" class="ghost">Zurück</button>
+        <button id="btn-next" class="primary">Weiter</button>
+      </div>
+    </section>
+
+    <!-- Ergebnis -->
+    <section id="view-result" class="card hidden">
+      <h2>Auswertung</h2>
+      <p id="result-meta" class="hint"></p>
+      <div id="result-score" class="score-circle"></div>
+      <p id="result-summary"></p>
+
+      <div class="result-cols">
+        <div>
+          <h3>Stärken</h3>
+          <ul id="result-strengths"></ul>
+        </div>
+        <div>
+          <h3>Verbesserungspotenzial</h3>
+          <ul id="result-improvements"></ul>
+        </div>
+      </div>
+
+      <h3>Fragen im Detail</h3>
+      <div id="result-details"></div>
+
+      <div class="row wrap">
+        <button id="btn-restart" class="primary">Neuer Test</button>
+        <button id="btn-review-questions" class="ghost">Fragen durchgehen (Lernmodus)</button>
+        <button id="btn-print" class="ghost">Drucken / PDF</button>
+      </div>
+    </section>
+
+    <!-- Historie -->
+    <section id="view-history" class="card hidden">
+      <h2>Historie</h2>
+      <p class="hint" id="history-empty">Noch keine abgeschlossenen Tests. Nach jeder Auswertung landet das Ergebnis automatisch hier &ndash; pro Stelle gruppiert, damit der Fortschritt sichtbar wird.</p>
+      <div id="history-list"></div>
+      <div class="row">
+        <button id="btn-history-back" class="primary">Zurück</button>
+      </div>
+    </section>
+
+    <!-- Zeit abgelaufen (Prüfungsmodus) -->
+    <div id="timeout-modal" class="overlay hidden">
+      <div class="modal card">
+        <h2>Zeit abgelaufen</h2>
+        <p>Das Zeitlimit ist erreicht. Du kannst jetzt abgeben oder bewusst überziehen &ndash; die Überziehung wird in der Auswertung vermerkt.</p>
+        <div class="row">
+          <button id="btn-timeout-submit" class="primary">Jetzt auswerten</button>
+          <button id="btn-timeout-continue" class="ghost">Weitermachen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Changelog -->
+    <div id="changelog-modal" class="overlay hidden">
+      <div class="modal card changelog-modal">
+        <h2>Was ist neu</h2>
+        <div id="changelog-list"></div>
+        <div class="row">
+          <button id="btn-changelog-close" class="primary">Schließen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Lade-Overlay -->
+    <div id="loading" class="overlay hidden">
+      <div class="loading-panel">
+        <div class="spinner"></div>
+        <p id="loading-text">Wird geladen...</p>
+        <div id="loading-progress" class="loading-bar hidden"><div id="loading-fill"></div></div>
+        <p id="loading-elapsed" class="loading-elapsed"></p>
+      </div>
+    </div>
+
+    <!-- Update-Hinweis -->
+    <div id="update-banner" class="update-banner hidden">
+      <span>Eine neue Version ist verfügbar.</span>
+      <button id="btn-update-reload" class="primary">Jetzt aktualisieren</button>
+      <button id="btn-update-later" class="ghost">Später</button>
+    </div>
+
+    <!-- Fehleranzeige -->
+    <div id="error-box" class="error hidden">
+      <span id="error-text"></span>
+      <button id="btn-error-close" class="ghost">Schließen</button>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <p>
+      <strong>jobreif.de</strong> &ndash; Einstellungstest-Simulator
+      <span class="footer-sep">&middot;</span>
+      <a href="https://github.com/qudiqudi/bewerbungstool" target="_blank" rel="noopener">GitHub</a>
+      <span class="footer-sep">&middot;</span>
+      <a href="https://github.com/qudiqudi/bewerbungstool/blob/main/LICENSE" target="_blank" rel="noopener">Lizenz (AGPL-3.0)</a>
+      <span class="footer-sep">&middot;</span>
+      <a href="https://github.com/qudiqudi/bewerbungstool/issues" target="_blank" rel="noopener">Fehler melden</a>
+      <span class="footer-sep">&middot;</span>
+      <a href="#" id="link-changelog" title="Was ist neu"></a>
+    </p>
+    <p>Läuft vollständig in deinem Browser: kein Konto, keine Server. API-Schlüssel und Historie bleiben lokal auf deinem Gerät.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

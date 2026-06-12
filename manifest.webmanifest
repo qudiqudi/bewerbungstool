@@ -1,0 +1,49 @@
+{
+  "name": "jobreif.de – Einstellungstest-Simulator",
+  "short_name": "jobreif.de",
+  "description": "Erstellt aus einer Stellenbeschreibung einen interaktiven, simulierten Einstellungstest (Claude oder OpenAI, eigener API-Key).",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#fdf7f3",
+  "theme_color": "#c5543a",
+  "lang": "de",
+  "icons": [
+    {
+      "src": "assets/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/icons/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    },
+    {
+      "src": "assets/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/icons/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "assets/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

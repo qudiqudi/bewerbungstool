@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: JavaScript-Syntax prüfen
+        run: |
+          node --check app.js
+          node --check sw.js
+
+      - name: Asset- und Manifest-Integrität prüfen
+        run: node .github/scripts/check-integrity.js
