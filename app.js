@@ -19,7 +19,7 @@ const MODELS = {
     {
       id: "claude-sonnet-4-6",
       label: "Claude Sonnet 4.6",
-      desc: "Schnell und günstig bei weiterhin hoher Qualität. Gute Wahl, wenn man viele Tests hintereinander durchspielen will.",
+      desc: "Günstiger als Opus, bei dieser Aufgabe aber gemessen deutlich langsamer (lange Denkphase vor der Ausgabe). Opus 4.8 ist hier schneller und besser.",
     },
   ],
   openai: [
