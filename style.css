@@ -614,6 +614,27 @@ button.ghost {
   .score-circle { width: 92px; height: 92px; font-size: 1.35rem; }
 }
 
+/* Update-Hinweis */
+.update-banner {
+  position: fixed;
+  bottom: calc(1rem + env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  padding: 0.7rem 1rem;
+  border-radius: 12px;
+  display: flex;
+  gap: 0.7rem;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 92%;
+  z-index: 12;
+  font-size: 0.9rem;
+}
+
 /* Fehler */
 .error {
   position: fixed;

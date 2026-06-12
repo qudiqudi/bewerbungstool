@@ -1320,5 +1320,29 @@ if (!settings.apiKey) {
 /* ---------- Service Worker (PWA) ---------- */
 
 if ("serviceWorker" in navigator && location.protocol === "https:") {
-  navigator.serviceWorker.register("sw.js").catch(() => {});
+  navigator.serviceWorker
+    .register("sw.js")
+    .then((reg) => {
+      // Installierte PWAs laufen auf Smartphones oft tagelang im Hintergrund
+      // ohne echten Neustart - beim Zurueckkehren aktiv nach Updates suchen
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") {
+          reg.update().catch(() => {});
+        }
+      });
+    })
+    .catch(() => {});
+
+  // Eine neue Version hat uebernommen: dezent zum Neuladen einladen,
+  // nie automatisch neu laden (koennte einen laufenden Test zerstoeren)
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!hadController) return; // Erstinstallation, kein Update
+    $("update-banner").classList.remove("hidden");
+  });
 }
+
+$("btn-update-reload").addEventListener("click", () => location.reload());
+$("btn-update-later").addEventListener("click", () => {
+  $("update-banner").classList.add("hidden");
+});
