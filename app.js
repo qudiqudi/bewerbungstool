@@ -437,6 +437,12 @@ function cleanPageText(text) {
 
 // Heuristik: App-Hüllen sind kurz oder tragen Jina-Warnungen zu iframes/Shadow DOM
 function looksLikeRealContent(text) {
+  // Jina meldet einen fehlgeschlagenen Abruf der Zielseite als
+  // "Warning: Target URL returned error <code>". Dann ist der Body eine
+  // Fehler- oder Challenge-Seite (z. B. Stepstone-404, Indeed-Cloudflare) und
+  // kein echter Anzeigentext - sonst rutscht eine plausibel lange 404-Seite
+  // ungewarnt als Stellentext durch.
+  if (/Target URL returned error \d/i.test(text)) return false;
   return text.length > 1200 && !/contains (iframe|shadow DOM)/i.test(text);
 }
 
