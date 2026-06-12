@@ -18,8 +18,9 @@ const MODELS = {
     },
     {
       id: "claude-sonnet-4-6",
-      label: "Claude Sonnet 4.6",
-      desc: "Günstiger als Opus, bei dieser Aufgabe aber gemessen deutlich langsamer (lange Denkphase vor der Ausgabe). Opus 4.8 ist hier schneller und besser.",
+      label: "Claude Sonnet 4.6 (günstig)",
+      desc: "Günstiger als Opus. Läuft hier mit mittlerer Gründlichkeit (effort medium), weil es sonst vor der Ausgabe minutenlang nachdenkt - leichte Qualitätsabstriche gegenüber Opus sind möglich.",
+      effort: "medium",
     },
   ],
   openai: [
@@ -266,6 +267,13 @@ async function callLLM(systemPrompt, userPrompt, schema, onProgress) {
     : catalog[0].id;
 
   if (provider === "anthropic") {
+    // Per-Modell-Tuning: Sonnet denkt bei dieser Aufgabe sonst minutenlang
+    // (gemessen ~148s vor dem ersten Token); Opus bleibt auf dem
+    // Qualitaets-Default
+    const outputConfig = { format: { type: "json_schema", schema } };
+    const entry = catalog.find((m) => m.id === model);
+    if (entry && entry.effort) outputConfig.effort = entry.effort;
+
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -282,7 +290,7 @@ async function callLLM(systemPrompt, userPrompt, schema, onProgress) {
         thinking: { type: "adaptive" },
         system: systemPrompt,
         messages: [{ role: "user", content: userPrompt }],
-        output_config: { format: { type: "json_schema", schema } },
+        output_config: outputConfig,
       }),
     });
 
