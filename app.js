@@ -341,6 +341,18 @@ function candidateUrls(url) {
   return list;
 }
 
+// Entfernt offensichtliches Webseiten-Rauschen aus dem extrahierten Markdown
+// (Bilder, Link-Syntax, Trennlinien) - Jobportale wie Stepstone liefern sonst
+// viel Navigation und Logos mit
+function cleanPageText(text) {
+  return text
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")      // Bilder
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")   // Links -> nur Linktext
+    .replace(/^[ \t]*\*( \*)+[ \t]*$/gm, "")   // Trennlinien (* * *)
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 // Heuristik: App-Hüllen sind kurz oder tragen Jina-Warnungen zu iframes/Shadow DOM
 function looksLikeRealContent(text) {
   return text.length > 1200 && !/contains (iframe|shadow DOM)/i.test(text);
@@ -392,7 +404,11 @@ async function generateQuiz() {
       "Gib die URL einer Quelle nur an, wenn du dir sicher bist, dass sie existiert - bevorzugt Startseiten oder bekannte, " +
       "stabile Adressen, keine tief verschachtelten Links. Sonst lasse die URL leer und waehle einen praegnanten Titel, " +
       "der sich gut als Suchbegriff eignet. " +
-      "Schätze ausserdem ein realistisches Zeitlimit in Minuten für den gesamten Test. Antworte auf Deutsch.";
+      "Schätze ausserdem ein realistisches Zeitlimit in Minuten für den gesamten Test. " +
+      "Der folgende Text stammt oft von einer Jobportal-Seite und kann Navigation, Cookie-Hinweise, " +
+      "Unternehmens-Werbung, Fusszeilen und Teaser zu ähnlichen Stellen enthalten. Ignoriere all das " +
+      "und beziehe dich ausschliesslich auf die eigentliche Stellenanzeige. Enthält der Text mehrere " +
+      "Stellen, nimm die mit Abstand am ausführlichsten beschriebene. Antworte auf Deutsch.";
 
     const user =
       `Erstelle einen Einstellungstest mit genau ${numQuestions} Fragen zu dieser Stellenausschreibung:\n\n` +
@@ -802,7 +818,7 @@ $("btn-fetch-url").addEventListener("click", async () => {
   if (!url) return;
   showLoading("Stellenanzeige wird geladen...");
   try {
-    const text = await fetchJobFromUrl(url);
+    const text = cleanPageText(await fetchJobFromUrl(url));
     $("job-text").value = text;
     if (!looksLikeRealContent(text)) {
       showError("Die Seite konnte nur unvollständig ausgelesen werden (vermutlich eine JavaScript-Anwendung). Bitte prüfen und die Stellenbeschreibung ggf. manuell einfügen.");
