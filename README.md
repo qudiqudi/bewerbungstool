@@ -49,3 +49,9 @@ Dann http://localhost:8000 öffnen. Der Service Worker (Offline-Cache) ist nur �
 ## Deployment
 
 Statisches Hosting genügt (z. B. GitHub Pages). Einfach den Inhalt des Repos ausliefern, es gibt keinen Build-Schritt.
+
+## Lizenz
+
+Copyright (C) 2026 qudiqudi
+
+Dieses Programm ist freie Software, lizenziert unter der GNU Affero General Public License, Version 3 (AGPL-3.0). Es darf genutzt, verändert und weiterverbreitet werden &ndash; auch als gehosteter Dienst &ndash;, solange Änderungen unter derselben Lizenz wieder als Quellcode verfügbar gemacht werden. Details in der Datei [LICENSE](LICENSE). Das Programm wird ohne jede Gewährleistung bereitgestellt.
