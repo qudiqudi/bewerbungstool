@@ -88,7 +88,7 @@ const timer = { intervalId: null, deadline: 0, overtime: false, limitMin: 0 };
 
 const $ = (id) => document.getElementById(id);
 
-const views = ["view-settings", "view-input", "view-quiz", "view-result"];
+const views = ["view-onboarding", "view-settings", "view-input", "view-quiz", "view-result"];
 
 function showView(id) {
   views.forEach((v) => $(v).classList.toggle("hidden", v !== id));
@@ -854,6 +854,107 @@ function renderResult(result, durationMs) {
   });
 }
 
+/* ---------- Onboarding ---------- */
+
+const ONBOARDING_STEPS = {
+  anthropic: [
+    { text: "Konto erstellen auf", link: "https://console.anthropic.com", label: "console.anthropic.com" },
+    { text: "Links unter „Billing“ Guthaben aufladen (z. B. 5 $, Kreditkarte nötig)" },
+    { text: "Links unter „API Keys“ auf „Create Key“ klicken und einen beliebigen Namen vergeben" },
+    { text: "Den angezeigten Schlüssel kopieren (beginnt mit sk-ant-) – er wird nur einmal angezeigt" },
+  ],
+  openai: [
+    { text: "Konto erstellen auf", link: "https://platform.openai.com", label: "platform.openai.com" },
+    { text: "Unter „Settings“ → „Billing“ Guthaben aufladen (z. B. 5 $)" },
+    { text: "Unter „API Keys“ auf „Create new secret key“ klicken" },
+    { text: "Den Schlüssel kopieren (beginnt mit sk-) – er wird nur einmal angezeigt" },
+  ],
+  deepseek: [
+    { text: "Konto erstellen auf", link: "https://platform.deepseek.com", label: "platform.deepseek.com" },
+    { text: "Unter „Top up“ ein kleines Guthaben aufladen (schon 2 $ reichen lange)" },
+    { text: "Unter „API Keys“ einen neuen Schlüssel erstellen" },
+    { text: "Den Schlüssel kopieren (beginnt mit sk-) – er wird nur einmal angezeigt" },
+  ],
+};
+
+function renderOnboardingSteps(provider) {
+  const ol = $("ob-steps");
+  ol.innerHTML = "";
+  ONBOARDING_STEPS[provider].forEach((step) => {
+    const li = document.createElement("li");
+    li.appendChild(document.createTextNode(step.text + (step.link ? " " : "")));
+    if (step.link) {
+      const a = document.createElement("a");
+      a.href = step.link;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.textContent = step.label;
+      li.appendChild(a);
+    }
+    ol.appendChild(li);
+  });
+}
+
+// Kostenloser Verbindungstest ueber den Models-Endpoint des Anbieters
+async function validateKey(provider, key) {
+  let res;
+  if (provider === "anthropic") {
+    res = await fetch("https://api.anthropic.com/v1/models", {
+      headers: {
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+      },
+    });
+  } else {
+    const base = provider === "deepseek" ? "https://api.deepseek.com" : "https://api.openai.com/v1";
+    res = await fetch(base + "/models", {
+      headers: { Authorization: `Bearer ${key}` },
+    });
+  }
+  return res.ok;
+}
+
+$("ob-provider").addEventListener("change", () => renderOnboardingSteps($("ob-provider").value));
+
+$("btn-ob-test").addEventListener("click", async () => {
+  const provider = $("ob-provider").value;
+  const key = $("ob-key").value.trim();
+  const status = $("ob-status");
+  if (!key) {
+    status.textContent = "Bitte zuerst den API-Schlüssel einfügen.";
+    return;
+  }
+  status.textContent = "Verbindung wird getestet...";
+  $("btn-ob-test").disabled = true;
+  try {
+    const ok = await validateKey(provider, key);
+    if (ok) {
+      settings = { provider, apiKey: key, model: modelsFor(provider)[0].id };
+      saveSettings(settings);
+      status.textContent = "";
+      showView("view-input");
+    } else {
+      status.textContent = "Der Schlüssel wurde vom Anbieter abgelehnt. Bitte prüfen, ob er vollständig kopiert wurde und Guthaben vorhanden ist.";
+    }
+  } catch {
+    status.textContent = "Verbindung fehlgeschlagen. Bitte Internetverbindung prüfen und erneut versuchen.";
+  } finally {
+    $("btn-ob-test").disabled = false;
+  }
+});
+
+$("btn-ob-skip").addEventListener("click", () => {
+  initSettingsForm();
+  showView("view-settings");
+});
+
+$("link-onboarding").addEventListener("click", (e) => {
+  e.preventDefault();
+  renderOnboardingSteps($("ob-provider").value);
+  showView("view-onboarding");
+});
+
 /* ---------- Event-Verkabelung ---------- */
 
 function populateModelSelect(provider, selectedId) {
@@ -962,10 +1063,10 @@ $("btn-timeout-continue").addEventListener("click", () => {
 
 $("btn-error-close").addEventListener("click", () => $("error-box").classList.add("hidden"));
 
-// Beim ersten Start direkt zu den Einstellungen
+// Beim ersten Start zum Onboarding
 if (!settings.apiKey) {
-  initSettingsForm();
-  showView("view-settings");
+  renderOnboardingSteps($("ob-provider").value);
+  showView("view-onboarding");
 }
 
 /* ---------- Service Worker (PWA) ---------- */

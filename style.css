@@ -132,6 +132,33 @@ button.ghost {
   background: transparent;
 }
 
+/* Onboarding */
+.step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  font-size: 0.85rem;
+  margin-right: 0.4rem;
+}
+
+#ob-steps {
+  margin: 0.4rem 0 0;
+  padding-left: 1.3rem;
+}
+
+#ob-steps li { margin-bottom: 0.35rem; }
+
+#view-onboarding a, #view-settings a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* Quellen-Tabs (URL oder Text) */
 .tabs {
   display: inline-flex;

@@ -18,6 +18,31 @@
   </header>
 
   <main>
+    <!-- Onboarding (erster Start) -->
+    <section id="view-onboarding" class="card hidden">
+      <h2>Willkommen</h2>
+      <p>Dieses Tool erstellt aus einer Stellenanzeige einen simulierten Einstellungstest und wertet deine Antworten aus. Dafür nutzt es eine KI direkt von deinem Browser aus &ndash; du brauchst einmalig einen eigenen API-Schlüssel eines KI-Anbieters. Du zahlst nur die tatsächliche Nutzung direkt an den Anbieter (je nach Modell wenige Cent bis ca. 30&nbsp;Cent pro kompletten Test). Es gibt kein Konto bei diesem Tool, der Schlüssel bleibt in deinem Browser.</p>
+
+      <h3><span class="step-num">1</span> Anbieter wählen</h3>
+      <select id="ob-provider">
+        <option value="anthropic">Claude (Anthropic) – empfohlen, beste Ergebnisse</option>
+        <option value="openai">OpenAI (ChatGPT-Modelle)</option>
+        <option value="deepseek">DeepSeek – am günstigsten</option>
+      </select>
+
+      <h3><span class="step-num">2</span> API-Schlüssel erstellen</h3>
+      <ol id="ob-steps"></ol>
+
+      <h3><span class="step-num">3</span> Schlüssel einfügen und testen</h3>
+      <input type="password" id="ob-key" placeholder="API-Schlüssel hier einfügen" autocomplete="off">
+      <p id="ob-status" class="hint"></p>
+
+      <div class="row">
+        <button id="btn-ob-test" class="primary">Verbindung testen und loslegen</button>
+        <button id="btn-ob-skip" class="ghost">Ich kenne mich aus &ndash; direkt zu den Einstellungen</button>
+      </div>
+    </section>
+
     <!-- Einstellungen -->
     <section id="view-settings" class="card hidden">
       <h2>Einstellungen</h2>
@@ -41,6 +66,7 @@
         <button id="btn-save-settings" class="primary">Speichern</button>
         <button id="btn-cancel-settings" class="ghost">Abbrechen</button>
       </div>
+      <p class="hint"><a href="#" id="link-onboarding">Wie bekomme ich einen API-Schlüssel? Zur Schritt-für-Schritt-Anleitung</a></p>
     </section>
 
     <!-- Stellenbeschreibung -->
