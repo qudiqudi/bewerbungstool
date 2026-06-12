@@ -78,6 +78,10 @@ let settings = loadSettings();
 let quiz = null;      // { titel, fragen: [...] }
 let answers = [];     // index-paralleles Array mit Antworttexten
 let current = 0;
+let mode = "lernen";  // "lernen" | "pruefung"
+let revealed = [];    // Lernmodus: welche Fragen bereits aufgeloest wurden
+let startTime = 0;
+const timer = { intervalId: null, deadline: 0, overtime: false, limitMin: 0 };
 
 /* ---------- DOM-Helfer ---------- */
 
@@ -109,6 +113,10 @@ const QUESTIONS_SCHEMA = {
   type: "object",
   properties: {
     titel: { type: "string", description: "Kurzer Titel der Stelle" },
+    empfohlene_zeit_minuten: {
+      type: "integer",
+      description: "Realistisches Zeitlimit fuer den gesamten Test in Minuten, abhaengig von Anzahl und Umfang der Fragen",
+    },
     fragen: {
       type: "array",
       items: {
@@ -123,13 +131,31 @@ const QUESTIONS_SCHEMA = {
             items: { type: "string" },
             description: "Antwortoptionen bei multiple_choice, sonst leeres Array",
           },
+          korrekte_antwort: {
+            type: "string",
+            description: "Bei multiple_choice exakt der Wortlaut der besten Option; bei offenen Fragen eine knappe Musterantwort",
+          },
+          erklaerungen: {
+            type: "array",
+            items: { type: "string" },
+            description: "Bei multiple_choice parallel zu optionen: je Option ein Satz, warum sie richtig oder falsch ist; bei offenen Fragen leeres Array",
+          },
+          lerninfo: {
+            type: "string",
+            description: "Lernrelevanter Hintergrund zum Thema der Frage, 2 bis 4 Saetze",
+          },
+          quellen: {
+            type: "array",
+            items: { type: "string" },
+            description: "1 bis 3 real existierende Quellen zur Vertiefung",
+          },
         },
-        required: ["id", "typ", "kategorie", "frage", "optionen"],
+        required: ["id", "typ", "kategorie", "frage", "optionen", "korrekte_antwort", "erklaerungen", "lerninfo", "quellen"],
         additionalProperties: false,
       },
     },
   },
-  required: ["titel", "fragen"],
+  required: ["titel", "empfohlene_zeit_minuten", "fragen"],
   additionalProperties: false,
 };
 
@@ -341,6 +367,7 @@ async function generateQuiz() {
     return;
   }
   const numQuestions = $("num-questions").value;
+  mode = document.querySelector('input[name="mode"]:checked').value;
 
   showLoading("Fragenkatalog wird erstellt...");
   try {
@@ -349,7 +376,13 @@ async function generateQuiz() {
       "Erstelle präzise, anspruchsvolle Fragen, die exakt auf die gegebene Stelle zugeschnitten sind. " +
       "Mische Fachfragen, situative Fragen und Soft-Skill-Fragen. " +
       "Etwa die Hälfte der Fragen soll Multiple-Choice sein (4 plausible Optionen, genau eine ist die beste), " +
-      "der Rest offene Fragen. Antworte auf Deutsch.";
+      "der Rest offene Fragen. " +
+      "Gib zu jeder Frage die korrekte Antwort an (bei Multiple-Choice exakt den Wortlaut der besten Option, " +
+      "bei offenen Fragen eine knappe Musterantwort), bei Multiple-Choice zu jeder Option eine kurze Erklärung, " +
+      "warum sie richtig oder falsch ist, einen lernrelevanten Hintergrund (lerninfo) sowie 1 bis 3 Quellen zur Vertiefung. " +
+      "Nenne nur real existierende Quellen (Gesetze, Normen, Standardwerke, offizielle Dokumentation, etablierte Fachseiten). " +
+      "Wenn du dir bei einer URL nicht sicher bist, nenne stattdessen den Namen der Quelle und einen passenden Suchbegriff. " +
+      "Schätze ausserdem ein realistisches Zeitlimit in Minuten für den gesamten Test. Antworte auf Deutsch.";
 
     const user =
       `Erstelle einen Einstellungstest mit genau ${numQuestions} Fragen zu dieser Stellenausschreibung:\n\n` +
@@ -363,7 +396,17 @@ async function generateQuiz() {
     quiz = result;
     quiz.jobText = jobText;
     answers = new Array(quiz.fragen.length).fill("");
+    revealed = new Array(quiz.fragen.length).fill(false);
     current = 0;
+    startTime = Date.now();
+
+    if (mode === "pruefung") {
+      startTimer(computeTimeLimitMin(quiz));
+    } else {
+      stopTimer();
+      $("quiz-timer").classList.add("hidden");
+    }
+
     renderQuestion();
     showView("view-quiz");
   } catch (e) {
@@ -373,11 +416,73 @@ async function generateQuiz() {
   }
 }
 
+/* ---------- Timer (Prüfungsmodus) ---------- */
+
+function computeTimeLimitMin(q) {
+  // Faustregel als Absicherung: 1,5 min je Multiple-Choice, 4 min je offene Frage
+  const fallback = Math.ceil(
+    q.fragen.reduce((sum, f) => sum + (f.typ === "offen" ? 4 : 1.5), 0)
+  );
+  const suggested = q.empfohlene_zeit_minuten;
+  if (Number.isFinite(suggested) && suggested >= fallback * 0.5 && suggested <= fallback * 3) {
+    return suggested;
+  }
+  return fallback;
+}
+
+function startTimer(limitMin) {
+  stopTimer();
+  timer.limitMin = limitMin;
+  timer.deadline = Date.now() + limitMin * 60000;
+  timer.overtime = false;
+  $("quiz-timer").classList.remove("hidden");
+  updateTimerDisplay();
+  timer.intervalId = setInterval(updateTimerDisplay, 1000);
+}
+
+function stopTimer() {
+  if (timer.intervalId) {
+    clearInterval(timer.intervalId);
+    timer.intervalId = null;
+  }
+}
+
+function formatMinSec(ms) {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = String(total % 60).padStart(2, "0");
+  return `${m}:${s}`;
+}
+
+function updateTimerDisplay() {
+  const el = $("quiz-timer");
+  const remaining = timer.deadline - Date.now();
+
+  if (remaining >= 0) {
+    el.textContent = formatMinSec(remaining);
+    el.classList.toggle("warning", remaining < 60000);
+    el.classList.remove("overtime");
+    return;
+  }
+
+  if (!timer.overtime) {
+    // Zeit gerade abgelaufen: Timer anhalten und Nutzer entscheiden lassen
+    stopTimer();
+    el.textContent = "0:00";
+    $("timeout-modal").classList.remove("hidden");
+    return;
+  }
+
+  el.textContent = "+" + formatMinSec(-remaining);
+  el.classList.add("overtime");
+}
+
 /* ---------- Quiz-Anzeige ---------- */
 
 function renderQuestion() {
   const q = quiz.fragen[current];
   const total = quiz.fragen.length;
+  const isRevealed = mode === "lernen" && revealed[current];
 
   $("quiz-title").textContent = quiz.titel;
   $("quiz-progress").textContent = `Frage ${current + 1} von ${total}`;
@@ -391,12 +496,22 @@ function renderQuestion() {
   if (q.typ === "multiple_choice") {
     q.optionen.forEach((opt) => {
       const btn = document.createElement("button");
-      btn.className = "option" + (answers[current] === opt ? " selected" : "");
+      let cls = "option";
+      if (answers[current] === opt) cls += " selected";
+      if (isRevealed) {
+        if (opt.trim() === q.korrekte_antwort.trim()) cls += " correct";
+        else if (answers[current] === opt) cls += " wrong";
+      }
+      btn.className = cls;
       btn.textContent = opt;
-      btn.addEventListener("click", () => {
-        answers[current] = opt;
-        renderQuestion();
-      });
+      if (!isRevealed) {
+        btn.addEventListener("click", () => {
+          answers[current] = opt;
+          renderQuestion();
+        });
+      } else {
+        btn.disabled = true;
+      }
       area.appendChild(btn);
     });
   } else {
@@ -404,12 +519,79 @@ function renderQuestion() {
     ta.rows = 6;
     ta.placeholder = "Deine Antwort...";
     ta.value = answers[current];
+    ta.readOnly = isRevealed;
     ta.addEventListener("input", () => (answers[current] = ta.value));
     area.appendChild(ta);
   }
 
+  renderLearnArea(q, isRevealed);
+
   $("btn-prev").disabled = current === 0;
   $("btn-next").textContent = current === total - 1 ? "Auswerten" : "Weiter";
+}
+
+// Lernmodus: Auflösen-Button bzw. Erklärungsbox unter der Frage
+function renderLearnArea(q, isRevealed) {
+  const area = $("learn-area");
+  area.innerHTML = "";
+  if (mode !== "lernen") return;
+
+  if (!isRevealed) {
+    const btn = document.createElement("button");
+    btn.id = "btn-reveal";
+    btn.textContent = "Auflösen und erklären";
+    btn.addEventListener("click", () => {
+      revealed[current] = true;
+      renderQuestion();
+    });
+    area.appendChild(btn);
+    return;
+  }
+
+  const box = document.createElement("div");
+  box.className = "learn-box";
+
+  const answerLine = document.createElement("p");
+  answerLine.className = "learn-answer";
+  answerLine.textContent =
+    (q.typ === "multiple_choice" ? "Richtige Antwort: " : "Musterantwort: ") + q.korrekte_antwort;
+  box.appendChild(answerLine);
+
+  if (q.typ === "multiple_choice" && q.erklaerungen.length) {
+    const ul = document.createElement("ul");
+    ul.className = "option-explanations";
+    q.optionen.forEach((opt, i) => {
+      if (!q.erklaerungen[i]) return;
+      const li = document.createElement("li");
+      const isCorrect = opt.trim() === q.korrekte_antwort.trim();
+      li.className = isCorrect ? "exp-correct" : "exp-wrong";
+      li.textContent = `${opt} – ${q.erklaerungen[i]}`;
+      ul.appendChild(li);
+    });
+    box.appendChild(ul);
+  }
+
+  if (q.lerninfo) {
+    const info = document.createElement("p");
+    info.textContent = q.lerninfo;
+    box.appendChild(info);
+  }
+
+  if (q.quellen && q.quellen.length) {
+    const head = document.createElement("p");
+    head.className = "learn-sources-head";
+    head.textContent = "Quellen zur Vertiefung:";
+    box.appendChild(head);
+    const ul = document.createElement("ul");
+    q.quellen.forEach((src) => {
+      const li = document.createElement("li");
+      li.textContent = src;
+      ul.appendChild(li);
+    });
+    box.appendChild(ul);
+  }
+
+  area.appendChild(box);
 }
 
 function nextQuestion() {
@@ -436,27 +618,43 @@ async function evaluateQuiz() {
     return;
   }
 
+  stopTimer();
+  $("timeout-modal").classList.add("hidden");
+  const durationMs = Date.now() - startTime;
+
   showLoading("Antworten werden ausgewertet...");
   try {
     const system =
       "Du bist ein fairer, aber kritischer Prüfer für Einstellungstests. " +
       "Bewerte jede Antwort mit 0 bis 10 Punkten, gib kurzes konkretes Feedback und eine knappe Musterantwort. " +
-      "Unbeantwortete Fragen erhalten 0 Punkte. Antworte auf Deutsch.";
+      "Unbeantwortete Fragen erhalten 0 Punkte. " +
+      "Fragen, die im Lernmodus vor dem Antworten aufgelöst wurden (aufgeloest: true), bewerte normal, " +
+      "erwähne den Umstand aber kurz im Feedback. Antworte auf Deutsch.";
 
     const payload = quiz.fragen.map((q, i) => ({
       id: q.id,
       frage: q.frage,
       typ: q.typ,
       optionen: q.optionen,
+      korrekte_antwort: q.korrekte_antwort,
       antwort: answers[i] || "(keine Antwort)",
+      aufgeloest: mode === "lernen" ? revealed[i] : false,
     }));
+
+    const minutesUsed = Math.max(1, Math.round(durationMs / 60000));
+    const kontext =
+      mode === "pruefung"
+        ? `Prüfungsmodus mit Zeitlimit ${timer.limitMin} Minuten, benötigt wurden ca. ${minutesUsed} Minuten` +
+          (timer.overtime ? " (Limit wurde überschritten)." : ".")
+        : "Lernmodus ohne Zeitlimit.";
 
     const user =
       "Stellenausschreibung:\n" + quiz.jobText.slice(0, 15000) +
+      "\n\nRahmen: " + kontext +
       "\n\nBewerte diese Antworten des Kandidaten:\n" + JSON.stringify(payload, null, 2);
 
     const result = await callLLM(system, user, EVAL_SCHEMA);
-    renderResult(result);
+    renderResult(result, durationMs);
     showView("view-result");
   } catch (e) {
     showError(e.message);
@@ -465,10 +663,17 @@ async function evaluateQuiz() {
   }
 }
 
-function renderResult(result) {
+function renderResult(result, durationMs) {
   const g = result.gesamt;
   $("result-score").textContent = `${g.prozent}%`;
   $("result-summary").textContent = g.zusammenfassung;
+
+  const modeLabel = mode === "pruefung" ? "Prüfungsmodus" : "Lernmodus";
+  let meta = `${modeLabel} · ${quiz.fragen.length} Fragen · Dauer ${formatMinSec(durationMs)} min`;
+  if (mode === "pruefung") {
+    meta += ` · Zeitlimit ${timer.limitMin} min` + (timer.overtime ? " (überschritten)" : "");
+  }
+  $("result-meta").textContent = meta;
 
   const fill = (id, items) => {
     const ul = $(id);
@@ -497,11 +702,14 @@ function renderResult(result) {
       <p class="q"></p>
       <p class="a"></p>
       <p class="fb"></p>
-      <p class="fb"></p>`;
+      <p class="fb"></p>
+      <p class="fb src"></p>`;
     div.querySelector(".q").textContent = q.frage;
     div.querySelector(".a").textContent = "Deine Antwort: " + (answers[i] || "(keine Antwort)");
     div.querySelectorAll(".fb")[0].textContent = r.feedback || "";
     div.querySelectorAll(".fb")[1].textContent = r.musterantwort ? "Musterantwort: " + r.musterantwort : "";
+    div.querySelector(".src").textContent =
+      q.quellen && q.quellen.length ? "Quellen: " + q.quellen.join(" · ") : "";
     details.appendChild(div);
   });
 }
@@ -579,7 +787,25 @@ $("btn-prev").addEventListener("click", prevQuestion);
 $("btn-restart").addEventListener("click", () => {
   quiz = null;
   answers = [];
+  revealed = [];
+  stopTimer();
+  $("quiz-timer").classList.add("hidden");
   showView("view-input");
+});
+
+$("btn-print").addEventListener("click", () => window.print());
+
+// Zeit abgelaufen: auswerten oder bewusst überziehen
+$("btn-timeout-submit").addEventListener("click", () => {
+  $("timeout-modal").classList.add("hidden");
+  evaluateQuiz();
+});
+
+$("btn-timeout-continue").addEventListener("click", () => {
+  $("timeout-modal").classList.add("hidden");
+  timer.overtime = true;
+  timer.intervalId = setInterval(updateTimerDisplay, 1000);
+  updateTimerDisplay();
 });
 
 $("btn-error-close").addEventListener("click", () => $("error-box").classList.add("hidden"));

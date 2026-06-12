@@ -57,6 +57,24 @@
       <label for="job-text">Stellenbeschreibung</label>
       <textarea id="job-text" rows="12" placeholder="Stellenbeschreibung hier einfügen..."></textarea>
 
+      <label>Modus</label>
+      <div class="mode-row">
+        <label class="mode-option">
+          <input type="radio" name="mode" value="lernen" checked>
+          <span>
+            <strong>Lernmodus</strong>
+            Jede Frage lässt sich direkt auflösen: richtige Antwort, Erklärungen, Hintergrund und Quellen zur Vertiefung.
+          </span>
+        </label>
+        <label class="mode-option">
+          <input type="radio" name="mode" value="pruefung">
+          <span>
+            <strong>Prüfungsmodus</strong>
+            Mit Zeitlimit (richtet sich nach Anzahl und Umfang der Fragen, kann überzogen werden). Auflösung erst in der Auswertung.
+          </span>
+        </label>
+      </div>
+
       <div class="row space-between">
         <div class="field-inline">
           <label for="num-questions">Fragen</label>
@@ -74,7 +92,10 @@
     <section id="view-quiz" class="card hidden">
       <div class="quiz-header">
         <span id="quiz-title"></span>
-        <span id="quiz-progress"></span>
+        <span class="quiz-header-right">
+          <span id="quiz-timer" class="hidden"></span>
+          <span id="quiz-progress"></span>
+        </span>
       </div>
       <div class="progress-bar"><div id="progress-fill"></div></div>
 
@@ -82,6 +103,7 @@
       <h2 id="question-text"></h2>
 
       <div id="answer-area"></div>
+      <div id="learn-area"></div>
 
       <div class="row space-between">
         <button id="btn-prev" class="ghost">Zurück</button>
@@ -92,6 +114,7 @@
     <!-- Ergebnis -->
     <section id="view-result" class="card hidden">
       <h2>Auswertung</h2>
+      <p id="result-meta" class="hint"></p>
       <div id="result-score" class="score-circle"></div>
       <p id="result-summary"></p>
 
@@ -111,8 +134,21 @@
 
       <div class="row">
         <button id="btn-restart" class="primary">Neuer Test</button>
+        <button id="btn-print" class="ghost">Ergebnis drucken / als PDF speichern</button>
       </div>
     </section>
+
+    <!-- Zeit abgelaufen (Prüfungsmodus) -->
+    <div id="timeout-modal" class="overlay hidden">
+      <div class="modal card">
+        <h2>Zeit abgelaufen</h2>
+        <p>Das Zeitlimit ist erreicht. Du kannst jetzt abgeben oder bewusst überziehen &ndash; die Überziehung wird in der Auswertung vermerkt.</p>
+        <div class="row">
+          <button id="btn-timeout-submit" class="primary">Jetzt auswerten</button>
+          <button id="btn-timeout-continue" class="ghost">Weitermachen</button>
+        </div>
+      </div>
+    </div>
 
     <!-- Lade-Overlay -->
     <div id="loading" class="overlay hidden">

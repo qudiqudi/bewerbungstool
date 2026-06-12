@@ -5,9 +5,16 @@ Eine kleine PWA, die aus einer Stellenbeschreibung einen interaktiven, simuliert
 ## Funktionsweise
 
 1. Stellenbeschreibung einfügen oder per URL laden (über den Jina-Reader `r.jina.ai`)
-2. Das Tool erstellt per Claude- oder OpenAI-API einen Fragenkatalog (Multiple-Choice und offene Fragen)
+2. Das Tool erstellt per LLM-API einen Fragenkatalog (Multiple-Choice und offene Fragen)
 3. Fragen werden interaktiv beantwortet
 4. Die Antworten werden ausgewertet: Punkte pro Frage, Feedback, Musterantworten und eine Gesamteinschätzung
+
+## Modi
+
+- **Lernmodus**: Jede Frage lässt sich direkt auflösen. Angezeigt werden die richtige Antwort (bei Multiple-Choice farblich markiert), eine Erklärung zu jeder Antwortoption, lernrelevanter Hintergrund und Quellen zur Vertiefung. Aufgelöste Fragen werden in der Endauswertung entsprechend vermerkt.
+- **Prüfungsmodus**: Läuft auf einen Timer. Das Zeitlimit schätzt das Modell anhand von Anzahl und Umfang der Fragen (mit Plausibilitätsprüfung per Faustregel). Nach Ablauf kann abgegeben oder bewusst überzogen werden; die Überziehung wird in der Auswertung vermerkt. Erklärungen und Quellen erscheinen erst in der Endauswertung.
+
+In beiden Modi zeigt die Auswertung die benötigte Zeit und lässt sich drucken bzw. als PDF speichern.
 
 ## Eigener API-Key
 
