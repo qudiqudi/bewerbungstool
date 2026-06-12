@@ -11,14 +11,15 @@ Eine kleine PWA, die aus einer Stellenbeschreibung einen interaktiven, simuliert
 
 ## Eigener API-Key
 
-Jeder Nutzer hinterlegt seinen eigenen API-Key in den Einstellungen. Der Key wird ausschließlich im localStorage des Browsers gespeichert und direkt an den jeweiligen Anbieter gesendet (Anthropic erlaubt Browser-Aufrufe per CORS, OpenAI ebenfalls). Es gibt keinen Server, der den Key sieht.
+Jeder Nutzer hinterlegt seinen eigenen API-Key in den Einstellungen. Der Key wird ausschließlich im localStorage des Browsers gespeichert und direkt an den jeweiligen Anbieter gesendet (Anthropic, OpenAI und DeepSeek erlauben Browser-Aufrufe per CORS). Es gibt keinen Server, der den Key sieht.
 
-Unterstützte Anbieter:
+Unterstützte Anbieter und Modelle:
 
-- Claude (Anthropic), Standardmodell `claude-opus-4-8`
-- OpenAI, Standardmodell `gpt-4o`
+- Claude (Anthropic): Opus 4.8 (empfohlen), Fable 5, Sonnet 4.6
+- OpenAI: GPT-5.1 (empfohlen), GPT-5, GPT-4.1
+- DeepSeek: V3 (empfohlen), R1
 
-Das Modell ist in den Einstellungen frei änderbar.
+Die Auswahl ist bewusst auf leistungsstarke Modelle beschränkt: Kleine Modelle (Haiku, Mini-Varianten) erzeugen keine zuverlässig strukturierten Fragenkataloge und bewerten freie Antworten zu oberflächlich. Zu jedem Modell zeigt das Dropdown eine kurze Einordnung, wofür es sich eignet.
 
 ## Lokal ausführen
 

@@ -25,6 +25,7 @@
       <select id="provider">
         <option value="anthropic">Claude (Anthropic)</option>
         <option value="openai">OpenAI</option>
+        <option value="deepseek">DeepSeek</option>
       </select>
 
       <label for="api-key">API-Key</label>
@@ -32,7 +33,9 @@
       <p class="hint">Der Key wird nur lokal in deinem Browser gespeichert und direkt an den Anbieter gesendet.</p>
 
       <label for="model">Modell</label>
-      <input type="text" id="model" placeholder="claude-opus-4-8">
+      <select id="model"></select>
+      <p id="model-desc" class="hint"></p>
+      <p class="hint">Es stehen bewusst nur leistungsstarke Modelle zur Auswahl: Kleine Modelle (z.&nbsp;B. Haiku oder die Mini-Varianten) erzeugen keine zuverlässig strukturierten Fragenkataloge und bewerten Antworten zu oberflächlich.</p>
 
       <div class="row">
         <button id="btn-save-settings" class="primary">Speichern</button>

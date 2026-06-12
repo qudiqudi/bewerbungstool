@@ -1,11 +1,63 @@
 "use strict";
 
-/* ---------- Einstellungen (localStorage) ---------- */
+/* ---------- Modellkatalog ---------- */
 
-const DEFAULT_MODELS = {
-  anthropic: "claude-opus-4-8",
-  openai: "gpt-4o",
+// Bewusst nur große Modelle: Das Erstellen eines stimmigen Fragenkatalogs und
+// die differenzierte Bewertung freier Antworten überfordern kleine Modelle.
+const MODELS = {
+  anthropic: [
+    {
+      id: "claude-opus-4-8",
+      label: "Claude Opus 4.8 (empfohlen)",
+      desc: "Stärkstes reguläres Claude-Modell. Sehr gute, stellenspezifische Fragen und differenziertes, faires Feedback - der beste Standard für dieses Tool.",
+    },
+    {
+      id: "claude-fable-5",
+      label: "Claude Fable 5",
+      desc: "Anthropics fähigstes Modell. Noch gründlichere Auswertung, aber deutlich teurer und mit längeren Antwortzeiten - lohnt sich vor allem für anspruchsvolle Fach-Stellen.",
+    },
+    {
+      id: "claude-sonnet-4-6",
+      label: "Claude Sonnet 4.6",
+      desc: "Schnell und günstig bei weiterhin hoher Qualität. Gute Wahl, wenn man viele Tests hintereinander durchspielen will.",
+    },
+  ],
+  openai: [
+    {
+      id: "gpt-5.1",
+      label: "GPT-5.1 (empfohlen)",
+      desc: "Aktuelles Spitzenmodell von OpenAI. Sehr gute Fragenqualität und zuverlässige strukturierte Ausgabe.",
+    },
+    {
+      id: "gpt-5",
+      label: "GPT-5",
+      desc: "Sehr leistungsfähig und etwas günstiger als GPT-5.1. Solide Wahl für Generierung und Auswertung.",
+    },
+    {
+      id: "gpt-4.1",
+      label: "GPT-4.1",
+      desc: "Bewährtes großes Modell mit gutem Preis-Leistungs-Verhältnis. Für Standard-Stellen völlig ausreichend.",
+    },
+  ],
+  deepseek: [
+    {
+      id: "deepseek-chat",
+      label: "DeepSeek V3 (empfohlen)",
+      desc: "Großes, sehr günstiges Modell. Gute Fragenqualität bei einem Bruchteil der Kosten - kleinere Abstriche bei Feinheiten im Deutschen.",
+    },
+    {
+      id: "deepseek-reasoner",
+      label: "DeepSeek R1 (Reasoning)",
+      desc: "Denkt vor der Antwort ausführlich nach: besonders gründliche Bewertung, dafür spürbar langsamer.",
+    },
+  ],
 };
+
+function modelsFor(provider) {
+  return MODELS[provider] || MODELS.anthropic;
+}
+
+/* ---------- Einstellungen (localStorage) ---------- */
 
 function loadSettings() {
   try {
@@ -121,7 +173,10 @@ async function callLLM(systemPrompt, userPrompt, schema) {
     throw new Error("Kein API-Key hinterlegt. Bitte zuerst die Einstellungen ausfüllen.");
   }
   const provider = settings.provider || "anthropic";
-  const model = settings.model || DEFAULT_MODELS[provider];
+  const catalog = modelsFor(provider);
+  const model = catalog.some((m) => m.id === settings.model)
+    ? settings.model
+    : catalog[0].id;
 
   if (provider === "anthropic") {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -157,24 +212,43 @@ async function callLLM(systemPrompt, userPrompt, schema) {
     return JSON.parse(textBlock.text);
   }
 
-  // OpenAI
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+  // OpenAI und DeepSeek (OpenAI-kompatible API)
+  const isDeepseek = provider === "deepseek";
+  const endpoint = isDeepseek
+    ? "https://api.deepseek.com/chat/completions"
+    : "https://api.openai.com/v1/chat/completions";
+
+  const body = {
+    model,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+  };
+
+  if (isDeepseek) {
+    // DeepSeek kennt kein striktes JSON-Schema, nur einen JSON-Modus.
+    // Das Schema wird daher im Prompt mitgegeben.
+    body.messages[0].content +=
+      "\n\nAntworte ausschliesslich mit einem JSON-Objekt, das exakt diesem JSON-Schema entspricht (keine Erklaerungen, kein Markdown):\n" +
+      JSON.stringify(schema);
+    if (model === "deepseek-chat") {
+      body.response_format = { type: "json_object" };
+    }
+  } else {
+    body.response_format = {
+      type: "json_schema",
+      json_schema: { name: "ergebnis", strict: true, schema },
+    };
+  }
+
+  const res = await fetch(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${settings.apiKey}`,
     },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      response_format: {
-        type: "json_schema",
-        json_schema: { name: "ergebnis", strict: true, schema },
-      },
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
@@ -185,7 +259,21 @@ async function callLLM(systemPrompt, userPrompt, schema) {
   const data = await res.json();
   const content = data.choices?.[0]?.message?.content;
   if (!content) throw new Error("Leere Antwort vom Modell erhalten.");
-  return JSON.parse(content);
+  return parseJsonLoose(content);
+}
+
+// Toleriert Markdown-Zaeune und Text um das JSON herum (noetig fuer DeepSeek)
+function parseJsonLoose(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start === -1 || end <= start) {
+      throw new Error("Die Modellantwort enthielt kein gültiges JSON.");
+    }
+    return JSON.parse(text.slice(start, end + 1));
+  }
 }
 
 function apiErrorMessage(status, detail) {
@@ -201,13 +289,47 @@ function apiErrorMessage(status, detail) {
 
 /* ---------- Stellenanzeige per URL laden ---------- */
 
+// Manche Jobportale sind reine JavaScript-Apps, deren Inhalt der Reader nicht
+// sieht. Für bekannte Portale gibt es serverseitig gerenderte Alternativ-URLs,
+// die zuerst versucht werden.
+function candidateUrls(url) {
+  const list = [url];
+  try {
+    const u = new URL(url);
+    // Onlyfy (Prescreen): Print-Version enthält die volle Anzeige
+    const m = u.pathname.match(/\/job\/([a-z0-9]+)/i);
+    if (u.hostname.endsWith("onlyfy.jobs") && m) {
+      list.unshift(u.origin + "/candidate/job/print/" + m[1] + "?mode=print");
+    }
+  } catch {
+    // ungültige URL: unverändert versuchen, Fehler kommt dann vom fetch
+  }
+  return list;
+}
+
+// Heuristik: App-Hüllen sind kurz oder tragen Jina-Warnungen zu iframes/Shadow DOM
+function looksLikeRealContent(text) {
+  return text.length > 1200 && !/contains (iframe|shadow DOM)/i.test(text);
+}
+
 async function fetchJobFromUrl(url) {
   // r.jina.ai liefert beliebige Webseiten als Markdown-Text mit offenen CORS-Headern
-  const res = await fetch("https://r.jina.ai/" + url);
-  if (!res.ok) {
-    throw new Error("Die Seite konnte nicht geladen werden (HTTP " + res.status + "). Bitte Text manuell einfügen.");
+  let best = "";
+  let lastStatus = 0;
+  for (const u of candidateUrls(url)) {
+    const res = await fetch("https://r.jina.ai/" + u);
+    if (!res.ok) {
+      lastStatus = res.status;
+      continue;
+    }
+    const text = await res.text();
+    if (looksLikeRealContent(text)) return text;
+    if (text.length > best.length) best = text;
   }
-  return res.text();
+  if (!best) {
+    throw new Error("Die Seite konnte nicht geladen werden (HTTP " + lastStatus + "). Bitte Text manuell einfügen.");
+  }
+  return best;
 }
 
 /* ---------- Fragen generieren ---------- */
@@ -386,11 +508,29 @@ function renderResult(result) {
 
 /* ---------- Event-Verkabelung ---------- */
 
+function populateModelSelect(provider, selectedId) {
+  const select = $("model");
+  const catalog = modelsFor(provider);
+  select.innerHTML = "";
+  catalog.forEach((m) => {
+    const opt = document.createElement("option");
+    opt.value = m.id;
+    opt.textContent = m.label;
+    select.appendChild(opt);
+  });
+  select.value = catalog.some((m) => m.id === selectedId) ? selectedId : catalog[0].id;
+  updateModelDesc();
+}
+
+function updateModelDesc() {
+  const m = modelsFor($("provider").value).find((x) => x.id === $("model").value);
+  $("model-desc").textContent = m ? m.desc : "";
+}
+
 function initSettingsForm() {
   $("provider").value = settings.provider || "anthropic";
   $("api-key").value = settings.apiKey || "";
-  $("model").value = settings.model || "";
-  $("model").placeholder = DEFAULT_MODELS[$("provider").value];
+  populateModelSelect($("provider").value, settings.model);
 }
 
 $("btn-settings").addEventListener("click", () => {
@@ -399,9 +539,10 @@ $("btn-settings").addEventListener("click", () => {
 });
 
 $("provider").addEventListener("change", () => {
-  $("model").placeholder = DEFAULT_MODELS[$("provider").value];
-  $("model").value = "";
+  populateModelSelect($("provider").value);
 });
+
+$("model").addEventListener("change", updateModelDesc);
 
 $("btn-save-settings").addEventListener("click", () => {
   settings = {
@@ -420,7 +561,11 @@ $("btn-fetch-url").addEventListener("click", async () => {
   if (!url) return;
   showLoading("Stellenanzeige wird geladen...");
   try {
-    $("job-text").value = await fetchJobFromUrl(url);
+    const text = await fetchJobFromUrl(url);
+    $("job-text").value = text;
+    if (!looksLikeRealContent(text)) {
+      showError("Die Seite konnte nur unvollständig ausgelesen werden (vermutlich eine JavaScript-Anwendung). Bitte prüfen und die Stellenbeschreibung ggf. manuell einfügen.");
+    }
   } catch (e) {
     showError(e.message);
   } finally {
