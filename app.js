@@ -405,6 +405,24 @@ function apiErrorMessage(status, detail) {
 
 /* ---------- Stellenanzeige per URL laden ---------- */
 
+// LinkedIn-Jobseiten (/jobs/view/<id>, ?currentJobId=<id>) sind hinter einer
+// Login-/Verwandte-Jobs-Hülle versteckt - der Reader liefert dort viel
+// Navigations-Rauschen. Die Job-ID erlaubt den Zugriff auf den serverseitig
+// gerenderten Gast-Endpunkt, der nur die reine Stellenbeschreibung enthält.
+function linkedinJobId(u) {
+  const q = u.searchParams.get("currentJobId");
+  if (q && /^\d+$/.test(q)) return q;
+  const m = u.pathname.match(/\/jobs\/view\/(?:[^/]*-)?(\d{6,})/);
+  return m ? m[1] : null;
+}
+
+// Indeed-URLs enthalten den Job-Key als jk (Detailseite) oder vjk (aus der
+// Trefferliste). Die kanonische viewjob-URL ist die sauberste Variante.
+function indeedJobKey(u) {
+  const jk = u.searchParams.get("jk") || u.searchParams.get("vjk");
+  return jk && /^[0-9a-f]+$/i.test(jk) ? jk : null;
+}
+
 // Manche Jobportale sind reine JavaScript-Apps, deren Inhalt der Reader nicht
 // sieht. Für bekannte Portale gibt es serverseitig gerenderte Alternativ-URLs,
 // die zuerst versucht werden.
@@ -416,6 +434,28 @@ function candidateUrls(url) {
     const m = u.pathname.match(/\/job\/([a-z0-9]+)/i);
     if (u.hostname.endsWith("onlyfy.jobs") && m) {
       list.unshift(u.origin + "/candidate/job/print/" + m[1] + "?mode=print");
+    }
+    // LinkedIn: Gast-Endpunkt mit der reinen Beschreibung zuerst versuchen
+    if (/(^|\.)linkedin\.com$/i.test(u.hostname)) {
+      const id = linkedinJobId(u);
+      if (id) {
+        list.unshift("https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/" + id);
+      }
+    }
+    // Indeed: auf die kanonische viewjob-URL ohne Tracking-Parameter normalisieren
+    if (/(^|\.)indeed\.com$/i.test(u.hostname)) {
+      const jk = indeedJobKey(u);
+      if (jk) {
+        list.unshift(u.origin + "/viewjob?jk=" + jk);
+      }
+    }
+    // StepStone: die normale Anzeige lädt den Beschreibungstext per JavaScript
+    // nach; die -inline-Variante ist serverseitig gerendert und vollständig.
+    if (u.hostname.endsWith("stepstone.de")) {
+      const m = u.pathname.match(/--(\d+)\.html$/);
+      if (m) {
+        list.unshift(u.origin + u.pathname.replace(/--(\d+)\.html$/, "--$1-inline.html"));
+      }
     }
   } catch {
     // ungültige URL: unverändert versuchen, Fehler kommt dann vom fetch
@@ -435,15 +475,23 @@ function cleanPageText(text) {
     .trim();
 }
 
+// Bot-Schutz (z. B. Cloudflare bei Indeed) liefert eine Challenge- oder
+// Fehlerseite, die der Reader als kurzen Text durchreicht. Solche Seiten dürfen
+// nie als Stellenbeschreibung durchgehen - sonst entstehen Fragen aus Müll.
+function looksBlocked(text) {
+  return /Just a moment\.\.\.|Attention Required|Enable JavaScript and cookies to continue|cf-browser-verification|challenge-platform|Warning: Target URL returned error (4|5)\d\d/i.test(text);
+}
+
 // Heuristik: App-Hüllen sind kurz oder tragen Jina-Warnungen zu iframes/Shadow DOM
 function looksLikeRealContent(text) {
-  return text.length > 1200 && !/contains (iframe|shadow DOM)/i.test(text);
+  return text.length > 1200 && !looksBlocked(text) && !/contains (iframe|shadow DOM)/i.test(text);
 }
 
 async function fetchJobFromUrl(url) {
   // r.jina.ai liefert beliebige Webseiten als Markdown-Text mit offenen CORS-Headern
   let best = "";
   let lastStatus = 0;
+  let blocked = false;
   for (const u of candidateUrls(url)) {
     const res = await fetch("https://r.jina.ai/" + u);
     if (!res.ok) {
@@ -452,9 +500,16 @@ async function fetchJobFromUrl(url) {
     }
     const text = await res.text();
     if (looksLikeRealContent(text)) return text;
+    if (looksBlocked(text)) {
+      blocked = true;
+      continue; // Challenge-/Fehlerseite nie als "best" merken
+    }
     if (text.length > best.length) best = text;
   }
   if (!best) {
+    if (blocked) {
+      throw new Error("Die Seite ist durch einen Bot-Schutz gesichert und lässt sich nicht automatisch auslesen (häufig bei Indeed). Bitte die Stellenbeschreibung manuell einfügen.");
+    }
     throw new Error("Die Seite konnte nicht geladen werden (HTTP " + lastStatus + "). Bitte Text manuell einfügen.");
   }
   return best;
