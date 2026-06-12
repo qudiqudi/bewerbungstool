@@ -93,12 +93,31 @@ function showView(id) {
   views.forEach((v) => $(v).classList.toggle("hidden", v !== id));
 }
 
+let loadingTicker = null;
+
 function showLoading(text) {
   $("loading-text").textContent = text;
+  $("loading-progress").classList.add("hidden");
+  $("loading-fill").style.width = "0%";
   $("loading").classList.remove("hidden");
+
+  const started = Date.now();
+  $("loading-elapsed").textContent = "";
+  clearInterval(loadingTicker);
+  loadingTicker = setInterval(() => {
+    $("loading-elapsed").textContent = Math.round((Date.now() - started) / 1000) + " s";
+  }, 1000);
+}
+
+function setLoadingProgress(done, total, label) {
+  $("loading-progress").classList.remove("hidden");
+  $("loading-fill").style.width = Math.min(100, Math.round((done / total) * 100)) + "%";
+  if (label) $("loading-text").textContent = label;
 }
 
 function hideLoading() {
+  clearInterval(loadingTicker);
+  loadingTicker = null;
   $("loading").classList.add("hidden");
 }
 
@@ -202,7 +221,41 @@ const EVAL_SCHEMA = {
 
 /* ---------- LLM-Aufruf (Anthropic / OpenAI) ---------- */
 
-async function callLLM(systemPrompt, userPrompt, schema) {
+// Liest einen SSE-Stream und sammelt die per extractDelta gelieferten
+// Textstuecke; onChunk bekommt nach jedem Stueck den bisherigen Gesamttext
+async function readSSEText(res, extractDelta, onChunk) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let acc = "";
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop();
+    for (const line of lines) {
+      if (!line.startsWith("data:")) continue;
+      const payload = line.slice(5).trim();
+      if (!payload || payload === "[DONE]") continue;
+      let data;
+      try {
+        data = JSON.parse(payload);
+      } catch {
+        continue;
+      }
+      const delta = extractDelta(data);
+      if (delta) {
+        acc += delta;
+        if (onChunk) onChunk(acc);
+      }
+    }
+  }
+  return acc;
+}
+
+async function callLLM(systemPrompt, userPrompt, schema, onProgress) {
   if (!settings.apiKey) {
     throw new Error("Kein API-Key hinterlegt. Bitte zuerst die Einstellungen ausfüllen.");
   }
@@ -225,6 +278,7 @@ async function callLLM(systemPrompt, userPrompt, schema) {
       body: JSON.stringify({
         model,
         max_tokens: 16000,
+        stream: true,
         thinking: { type: "adaptive" },
         system: systemPrompt,
         messages: [{ role: "user", content: userPrompt }],
@@ -237,13 +291,22 @@ async function callLLM(systemPrompt, userPrompt, schema) {
       throw new Error(apiErrorMessage(res.status, err?.error?.message));
     }
 
-    const data = await res.json();
-    if (data.stop_reason === "refusal") {
+    let stopReason = null;
+    const text = await readSSEText(
+      res,
+      (d) => {
+        if (d.type === "message_delta" && d.delta?.stop_reason) stopReason = d.delta.stop_reason;
+        if (d.type === "content_block_delta" && d.delta?.type === "text_delta") return d.delta.text;
+        return "";
+      },
+      onProgress
+    );
+
+    if (stopReason === "refusal") {
       throw new Error("Die Anfrage wurde vom Modell abgelehnt. Bitte Stellenbeschreibung prüfen.");
     }
-    const textBlock = data.content.find((b) => b.type === "text");
-    if (!textBlock) throw new Error("Leere Antwort vom Modell erhalten.");
-    return JSON.parse(textBlock.text);
+    if (!text) throw new Error("Leere Antwort vom Modell erhalten.");
+    return parseJsonLoose(text);
   }
 
   // OpenAI und DeepSeek (OpenAI-kompatible API)
@@ -254,6 +317,7 @@ async function callLLM(systemPrompt, userPrompt, schema) {
 
   const body = {
     model,
+    stream: true,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
@@ -290,10 +354,14 @@ async function callLLM(systemPrompt, userPrompt, schema) {
     throw new Error(apiErrorMessage(res.status, err?.error?.message));
   }
 
-  const data = await res.json();
-  const content = data.choices?.[0]?.message?.content;
-  if (!content) throw new Error("Leere Antwort vom Modell erhalten.");
-  return parseJsonLoose(content);
+  const text = await readSSEText(
+    res,
+    (d) => d.choices?.[0]?.delta?.content || "",
+    onProgress
+  );
+
+  if (!text) throw new Error("Leere Antwort vom Modell erhalten.");
+  return parseJsonLoose(text);
 }
 
 // Toleriert Markdown-Zaeune und Text um das JSON herum (noetig fuer DeepSeek)
@@ -414,7 +482,15 @@ async function generateQuiz() {
       `Erstelle einen Einstellungstest mit genau ${numQuestions} Fragen zu dieser Stellenausschreibung:\n\n` +
       jobText.slice(0, 30000);
 
-    const result = await callLLM(system, user, QUESTIONS_SCHEMA);
+    const total = Number(numQuestions);
+    setLoadingProgress(0, total, "Das Modell liest die Stellenanzeige...");
+    const result = await callLLM(system, user, QUESTIONS_SCHEMA, (acc) => {
+      // Jede fertige Frage hat im gestreamten JSON genau einen "frage"-Schluessel
+      const seen = (acc.match(/"frage"\s*:/g) || []).length;
+      setLoadingProgress(seen, total, seen > 0
+        ? `Frage ${Math.min(seen, total)} von ${total} wird erstellt...`
+        : "Fragenkatalog wird erstellt...");
+    });
     if (!result.fragen || result.fragen.length === 0) {
       throw new Error("Es konnten keine Fragen erstellt werden.");
     }
@@ -696,7 +772,14 @@ async function evaluateQuiz() {
       "\n\nRahmen: " + kontext +
       "\n\nBewerte diese Antworten des Kandidaten:\n" + JSON.stringify(payload, null, 2);
 
-    const result = await callLLM(system, user, EVAL_SCHEMA);
+    const total = quiz.fragen.length;
+    setLoadingProgress(0, total, "Das Modell prüft deine Antworten...");
+    const result = await callLLM(system, user, EVAL_SCHEMA, (acc) => {
+      const seen = (acc.match(/"feedback"\s*:/g) || []).length;
+      setLoadingProgress(seen, total, seen > 0
+        ? `Antwort ${Math.min(seen, total)} von ${total} wird bewertet...`
+        : "Antworten werden ausgewertet...");
+    });
     renderResult(result, durationMs);
     showView("view-result");
   } catch (e) {

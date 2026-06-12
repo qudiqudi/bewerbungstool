@@ -383,6 +383,30 @@ button.ghost {
   animation: spin 0.8s linear infinite;
 }
 
+.loading-bar {
+  width: 280px;
+  max-width: 80vw;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+#loading-fill {
+  height: 100%;
+  width: 0;
+  background: #fff;
+  border-radius: 4px;
+  transition: width 0.4s;
+}
+
+.loading-elapsed {
+  margin: 0;
+  font-size: 0.8rem;
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* Modal */
