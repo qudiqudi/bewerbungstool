@@ -1,6 +1,6 @@
 "use strict";
 
-const CACHE = "bewerbungstool-v13";
+const CACHE = "bewerbungstool-v14";
 const ASSETS = [
   ".",
   "index.html",
@@ -33,9 +33,11 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Netzwerk zuerst, Cache als Offline-Fallback
+  // Netzwerk zuerst, Cache als Offline-Fallback. "no-cache" erzwingt eine
+  // Revalidierung beim Server (per ETag), weil GitHub Pages Assets sonst bis
+  // zu 10 Minuten im HTTP-Cache des Browsers liegen und Updates verzoegern.
   event.respondWith(
-    fetch(event.request)
+    fetch(event.request, { cache: "no-cache" })
       .then((res) => {
         const copy = res.clone();
         caches.open(CACHE).then((cache) => cache.put(event.request, copy));
