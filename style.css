@@ -365,6 +365,8 @@ button.ghost {
   position: fixed;
   inset: 0;
   background: rgba(20, 28, 42, 0.55);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -373,6 +375,21 @@ button.ghost {
   color: #fff;
   z-index: 10;
 }
+
+.loading-panel {
+  background: #232c3d;
+  border-radius: 14px;
+  padding: 1.8rem 2.2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  max-width: min(420px, 90vw);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+  text-align: center;
+}
+
+.loading-panel p { margin: 0; }
 
 .spinner {
   width: 42px;
