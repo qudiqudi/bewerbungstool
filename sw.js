@@ -1,6 +1,6 @@
 "use strict";
 
-const CACHE = "bewerbungstool-v9";
+const CACHE = "bewerbungstool-v10";
 const ASSETS = [
   ".",
   "index.html",
