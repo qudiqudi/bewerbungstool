@@ -1,4 +1,4 @@
-![jobreif.de – Einstellungstest-Simulator](social-preview.png)
+![jobreif.de – Einstellungstest-Simulator](assets/social-preview.png)
 
 # jobreif.de
 
