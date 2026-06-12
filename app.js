@@ -118,7 +118,7 @@ const EVAL_SCHEMA = {
 
 async function callLLM(systemPrompt, userPrompt, schema) {
   if (!settings.apiKey) {
-    throw new Error("Kein API-Key hinterlegt. Bitte zuerst die Einstellungen ausfuellen.");
+    throw new Error("Kein API-Key hinterlegt. Bitte zuerst die Einstellungen ausfüllen.");
   }
   const provider = settings.provider || "anthropic";
   const model = settings.model || DEFAULT_MODELS[provider];
@@ -150,7 +150,7 @@ async function callLLM(systemPrompt, userPrompt, schema) {
 
     const data = await res.json();
     if (data.stop_reason === "refusal") {
-      throw new Error("Die Anfrage wurde vom Modell abgelehnt. Bitte Stellenbeschreibung pruefen.");
+      throw new Error("Die Anfrage wurde vom Modell abgelehnt. Bitte Stellenbeschreibung prüfen.");
     }
     const textBlock = data.content.find((b) => b.type === "text");
     if (!textBlock) throw new Error("Leere Antwort vom Modell erhalten.");
@@ -190,11 +190,11 @@ async function callLLM(systemPrompt, userPrompt, schema) {
 
 function apiErrorMessage(status, detail) {
   const base = {
-    401: "API-Key ungueltig oder abgelaufen.",
-    403: "Zugriff verweigert. Berechtigung des API-Keys pruefen.",
-    404: "Modell nicht gefunden. Modellnamen in den Einstellungen pruefen.",
+    401: "API-Key ungültig oder abgelaufen.",
+    403: "Zugriff verweigert. Berechtigung des API-Keys prüfen.",
+    404: "Modell nicht gefunden. Modellnamen in den Einstellungen prüfen.",
     429: "Rate-Limit erreicht. Bitte kurz warten und erneut versuchen.",
-    529: "Anbieter ueberlastet. Bitte erneut versuchen.",
+    529: "Anbieter überlastet. Bitte erneut versuchen.",
   }[status] || `API-Fehler (HTTP ${status}).`;
   return detail ? `${base} Details: ${detail}` : base;
 }
@@ -205,7 +205,7 @@ async function fetchJobFromUrl(url) {
   // r.jina.ai liefert beliebige Webseiten als Markdown-Text mit offenen CORS-Headern
   const res = await fetch("https://r.jina.ai/" + url);
   if (!res.ok) {
-    throw new Error("Die Seite konnte nicht geladen werden (HTTP " + res.status + "). Bitte Text manuell einfuegen.");
+    throw new Error("Die Seite konnte nicht geladen werden (HTTP " + res.status + "). Bitte Text manuell einfügen.");
   }
   return res.text();
 }
@@ -215,7 +215,7 @@ async function fetchJobFromUrl(url) {
 async function generateQuiz() {
   const jobText = $("job-text").value.trim();
   if (jobText.length < 50) {
-    showError("Bitte zuerst eine Stellenbeschreibung einfuegen (mindestens ein paar Saetze).");
+    showError("Bitte zuerst eine Stellenbeschreibung einfügen (mindestens ein paar Sätze).");
     return;
   }
   const numQuestions = $("num-questions").value;
@@ -224,9 +224,9 @@ async function generateQuiz() {
   try {
     const system =
       "Du bist ein erfahrener Recruiter und erstellst realistische Einstellungstests. " +
-      "Erstelle praezise, anspruchsvolle Fragen, die exakt auf die gegebene Stelle zugeschnitten sind. " +
+      "Erstelle präzise, anspruchsvolle Fragen, die exakt auf die gegebene Stelle zugeschnitten sind. " +
       "Mische Fachfragen, situative Fragen und Soft-Skill-Fragen. " +
-      "Etwa die Haelfte der Fragen soll Multiple-Choice sein (4 plausible Optionen, genau eine ist die beste), " +
+      "Etwa die Hälfte der Fragen soll Multiple-Choice sein (4 plausible Optionen, genau eine ist die beste), " +
       "der Rest offene Fragen. Antworte auf Deutsch.";
 
     const user =
@@ -317,7 +317,7 @@ async function evaluateQuiz() {
   showLoading("Antworten werden ausgewertet...");
   try {
     const system =
-      "Du bist ein fairer, aber kritischer Pruefer fuer Einstellungstests. " +
+      "Du bist ein fairer, aber kritischer Prüfer für Einstellungstests. " +
       "Bewerte jede Antwort mit 0 bis 10 Punkten, gib kurzes konkretes Feedback und eine knappe Musterantwort. " +
       "Unbeantwortete Fragen erhalten 0 Punkte. Antworte auf Deutsch.";
 
