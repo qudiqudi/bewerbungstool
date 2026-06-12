@@ -440,8 +440,34 @@ function looksLikeRealContent(text) {
   return text.length > 1200 && !/contains (iframe|shadow DOM)/i.test(text);
 }
 
+// LinkedIn-Anzeigen kommen mit enormem Rauschen (wiederholte Sign-in-Blöcke,
+// "Similar jobs", "People also viewed", Footer, Sprachliste). Diese Funktion
+// schneidet auf den eigentlichen Anzeigentext zu. Wird nur für linkedin.com
+// angewandt, damit andere Portale unberührt bleiben.
+function cleanLinkedIn(text) {
+  let t = text;
+  // Sign-in-/Join-Blöcke (Überschrift bis zur "By clicking Continue..."-Zeile)
+  t = t.replace(
+    /^#{1,6}\s*(?:Join or sign in|Sign in to)[\s\S]*?By clicking Continue to join or sign in[^\n]*\n?/gim,
+    ""
+  );
+  // Alles ab dem Empfehlungs-/Footer-Bereich abschneiden (kommt nach dem Text).
+  // Seniority/Employment/Job function/Industries bleiben so erhalten.
+  const cut = t.search(
+    /Referrals increase your chances|^##\s*Similar jobs|^##\s*People also viewed/im
+  );
+  if (cut > 0) t = t.slice(0, cut);
+  return t;
+}
+
 async function fetchJobFromUrl(url) {
   // r.jina.ai liefert beliebige Webseiten als Markdown-Text mit offenen CORS-Headern
+  let isLinkedIn = false;
+  try {
+    isLinkedIn = new URL(url).hostname.endsWith("linkedin.com");
+  } catch {
+    // ungültige URL: keine Sonderbehandlung
+  }
   let best = "";
   let lastStatus = 0;
   for (const u of candidateUrls(url)) {
@@ -450,7 +476,8 @@ async function fetchJobFromUrl(url) {
       lastStatus = res.status;
       continue;
     }
-    const text = await res.text();
+    let text = await res.text();
+    if (isLinkedIn) text = cleanLinkedIn(text);
     if (looksLikeRealContent(text)) return text;
     if (text.length > best.length) best = text;
   }
