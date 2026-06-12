@@ -146,7 +146,15 @@ const QUESTIONS_SCHEMA = {
           },
           quellen: {
             type: "array",
-            items: { type: "string" },
+            items: {
+              type: "object",
+              properties: {
+                titel: { type: "string", description: "Name der Quelle, z. B. Gesetz, Norm, Standardwerk oder Dokumentation" },
+                url: { type: "string", description: "URL der Quelle, nur wenn sicher bekannt; sonst leerer String" },
+              },
+              required: ["titel", "url"],
+              additionalProperties: false,
+            },
             description: "1 bis 3 real existierende Quellen zur Vertiefung",
           },
         },
@@ -381,7 +389,9 @@ async function generateQuiz() {
       "bei offenen Fragen eine knappe Musterantwort), bei Multiple-Choice zu jeder Option eine kurze Erklärung, " +
       "warum sie richtig oder falsch ist, einen lernrelevanten Hintergrund (lerninfo) sowie 1 bis 3 Quellen zur Vertiefung. " +
       "Nenne nur real existierende Quellen (Gesetze, Normen, Standardwerke, offizielle Dokumentation, etablierte Fachseiten). " +
-      "Wenn du dir bei einer URL nicht sicher bist, nenne stattdessen den Namen der Quelle und einen passenden Suchbegriff. " +
+      "Gib die URL einer Quelle nur an, wenn du dir sicher bist, dass sie existiert - bevorzugt Startseiten oder bekannte, " +
+      "stabile Adressen, keine tief verschachtelten Links. Sonst lasse die URL leer und waehle einen praegnanten Titel, " +
+      "der sich gut als Suchbegriff eignet. " +
       "Schätze ausserdem ein realistisches Zeitlimit in Minuten für den gesamten Test. Antworte auf Deutsch.";
 
     const user =
@@ -530,6 +540,23 @@ function renderQuestion() {
   $("btn-next").textContent = current === total - 1 ? "Auswerten" : "Weiter";
 }
 
+// Quelle als klickbarer Link: direkte URL, wenn das Modell sich sicher war,
+// sonst eine Websuche nach dem Quellentitel (vermeidet erfundene, tote Links)
+function sourceAnchor(src) {
+  const titel = (typeof src === "string" ? src : src.titel || src.url || "").trim();
+  let url = (typeof src === "string" ? "" : src.url || "").trim();
+  const isSearch = !/^https?:\/\//i.test(url);
+  if (isSearch) {
+    url = "https://duckduckgo.com/?q=" + encodeURIComponent(titel);
+  }
+  const a = document.createElement("a");
+  a.href = url;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  a.textContent = titel + (isSearch ? " (Suche)" : "");
+  return a;
+}
+
 // Lernmodus: Auflösen-Button bzw. Erklärungsbox unter der Frage
 function renderLearnArea(q, isRevealed) {
   const area = $("learn-area");
@@ -585,7 +612,7 @@ function renderLearnArea(q, isRevealed) {
     const ul = document.createElement("ul");
     q.quellen.forEach((src) => {
       const li = document.createElement("li");
-      li.textContent = src;
+      li.appendChild(sourceAnchor(src));
       ul.appendChild(li);
     });
     box.appendChild(ul);
@@ -708,8 +735,14 @@ function renderResult(result, durationMs) {
     div.querySelector(".a").textContent = "Deine Antwort: " + (answers[i] || "(keine Antwort)");
     div.querySelectorAll(".fb")[0].textContent = r.feedback || "";
     div.querySelectorAll(".fb")[1].textContent = r.musterantwort ? "Musterantwort: " + r.musterantwort : "";
-    div.querySelector(".src").textContent =
-      q.quellen && q.quellen.length ? "Quellen: " + q.quellen.join(" · ") : "";
+    const srcEl = div.querySelector(".src");
+    if (q.quellen && q.quellen.length) {
+      srcEl.appendChild(document.createTextNode("Quellen: "));
+      q.quellen.forEach((src, n) => {
+        if (n > 0) srcEl.appendChild(document.createTextNode(" · "));
+        srcEl.appendChild(sourceAnchor(src));
+      });
+    }
     details.appendChild(div);
   });
 }

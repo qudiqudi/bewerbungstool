@@ -289,6 +289,14 @@ button.ghost {
   color: var(--muted);
 }
 
+.learn-box a, .detail-item a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.learn-box a:hover, .detail-item a:hover { color: var(--primary-dark); }
+
 /* Ergebnis */
 .score-circle {
   width: 110px;
