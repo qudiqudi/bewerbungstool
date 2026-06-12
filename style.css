@@ -824,7 +824,7 @@ button.ghost {
     --red: #b23b2a;
     --red-soft: #f6e9e6;
   }
-  header, #btn-settings, .row button, .row, .overlay, .error, .update-banner { display: none !important; }
+  header, #btn-settings, .row button, .row, .overlay, .error, .update-banner, .site-footer { display: none !important; }
   body { background: #fff; color: #000; }
   .card { border: none; padding: 0; box-shadow: none; margin: 0; }
   .score-ring-progress { transition: none; }
@@ -931,6 +931,30 @@ button.ghost {
   .job-head button { align-self: stretch; }
   .attempt-list li { flex-wrap: wrap; }
 }
+
+/* Footer */
+.site-footer {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1.2rem 1rem calc(1.6rem + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border);
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.site-footer p { margin: 0 0 0.4rem; }
+.site-footer p:last-child { margin-bottom: 0; }
+.site-footer strong { font-family: var(--display); font-weight: 700; color: var(--text); }
+.footer-sep { margin: 0 0.35rem; }
+
+.site-footer a {
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
+.site-footer a:hover { color: var(--primary-dark); }
 
 /* Update-Hinweis */
 .update-banner {
