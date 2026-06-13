@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.21";
+const APP_VERSION = "1.0.22";
 
 const CHANGELOG = [
+  {
+    version: "1.0.22",
+    date: "14.06.2026",
+    items: [
+      "Das „Was ist neu“-Fenster öffnet jetzt immer bei der neuesten Version statt mitten im Verlauf und lässt sich zusätzlich durch Tippen neben das Fenster schließen.",
+    ],
+  },
   {
     version: "1.0.21",
     date: "14.06.2026",
@@ -3391,7 +3398,12 @@ $("link-changelog").addEventListener("click", (e) => {
   e.preventDefault();
   renderChangelog();
   $("changelog-modal").classList.remove("hidden");
-  $("btn-changelog-close").focus();
+  // Immer bei der neuesten Version (oben) starten. Der Fokus auf den Schliessen-
+  // Button darf das scrollbare Panel nicht nach unten ziehen (preventScroll),
+  // sonst oeffnet das Fenster mitten in der aeltesten Version.
+  const panel = $("changelog-modal").querySelector(".modal");
+  if (panel) panel.scrollTop = 0;
+  $("btn-changelog-close").focus({ preventScroll: true });
 });
 
 function closeChangelog() {
@@ -3400,6 +3412,10 @@ function closeChangelog() {
 }
 
 $("btn-changelog-close").addEventListener("click", closeChangelog);
+// Klick auf den abgedunkelten Hintergrund (nicht auf das Panel) schliesst
+$("changelog-modal").addEventListener("click", (e) => {
+  if (e.target === $("changelog-modal")) closeChangelog();
+});
 
 $("btn-badge-close").addEventListener("click", closeBadgeModal);
 // Klick auf den abgedunkelten Hintergrund (nicht auf die Karte) schliesst
