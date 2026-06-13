@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.9";
+const APP_VERSION = "1.0.10";
 
 const CHANGELOG = [
+  {
+    version: "1.0.10",
+    date: "13.06.2026",
+    items: [
+      "Robustheit und Barrierefreiheit: Antworten von Modellen ohne striktes Schema werden vor Anzeige und Speicherung auf ihre Form geprüft, der Import verträgt unvollständige Sicherungsdateien besser, der Timer bleibt nach Zeitablauf nicht mehr hängen, die Stellenanzeige lässt sich per Enter laden, Auswahlgruppen und das Schlüsselfeld sind sauber beschriftet, der Kopfzeilen-Kontrast erfüllt jetzt die AA-Vorgaben, und die Offline-Nutzung wurde gehärtet.",
+    ],
+  },
   {
     version: "1.0.9",
     date: "13.06.2026",
@@ -495,6 +502,83 @@ const EVAL_SCHEMA = {
   additionalProperties: false,
 };
 
+/* ---------- Shape-Validierung der Modellantworten ---------- */
+// Anthropic und OpenAI erzwingen das JSON-Schema serverseitig. DeepSeek und
+// lokale Modelle bekommen es nur als Prompt-Hinweis und koennen Felder
+// weglassen oder den Typ verfehlen. Diese Helfer machen die Antwort robust
+// nutzbar (harmlose Luecken auffuellen) und werfen nur, wenn das Ergebnis
+// grundsaetzlich unbrauchbar ist.
+
+function normalizeQuizData(result) {
+  if (!result || typeof result !== "object" || !Array.isArray(result.fragen)) {
+    throw new Error("Die Modellantwort hatte nicht die erwartete Form (keine Fragenliste).");
+  }
+  const validTyp = (t) => (t === "multiple_choice" || t === "offen" ? t : "offen");
+  const validDiff = (d) => (d === "leicht" || d === "mittel" || d === "schwer" ? d : "");
+  const fragen = [];
+  result.fragen.forEach((q, i) => {
+    if (!q || typeof q !== "object") return;
+    const frage = typeof q.frage === "string" ? q.frage.trim() : "";
+    if (!frage) return; // ohne Fragetext nicht darstellbar
+    let typ = validTyp(q.typ);
+    let optionen = Array.isArray(q.optionen) ? q.optionen.filter((o) => typeof o === "string") : [];
+    // Multiple-Choice ohne brauchbare Optionen ist nicht bedienbar -> offene Frage
+    if (typ === "multiple_choice" && optionen.length < 2) { typ = "offen"; optionen = []; }
+    const quellen = Array.isArray(q.quellen)
+      ? q.quellen
+          .filter((s) => s && typeof s === "object")
+          .map((s) => ({
+            titel: typeof s.titel === "string" ? s.titel : "",
+            url: typeof s.url === "string" ? s.url : "",
+          }))
+          .filter((s) => s.titel || s.url)
+      : [];
+    fragen.push({
+      id: Number.isFinite(Number(q.id)) ? Number(q.id) : i + 1,
+      typ,
+      kategorie: typeof q.kategorie === "string" ? q.kategorie : "",
+      schwierigkeit: validDiff(q.schwierigkeit),
+      frage,
+      optionen,
+      korrekte_antwort: typeof q.korrekte_antwort === "string" ? q.korrekte_antwort : "",
+      erklaerungen: Array.isArray(q.erklaerungen) ? q.erklaerungen.filter((e) => typeof e === "string") : [],
+      lerninfo: typeof q.lerninfo === "string" ? q.lerninfo : "",
+      quellen,
+    });
+  });
+  if (!fragen.length) {
+    throw new Error("Die Modellantwort enthielt keine verwertbaren Fragen.");
+  }
+  const zeit = Math.round(Number(result.empfohlene_zeit_minuten));
+  return {
+    titel: typeof result.titel === "string" && result.titel.trim() ? result.titel.trim() : "Einstellungstest",
+    empfohlene_zeit_minuten: Number.isFinite(zeit) && zeit > 0 ? zeit : 0,
+    fragen,
+  };
+}
+
+function normalizeEvalData(result) {
+  if (!result || typeof result !== "object") {
+    throw new Error("Die Auswertung des Modells hatte nicht die erwartete Form.");
+  }
+  const g = result.gesamt && typeof result.gesamt === "object" ? result.gesamt : {};
+  let prozent = Math.round(Number(g.prozent));
+  if (!Number.isFinite(prozent)) prozent = 0;
+  prozent = Math.max(0, Math.min(100, prozent));
+  const strArr = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === "string") : []);
+  return {
+    ergebnisse: Array.isArray(result.ergebnisse)
+      ? result.ergebnisse.filter((e) => e && typeof e === "object")
+      : [],
+    gesamt: {
+      prozent,
+      zusammenfassung: typeof g.zusammenfassung === "string" ? g.zusammenfassung : "",
+      staerken: strArr(g.staerken),
+      verbesserungen: strArr(g.verbesserungen),
+    },
+  };
+}
+
 /* ---------- LLM-Aufruf (Anthropic / OpenAI) ---------- */
 
 // Liest einen SSE-Stream und sammelt die per extractDelta gelieferten
@@ -936,11 +1020,10 @@ async function generateQuiz() {
         ? `Frage ${Math.min(seen, total)} von ${total} wird erstellt...`
         : "Fragenkatalog wird erstellt...");
     });
-    if (!result.fragen || result.fragen.length === 0) {
-      throw new Error("Es konnten keine Fragen erstellt werden.");
-    }
-
-    quiz = result;
+    // Defensiv gegen Modelle ohne striktes Schema (DeepSeek, lokale Modelle):
+    // Form pruefen und harmlose Luecken auffuellen, statt spaeter beim Rendern
+    // an einem fehlenden Feld zu scheitern
+    quiz = normalizeQuizData(result);
     quiz.jobText = jobText;
     // Stabile Stellen-Identität aus der Quell-URL mitführen, solange der geladene
     // Text seit dem Laden nicht von Hand verändert wurde - sonst kann die URL
@@ -966,7 +1049,13 @@ async function generateQuiz() {
     if (mode === "pruefung") {
       startTimer(computeTimeLimitMin(quiz));
     } else {
+      // Lernmodus hat kein Zeitlimit - Timerzustand vollstaendig zuruecksetzen,
+      // damit kein „ueberzogen“ oder altes Limit aus einer frueheren Pruefung
+      // am Lern-Versuch haengen bleibt
       stopTimer();
+      timer.overtime = false;
+      timer.limitMin = 0;
+      timer.deadline = 0;
       $("quiz-timer").classList.add("hidden");
     }
 
@@ -1009,6 +1098,14 @@ function stopTimer() {
     clearInterval(timer.intervalId);
     timer.intervalId = null;
   }
+}
+
+// Ueberzieh-Modus: der Timer laeuft weiter und zaehlt hoch, der Versuch gilt
+// als ueberzogen. Idempotent, damit kein zweites Intervall entsteht.
+function enterOvertime() {
+  timer.overtime = true;
+  if (!timer.intervalId) timer.intervalId = setInterval(updateTimerDisplay, 1000);
+  updateTimerDisplay();
 }
 
 function formatMinSec(ms) {
@@ -1236,7 +1333,8 @@ async function evaluateQuiz() {
   if (actionRunning) return;
   const unanswered = answers.filter((a) => !a.trim()).length;
   // Bei unbeantworteten Fragen erst im UI-Modal rueckfragen (kein blockierendes
-  // natives confirm()). runEvaluation() laeuft erst nach Bestaetigung.
+  // natives confirm()). runEvaluation() laeuft erst nach Bestaetigung; das
+  // Abbrechen erledigt closeConfirmEval (inkl. Rueckkehr in den Ueberzieh-Modus).
   if (unanswered > 0) {
     openConfirmEval(unanswered);
     return;
@@ -1284,12 +1382,16 @@ async function runEvaluation() {
 
     const total = quiz.fragen.length;
     setLoadingProgress(0, total, "Das Modell prüft deine Antworten...");
-    const { data: result, cost: evalCost } = await callLLM(system, user, EVAL_SCHEMA, (acc) => {
+    const { data: rawResult, cost: evalCost } = await callLLM(system, user, EVAL_SCHEMA, (acc) => {
       const seen = (acc.match(/"feedback"\s*:/g) || []).length;
       setLoadingProgress(seen, total, seen > 0
         ? `Antwort ${Math.min(seen, total)} von ${total} wird bewertet...`
         : "Antworten werden ausgewertet...");
     });
+    // Form absichern, bevor gespeichert/gerendert wird: ohne striktes Schema
+    // (DeepSeek, lokale Modelle) koennte z. B. das gesamt-Objekt fehlen, was
+    // beim Speichern (result.gesamt.prozent) sonst einen Absturz ausloest
+    const result = normalizeEvalData(rawResult);
     saveAttempt(result, durationMs, evalCost);
     renderResult(result, durationMs);
     // Spielfortschritt dieser Stelle; frisch freigeschaltete Abzeichen und ein
@@ -1635,6 +1737,11 @@ function renderResultGami(job, opts) {
 
 /* ---------- Historie (localStorage, pro Stelle gruppiert) ---------- */
 
+// Obergrenzen, damit die Historie (und localStorage) nicht unbegrenzt waechst.
+// Gelten beim normalen Speichern und beim Import gleichermassen.
+const HISTORY_MAX_JOBS = 20;
+const HISTORY_MAX_ATTEMPTS = 20;
+
 function loadHistory() {
   try {
     return JSON.parse(localStorage.getItem("bewerbungstool.history")) || { jobs: [] };
@@ -1770,8 +1877,8 @@ function saveAttempt(result, durationMs, evalCost) {
     result,
   });
 
-  if (job.attempts.length > 20) job.attempts = job.attempts.slice(-20);
-  if (h.jobs.length > 20) h.jobs.length = 20;
+  if (job.attempts.length > HISTORY_MAX_ATTEMPTS) job.attempts = job.attempts.slice(-HISTORY_MAX_ATTEMPTS);
+  if (h.jobs.length > HISTORY_MAX_JOBS) h.jobs.length = HISTORY_MAX_JOBS;
   saveHistory(h);
 }
 
@@ -1793,6 +1900,10 @@ function renderHistory() {
   $("history-empty").classList.toggle("hidden", h.jobs.length > 0);
 
   h.jobs.forEach((job) => {
+    // Eine Stelle ohne Versuche (z. B. aus einer manipulierten Importdatei)
+    // wuerde best/last unten zum Absturz bringen - solche Eintraege ueberspringen
+    if (!job || !Array.isArray(job.attempts) || job.attempts.length === 0) return;
+
     const block = document.createElement("div");
     block.className = "job-block";
 
@@ -2235,15 +2346,21 @@ function importData(text) {
     const h = loadHistory();
     data.history.jobs.forEach((impJob) => {
       if (!impJob || !impJob.key || !Array.isArray(impJob.attempts)) return;
+      // Nur Versuche mit verwertbarem Zeitstempel uebernehmen (date traegt die
+      // Identitaet beim Zusammenfuehren und die Sortierung). Eine Stelle ohne
+      // brauchbare Versuche wird uebersprungen - ein leeres attempts-Array wuerde
+      // die Historie sonst beim Rendern zum Absturz bringen.
+      const incoming = impJob.attempts.filter((a) => a && typeof a === "object" && Number.isFinite(a.date));
+      if (!incoming.length) return;
       // Stelle zuerst über die stabile URL-Identität zusammenführen, sonst über
       // den Text-key (wie bisher)
       const existing =
         (impJob.urlKey && h.jobs.find((j) => j.urlKey === impJob.urlKey)) ||
         h.jobs.find((j) => j.key === impJob.key);
       if (!existing) {
-        h.jobs.push(impJob);
+        h.jobs.push({ ...impJob, attempts: incoming });
         newJobs++;
-        newAttempts += impJob.attempts.length;
+        newAttempts += incoming.length;
         return;
       }
       // urlKey/Quelle aus dem Import übernehmen, falls lokal noch nicht gesetzt
@@ -2252,8 +2369,8 @@ function importData(text) {
         if (impJob.url) existing.url = impJob.url;
       }
       const seen = new Set(existing.attempts.map((a) => a.date));
-      impJob.attempts.forEach((a) => {
-        if (a && !seen.has(a.date)) {
+      incoming.forEach((a) => {
+        if (!seen.has(a.date)) {
           existing.attempts.push(a);
           newAttempts++;
         }
@@ -2265,6 +2382,12 @@ function importData(text) {
       const last = (j) => Math.max(0, ...j.attempts.map((a) => a.date || 0));
       return last(j2) - last(j1);
     });
+    // Dieselben Obergrenzen wie beim normalen Speichern anwenden, damit ein
+    // grosser Import die Historie (und localStorage) nicht unbegrenzt aufblaeht
+    h.jobs.forEach((j) => {
+      if (j.attempts.length > HISTORY_MAX_ATTEMPTS) j.attempts = j.attempts.slice(-HISTORY_MAX_ATTEMPTS);
+    });
+    if (h.jobs.length > HISTORY_MAX_JOBS) h.jobs.length = HISTORY_MAX_JOBS;
     saveHistory(h);
   }
 
@@ -2331,6 +2454,15 @@ $("btn-fetch-url").addEventListener("click", async () => {
   }
 });
 
+// Enter im URL-Feld loest das Laden aus, wie der Klick auf „Laden“. Der
+// actionRunning-Schutz im Klick-Handler verhindert doppeltes Ausloesen.
+$("job-url").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    $("btn-fetch-url").click();
+  }
+});
+
 $("btn-generate").addEventListener("click", generateQuiz);
 $("btn-next").addEventListener("click", nextQuestion);
 $("btn-prev").addEventListener("click", prevQuestion);
@@ -2383,9 +2515,7 @@ $("btn-timeout-submit").addEventListener("click", () => {
 
 $("btn-timeout-continue").addEventListener("click", () => {
   $("timeout-modal").classList.add("hidden");
-  timer.overtime = true;
-  timer.intervalId = setInterval(updateTimerDisplay, 1000);
-  updateTimerDisplay();
+  enterOvertime();
 });
 
 $("btn-error-close").addEventListener("click", () => $("error-box").classList.add("hidden"));
@@ -2408,11 +2538,21 @@ function closeConfirmEval() {
   }
   confirmEvalReturnFocus = null;
 }
+// Abbruch der Rueckfrage (Zurueck/Escape): wurde die Auswertung nach Zeitablauf
+// angestossen, nicht im eingefrorenen 0:00-Zustand haengen bleiben, sondern in
+// den Ueberzieh-Modus zurueck - der Timer laeuft weiter und das overtime-Flag
+// stimmt mit der Realitaet ueberein.
+function cancelConfirmEval() {
+  closeConfirmEval();
+  if (mode === "pruefung" && timer.limitMin && Date.now() > timer.deadline) {
+    enterOvertime();
+  }
+}
 $("btn-confirm-eval").addEventListener("click", () => {
   closeConfirmEval();
   runEvaluation();
 });
-$("btn-confirm-eval-cancel").addEventListener("click", closeConfirmEval);
+$("btn-confirm-eval-cancel").addEventListener("click", cancelConfirmEval);
 
 // Versionsanzeige im Footer und Changelog-Fenster
 function renderChangelog() {
@@ -2461,7 +2601,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !$("changelog-modal").classList.contains("hidden")) {
     closeChangelog();
   } else if (e.key === "Escape" && !$("confirm-eval-modal").classList.contains("hidden")) {
-    closeConfirmEval();
+    cancelConfirmEval();
   }
 });
 
