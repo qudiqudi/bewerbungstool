@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.19";
+const APP_VERSION = "1.0.20";
 
 const CHANGELOG = [
+  {
+    version: "1.0.20",
+    date: "13.06.2026",
+    items: [
+      "Dieselbe Stelle wird jetzt zuverlässiger wiedererkannt: Wird eine Anzeige ohne URL erneut eingefügt – etwa mit leicht abweichendem Text –, ordnet das Tool die Versuche anhand von Bezeichnung, Arbeitgeber und Arbeitsort wieder der bestehenden Stelle zu, statt einen zweiten Eintrag anzulegen. Verschiedene Stellen mit gleicher Bezeichnung bei unterschiedlichen Arbeitgebern bleiben getrennt.",
+    ],
+  },
   {
     version: "1.0.19",
     date: "13.06.2026",
@@ -2129,6 +2136,24 @@ function urlKeyOf(url) {
   return canon ? "u" + hashStr(canon) : null;
 }
 
+// Identität einer Stelle aus dem, was sie für den Nutzer ausmacht: Bezeichnung
+// + Arbeitgeber + Arbeitsort ("Fachinformatiker bei IBM in Bonn"). Damit wird
+// dieselbe ohne URL erneut eingefügte Anzeige - die einen leicht abweichenden
+// Text und damit einen anderen jobKey hätte - wieder derselben Stelle zugeordnet.
+// Bewusst nur gebildet, wenn Arbeitgeber UND Arbeitsort bekannt sind: ohne sie
+// wäre der Schlüssel zu grob (zwei generische "Fachinformatiker" verschiedener
+// Firmen würden fälschlich verschmelzen). Liefert sonst null. Hinweis: greift
+// als Fallback erst nach dem urlKey und nur bei abweichendem Text - zwei echte
+// verschiedene Stellen mit identischem Titel/Arbeitgeber/Ort würden dabei
+// zusammengeführt; das ist gegenüber dem Aufsplitten der selteneren Fehler.
+function identityKeyOf(titel, arbeitgeber, arbeitsort) {
+  const ag = (typeof arbeitgeber === "string" ? arbeitgeber : "").trim();
+  const ao = (typeof arbeitsort === "string" ? arbeitsort : "").trim();
+  if (!ag || !ao) return null;
+  const norm = (s) => s.replace(/\s+/g, " ").trim().toLowerCase();
+  return "i" + hashStr(`${norm(titel || "")}|${norm(ag)}|${norm(ao)}`);
+}
+
 // Gesamtkosten eines Fragebogens aus Erstellung und Auswertung; null, wenn
 // fuer keinen der beiden Aufrufe Kosten bekannt sind (z. B. eigenes Modell)
 function buildCost(genCost, evalCost) {
@@ -2159,12 +2184,17 @@ function saveAttempt(result, durationMs, evalCost, evalTokens) {
   const h = loadHistory();
   const key = jobKey(quiz.jobText);
   const uKey = quiz.urlKey || null;
-  // Bei per URL geladenen Stellen zuerst über die stabile URL-Identität suchen:
-  // erneutes Laden derselben Anzeige liefert oft leicht abweichenden Text und
-  // damit einen anderen Text-key - der urlKey hält die Versuche trotzdem in
-  // einer Historie zusammen. Sonst (und für ältere Stellen) der Text-key.
+  const iKey = identityKeyOf(quiz.titel, quiz.arbeitgeber, quiz.arbeitsort);
+  // Suchreihenfolge: zuerst die stabile URL-Identität (urlKey), dann die
+  // Stellen-Identität aus Titel+Arbeitgeber+Ort (identityKey), zuletzt der
+  // Text-key. So landen Versuche derselben Anzeige zusammen, auch wenn sie ohne
+  // URL und mit leicht abweichendem Text erneut eingefügt wurde. Die identityKey-
+  // Zusammenführung wird nur unterdrückt, wenn beide Seiten eine URL-Identität
+  // haben und diese sich unterscheiden - dann sind es nachweislich zwei
+  // verschiedene Anzeigen und bleiben getrennt.
   let job =
     (uKey && h.jobs.find((j) => j.urlKey === uKey)) ||
+    (iKey && h.jobs.find((j) => j.identityKey === iKey && !(uKey && j.urlKey && j.urlKey !== uKey))) ||
     h.jobs.find((j) => j.key === key);
   if (!job) {
     job = { key, titel: quiz.titel, jobText: quiz.jobText, attempts: [] };
@@ -2184,6 +2214,12 @@ function saveAttempt(result, durationMs, evalCost, evalTokens) {
   // dann auf den Titel allein zurueck. Leere Werte ueberschreiben nichts.
   if (typeof quiz.arbeitgeber === "string" && quiz.arbeitgeber.trim()) job.arbeitgeber = quiz.arbeitgeber.trim();
   if (typeof quiz.arbeitsort === "string" && quiz.arbeitsort.trim()) job.arbeitsort = quiz.arbeitsort.trim();
+  // identityKey aus den aktuellen Feldern der Stelle ableiten (nicht aus dem
+  // einzelnen Versuch), damit er zur Stelle passt und ältere, vor diesem Feld
+  // angelegte Stellen ihn beim nächsten Versuch nachtragen. Null (Arbeitgeber
+  // oder Ort fehlt) lässt einen evtl. vorhandenen Wert unangetastet.
+  const jobIKey = identityKeyOf(job.titel, job.arbeitgeber, job.arbeitsort);
+  if (jobIKey) job.identityKey = jobIKey;
   // Zuletzt genutzte Test-Einstellungen merken, damit die Stellen-Subpage einen
   // Test mit denselben Optionen per Tipp wiederholen kann (One-Tap-Repeat).
   job.lastTestConfig = {
@@ -2966,13 +3002,19 @@ function importData(text) {
       // die Historie sonst beim Rendern zum Absturz bringen.
       const incoming = impJob.attempts.filter((a) => a && typeof a === "object" && Number.isFinite(a.date));
       if (!incoming.length) return;
-      // Stelle zuerst über die stabile URL-Identität zusammenführen, sonst über
-      // den Text-key (wie bisher)
+      // Stelle zusammenführen wie beim normalen Speichern: zuerst über die
+      // stabile URL-Identität, dann über die Stellen-Identität (Titel+Arbeit-
+      // geber+Ort), zuletzt über den Text-key.
+      const impIKey = impJob.identityKey || identityKeyOf(impJob.titel, impJob.arbeitgeber, impJob.arbeitsort);
       const existing =
         (impJob.urlKey && h.jobs.find((j) => j.urlKey === impJob.urlKey)) ||
+        (impIKey && h.jobs.find((j) => j.identityKey === impIKey && !(impJob.urlKey && j.urlKey && j.urlKey !== impJob.urlKey))) ||
         h.jobs.find((j) => j.key === impJob.key);
       if (!existing) {
-        h.jobs.push({ ...impJob, attempts: incoming });
+        // identityKey direkt mitschreiben, falls er aus den Feldern abgeleitet
+        // wurde, aber im Alt-Export noch fehlte - sonst greift die Identitaets-
+        // Zusammenfuehrung erst nach dem naechsten Versuch/Import.
+        h.jobs.push({ ...impJob, attempts: incoming, ...(impIKey ? { identityKey: impIKey } : {}) });
         newJobs++;
         newAttempts += incoming.length;
         return;
@@ -2982,6 +3024,10 @@ function importData(text) {
         existing.urlKey = impJob.urlKey;
         if (impJob.url) existing.url = impJob.url;
       }
+      // identityKey und Arbeitgeber/Ort nachtragen, falls lokal noch nicht gesetzt
+      if (impJob.arbeitgeber && !existing.arbeitgeber) existing.arbeitgeber = impJob.arbeitgeber;
+      if (impJob.arbeitsort && !existing.arbeitsort) existing.arbeitsort = impJob.arbeitsort;
+      if (impIKey && !existing.identityKey) existing.identityKey = impIKey;
       const seen = new Set(existing.attempts.map((a) => a.date));
       incoming.forEach((a) => {
         if (!seen.has(a.date)) {
