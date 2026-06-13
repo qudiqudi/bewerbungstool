@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.22";
+const APP_VERSION = "1.0.23";
 
 const CHANGELOG = [
+  {
+    version: "1.0.23",
+    date: "14.06.2026",
+    items: [
+      "Kleinigkeit in der Abzeichen-Detailansicht: Bei der Gruppe „Fleiß“ ist der Zusatz „Modusunabhängig“ entfallen.",
+    ],
+  },
   {
     version: "1.0.22",
     date: "14.06.2026",
@@ -1970,7 +1977,7 @@ const BADGE_ICONS = {
 // Gruppen der Abzeichen (fuer die Detailansicht). Aus dem jobreif-Abzeichen-
 // Design. Reine Anzeige-Metadaten - der BADGES-Katalog bleibt unveraendert.
 const BADGE_GROUPS = {
-  fleiss: { label: "Fleiß", note: "Modusunabhängig — fürs Dranbleiben" },
+  fleiss: { label: "Fleiß", note: "Fürs Dranbleiben" },
   leistung: { label: "Leistung", note: "Nur im Prüfungsmodus — echtes Können" },
 };
 
