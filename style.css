@@ -1214,6 +1214,16 @@ button.ghost {
   color: var(--green);
 }
 
+.gami-exam-tip {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0.7rem;
+  border-left: 3px solid var(--primary);
+  background: var(--primary-soft);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
 /* Reduzierte Bewegung respektieren */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

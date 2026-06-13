@@ -4,9 +4,18 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.13";
+const APP_VERSION = "1.0.14";
 
 const CHANGELOG = [
+  {
+    version: "1.0.14",
+    date: "13.06.2026",
+    items: [
+      "Leistungsabzeichen (Bestanden, Souverän, Spitzenreiter, Aufwärtstrend) gibt es jetzt nur noch für Ergebnisse im Prüfungsmodus. Im Lernmodus lässt sich durch Auflösen leicht ein hoher Wert erreichen – deshalb zählen für diese Abzeichen nur echte Prüfungen. Die Fleiß-Abzeichen (Erster Schritt, Drei am Stück, Hartnäckig) bleiben in beiden Modi.",
+      "Das Abzeichen „Ernstfall“ gibt es jetzt schon fürs Antreten zu einer Prüfung (vorher erst ab 70 %), damit es sich nicht mehr mit „Souverän“ überschneidet.",
+      "Wer im Lernmodus mehrmals hintereinander gut abschneidet, bekommt am Ende der Auswertung einen Hinweis, es als Nächstes mit einer Prüfung zu versuchen.",
+    ],
+  },
   {
     version: "1.0.13",
     date: "13.06.2026",
@@ -1448,7 +1457,10 @@ async function runEvaluation() {
       const before = computeJobProgress({ attempts: job.attempts.slice(0, -1) });
       const earnedBefore = new Set(before.badges.filter((b) => b.earned).map((b) => b.id));
       const newBadges = after.badges.filter((b) => b.earned && !earnedBefore.has(b.id)).map((b) => b.id);
-      renderResultGami(job, { leveledUp: after.level > before.level, highlightBadges: newBadges });
+      // Im Lernmodus zur Prüfung ermutigen, sobald mehrere gute Läufe in Folge
+      // sitzen – dort gibt es die Leistungsabzeichen und das echte Zeitgefühl.
+      const suggestExam = mode === "lernen" && lernGoodStreak(job.attempts) >= LERN_HINT_STREAK;
+      renderResultGami(job, { leveledUp: after.level > before.level, highlightBadges: newBadges, suggestExam });
     }
     showView("view-result");
   } catch (e) {
@@ -1633,15 +1645,19 @@ function computeStreaks(attempts) {
 
 // Abzeichen-Katalog. test(s) entscheidet aus den aggregierten Werten einer
 // Stelle, ob das Abzeichen verdient ist.
+// Leistungs-Abzeichen (Score/Aufwärtstrend) zählen bewusst nur aus dem
+// Prüfungsmodus: im Lernmodus lässt sich durch Auflösen leicht ein hoher Wert
+// erreichen. Fleiß-Abzeichen (erster Test, Serie, Hartnäckigkeit) bleiben
+// modusunabhängig.
 const BADGES = [
   { id: "erster-test", label: "Erster Schritt", desc: "Ersten Test zu dieser Stelle gemacht", test: (s) => s.count >= 1 },
-  { id: "bestanden", label: "Bestanden", desc: "Mindestens 50 % erreicht", test: (s) => s.bestPct >= 50 },
-  { id: "souveraen", label: "Souverän", desc: "Mindestens 70 % erreicht", test: (s) => s.bestPct >= 70 },
-  { id: "spitze", label: "Spitzenreiter", desc: "Mindestens 90 % erreicht", test: (s) => s.bestPct >= 90 },
-  { id: "aufwaerts", label: "Aufwärtstrend", desc: "Vom ersten zum letzten Versuch verbessert", test: (s) => s.improved },
+  { id: "bestanden", label: "Bestanden", desc: "Im Prüfungsmodus mindestens 50 % erreicht", test: (s) => s.bestExamPct >= 50 },
+  { id: "souveraen", label: "Souverän", desc: "Im Prüfungsmodus mindestens 70 % erreicht", test: (s) => s.bestExamPct >= 70 },
+  { id: "spitze", label: "Spitzenreiter", desc: "Im Prüfungsmodus mindestens 90 % erreicht", test: (s) => s.bestExamPct >= 90 },
+  { id: "aufwaerts", label: "Aufwärtstrend", desc: "Im Prüfungsmodus vom ersten zum letzten Versuch verbessert", test: (s) => s.examImproved },
   { id: "drei-serie", label: "Drei am Stück", desc: "An 3 Tagen in Folge geübt", test: (s) => s.bestStreak >= 3 },
   { id: "hartnaeckig", label: "Hartnäckig", desc: "10 Versuche zu dieser Stelle", test: (s) => s.count >= 10 },
-  { id: "ernstfall", label: "Ernstfall", desc: "Prüfungsmodus mit mindestens 70 % bestanden", test: (s) => s.pruefungPass },
+  { id: "ernstfall", label: "Ernstfall", desc: "Sich an eine echte Prüfung gewagt", test: (s) => s.examCount >= 1 },
 ];
 
 // Aggregiert alle spielrelevanten Werte einer Stelle aus ihren Versuchen.
@@ -1653,10 +1669,15 @@ function computeJobProgress(job) {
   const bestPct = pcts.length ? Math.max(...pcts) : 0;
   const byDate = attempts.slice().sort((a, b) => (a.date || 0) - (b.date || 0));
   const improved = byDate.length >= 2 && attemptXp(byDate[byDate.length - 1]) > attemptXp(byDate[0]);
-  const pruefungPass = attempts.some((a) => a.mode === "pruefung" && attemptXp(a) >= 70);
+  // Leistungs-Abzeichen zählen nur Prüfungsversuche (siehe BADGES).
+  const examByDate = byDate.filter((a) => a.mode === "pruefung");
+  const examPcts = examByDate.map(attemptXp);
+  const bestExamPct = examPcts.length ? Math.max(...examPcts) : 0;
+  const examImproved = examByDate.length >= 2 && attemptXp(examByDate[examByDate.length - 1]) > attemptXp(examByDate[0]);
   const streak = computeStreaks(attempts);
   const stats = {
-    count: attempts.length, bestPct, improved, pruefungPass,
+    count: attempts.length, bestPct, improved,
+    examCount: examByDate.length, bestExamPct, examImproved,
     currentStreak: streak.current, bestStreak: streak.best,
   };
   const badges = BADGES.map((b) => ({ id: b.id, label: b.label, desc: b.desc, earned: !!b.test(stats) }));
@@ -1668,6 +1689,27 @@ function computeJobProgress(job) {
     currentStreak: streak.current, bestStreak: streak.best,
     badges, earnedCount: badges.filter((b) => b.earned).length,
   };
+}
+
+// Ab wann ein Lernmodus-Versuch als "gut" gilt und wie viele davon nacheinander
+// nötig sind, bevor der Hinweis kommt, es mal mit einer Prüfung zu versuchen.
+const LERN_GOOD_PCT = 70;
+const LERN_HINT_STREAK = 3;
+
+// Zahl der zuletzt nacheinander gut (>= LERN_GOOD_PCT) im Lernmodus abge-
+// schlossenen Versuche, endend beim jüngsten. Ein Prüfungsversuch oder ein
+// schwacher Lernversuch unterbricht die Serie. So baut sich der Hinweis nur auf,
+// wenn jemand ausschließlich im Lernmodus übt und dort gut ist.
+function lernGoodStreak(attempts) {
+  const list = (Array.isArray(attempts) ? attempts : []).filter(Boolean)
+    .slice().sort((a, b) => (a.date || 0) - (b.date || 0));
+  let run = 0;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const a = list[i];
+    if (a.mode === "lernen" && attemptXp(a) >= LERN_GOOD_PCT) run++;
+    else break;
+  }
+  return run;
 }
 
 const BADGE_ICON_EARNED =
@@ -1778,6 +1820,17 @@ function renderResultGami(job, opts) {
     live.setAttribute("role", "status");
     live.textContent = say.join(" ");
     container.appendChild(live);
+  }
+
+  // Sanfter Anstoß zum Prüfungsmodus nach mehreren guten Lernläufen in Folge.
+  if (opts.suggestExam) {
+    const tip = document.createElement("p");
+    tip.className = "gami-exam-tip";
+    tip.setAttribute("role", "status");
+    tip.textContent =
+      "Stark – mehrere gute Lernläufe hintereinander. Trau dich an eine Prüfung: " +
+      "mit Zeitlimit und ohne Auflösen. Die Leistungsabzeichen gibt es nur dort.";
+    container.appendChild(tip);
   }
 }
 
