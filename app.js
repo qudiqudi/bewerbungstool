@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.7";
+const APP_VERSION = "1.0.8";
 
 const CHANGELOG = [
+  {
+    version: "1.0.8",
+    date: "13.06.2026",
+    items: [
+      "Historie: Versuche zur selben per URL geladenen Stelle landen jetzt zuverlässig in einer Historie, auch wenn die Anzeige beim erneuten Laden leicht abweichenden Text liefert.",
+    ],
+  },
   {
     version: "1.0.7",
     date: "13.06.2026",
@@ -859,6 +866,11 @@ async function fetchJobFromUrl(url) {
 // (und bei LLM-Aufrufen kostenpflichtigen) Request starten.
 let actionRunning = false;
 
+// Zuletzt per URL geladene Anzeige (URL und der daraus erzeugte Text). Dient
+// dazu, einer Stelle eine stabile, von der URL abgeleitete Identität (urlKey)
+// zu geben - aber nur solange der geladene Text nicht manuell ersetzt wurde.
+let lastFetch = { url: "", text: "" };
+
 async function generateQuiz() {
   if (actionRunning) return;
   const jobText = $("job-text").value.trim();
@@ -923,6 +935,16 @@ async function generateQuiz() {
 
     quiz = result;
     quiz.jobText = jobText;
+    // Stabile Stellen-Identität aus der Quell-URL mitführen, solange der geladene
+    // Text seit dem Laden nicht von Hand verändert wurde - sonst kann die URL
+    // nicht mehr für diesen Text bürgen (z. B. anderer Job manuell eingefügt).
+    if (lastFetch.url && jobText === lastFetch.text) {
+      const uk = urlKeyOf(lastFetch.url);
+      if (uk) {
+        quiz.urlKey = uk;
+        quiz.jobUrl = lastFetch.url;
+      }
+    }
     quiz.schwierigkeitsgrad = difficulty;
     // Kosten der Fragenerstellung (inkl. Verarbeitung der Stellenanzeige) bis
     // zur Auswertung am Quiz mitfuehren, damit der Gesamtpreis je Fragebogen
@@ -1415,13 +1437,55 @@ function saveHistory(h) {
 }
 
 // Dieselbe Anzeige (gleicher Text) landet immer bei derselben Stelle
+// djb2 -> vorzeichenlose Base36-Zeichenkette
+function hashStr(s) {
+  let hash = 5381;
+  for (let i = 0; i < s.length; i++) {
+    hash = ((hash << 5) + hash + s.charCodeAt(i)) | 0;
+  }
+  return (hash >>> 0).toString(36);
+}
+
 function jobKey(text) {
   const norm = text.replace(/\s+/g, " ").trim().toLowerCase();
-  let hash = 5381;
-  for (let i = 0; i < norm.length; i++) {
-    hash = ((hash << 5) + hash + norm.charCodeAt(i)) | 0;
+  return "j" + hashStr(norm);
+}
+
+// Stabile Identität einer per URL geladenen Stelle: bevorzugt die Job-ID des
+// Portals (überlebt wechselnde Tracking-Parameter und leicht abweichenden
+// Anzeigentext beim erneuten Laden), sonst die auf Host und Pfad normalisierte
+// URL. Liefert null bei leerer oder ungültiger URL.
+function canonicalJobUrl(url) {
+  let u;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
   }
-  return "j" + (hash >>> 0).toString(36);
+  if (/(^|\.)linkedin\.com$/i.test(u.hostname)) {
+    const id = linkedinJobId(u);
+    if (id) return "linkedin:" + id;
+  }
+  if (/(^|\.)indeed\.com$/i.test(u.hostname)) {
+    const jk = indeedJobKey(u);
+    if (jk) return "indeed:" + jk.toLowerCase();
+  }
+  if (u.hostname.endsWith("onlyfy.jobs")) {
+    const m = u.pathname.match(/\/job\/([a-z0-9]+)/i);
+    if (m) return "onlyfy:" + m[1].toLowerCase();
+  }
+  if (u.hostname.endsWith("stepstone.de")) {
+    const m = u.pathname.match(/--(\d+)\.html$/);
+    if (m) return "stepstone:" + m[1];
+  }
+  // Unbekanntes Portal: Host (ohne www) und Pfad ohne Query/Hash/Trailing-Slash
+  const host = u.hostname.replace(/^www\./i, "").toLowerCase();
+  return host + u.pathname.replace(/\/+$/, "");
+}
+
+function urlKeyOf(url) {
+  const canon = canonicalJobUrl(url);
+  return canon ? "u" + hashStr(canon) : null;
 }
 
 // Gesamtkosten eines Fragebogens aus Erstellung und Auswertung; null, wenn
@@ -1436,10 +1500,24 @@ function buildCost(genCost, evalCost) {
 function saveAttempt(result, durationMs, evalCost) {
   const h = loadHistory();
   const key = jobKey(quiz.jobText);
-  let job = h.jobs.find((j) => j.key === key);
+  const uKey = quiz.urlKey || null;
+  // Bei per URL geladenen Stellen zuerst über die stabile URL-Identität suchen:
+  // erneutes Laden derselben Anzeige liefert oft leicht abweichenden Text und
+  // damit einen anderen Text-key - der urlKey hält die Versuche trotzdem in
+  // einer Historie zusammen. Sonst (und für ältere Stellen) der Text-key.
+  let job =
+    (uKey && h.jobs.find((j) => j.urlKey === uKey)) ||
+    h.jobs.find((j) => j.key === key);
   if (!job) {
     job = { key, titel: quiz.titel, jobText: quiz.jobText, attempts: [] };
     h.jobs.unshift(job);
+  }
+  // urlKey und Quelle nachtragen, sobald bekannt - auch bei Stellen, die früher
+  // per Text angelegt wurden. Ab dem nächsten Laden greift dann die
+  // URL-Zusammenführung statt des brüchigen Text-keys.
+  if (uKey && !job.urlKey) {
+    job.urlKey = uKey;
+    if (quiz.jobUrl) job.url = quiz.jobUrl;
   }
   job.titel = quiz.titel;
 
@@ -1448,6 +1526,8 @@ function saveAttempt(result, durationMs, evalCost) {
   const quizCopy = JSON.parse(JSON.stringify(quiz));
   delete quizCopy.jobText; // liegt schon auf dem Job, spart Speicher
   delete quizCopy.genCost; // liegt als cost am Versuch, nicht doppelt sichern
+  delete quizCopy.urlKey;  // liegt am Job
+  delete quizCopy.jobUrl;  // liegt am Job
 
   job.attempts.push({
     date: Date.now(),
@@ -1562,6 +1642,10 @@ function renderHistory() {
 function openAttempt(job, att) {
   quiz = JSON.parse(JSON.stringify(att.quiz));
   quiz.jobText = job.jobText;
+  // urlKey/Quelle aus der Stelle übernehmen, damit ein erneutes Auswerten aus
+  // der Review heraus wieder zur selben Stelle gespeichert wird
+  if (job.urlKey) quiz.urlKey = job.urlKey;
+  if (job.url) quiz.jobUrl = job.url;
   answers = att.answers.slice();
   revealed = (att.revealed || []).slice();
   while (revealed.length < quiz.fragen.length) revealed.push(false);
@@ -1919,12 +2003,21 @@ function importData(text) {
     const h = loadHistory();
     data.history.jobs.forEach((impJob) => {
       if (!impJob || !impJob.key || !Array.isArray(impJob.attempts)) return;
-      const existing = h.jobs.find((j) => j.key === impJob.key);
+      // Stelle zuerst über die stabile URL-Identität zusammenführen, sonst über
+      // den Text-key (wie bisher)
+      const existing =
+        (impJob.urlKey && h.jobs.find((j) => j.urlKey === impJob.urlKey)) ||
+        h.jobs.find((j) => j.key === impJob.key);
       if (!existing) {
         h.jobs.push(impJob);
         newJobs++;
         newAttempts += impJob.attempts.length;
         return;
+      }
+      // urlKey/Quelle aus dem Import übernehmen, falls lokal noch nicht gesetzt
+      if (impJob.urlKey && !existing.urlKey) {
+        existing.urlKey = impJob.urlKey;
+        if (impJob.url) existing.url = impJob.url;
       }
       const seen = new Set(existing.attempts.map((a) => a.date));
       impJob.attempts.forEach((a) => {
@@ -1993,6 +2086,7 @@ $("btn-fetch-url").addEventListener("click", async () => {
   try {
     const text = cleanPageText(await fetchJobFromUrl(url));
     $("job-text").value = text;
+    lastFetch = { url, text: text.trim() };
     setSourceTab("text");
     if (!looksLikeRealContent(text)) {
       showError("Die Seite konnte nur unvollständig ausgelesen werden (vermutlich eine JavaScript-Anwendung). Bitte prüfen und die Stellenbeschreibung ggf. manuell einfügen.");
