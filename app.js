@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.12";
+const APP_VERSION = "1.0.13";
 
 const CHANGELOG = [
+  {
+    version: "1.0.13",
+    date: "13.06.2026",
+    items: [
+      "Lernmodus: Eine Frage, die man auflöst, ohne sie vorher zu beantworten, lässt sich jetzt noch beantworten. Bisher war sie dauerhaft gesperrt – wer am Ende übersprungene Fragen über „Zurück“ nachholen wollte, kam nicht mehr hinein. Eine bereits gegebene Antwort bleibt nach dem Auflösen weiterhin eingefroren.",
+    ],
+  },
   {
     version: "1.0.12",
     date: "13.06.2026",
@@ -1201,8 +1208,12 @@ function renderQuestion() {
   const area = $("answer-area");
   area.innerHTML = "";
 
-  // Beim Durchgehen eines bewerteten Fragebogens sind Antworten gesperrt
-  const locked = isRevealed || reviewing;
+  // Beim Durchgehen eines bewerteten Fragebogens sind Antworten gesperrt.
+  // Eine im Lernmodus aufgeloeste Frage friert ihre Antwort ein - aber nur,
+  // wenn schon eine gegeben wurde. Sonst bliebe eine ohne Antwort aufgeloeste
+  // Frage fuer immer unbeantwortbar (man kommt per Zurueck nicht mehr rein).
+  const hasAnswer = (answers[current] || "").trim() !== "";
+  const locked = (isRevealed && hasAnswer) || reviewing;
 
   if (q.typ === "multiple_choice") {
     q.optionen.forEach((opt, idx) => {
