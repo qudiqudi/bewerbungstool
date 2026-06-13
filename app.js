@@ -4,9 +4,17 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.14";
+const APP_VERSION = "1.0.15";
 
 const CHANGELOG = [
+  {
+    version: "1.0.15",
+    date: "13.06.2026",
+    items: [
+      "Lokales Modell: Fragebogen-Erstellung schlug bei neueren LM-Studio-Versionen mit „HTTP 400“ fehl. Ursache war der angeforderte JSON-Modus (response_format „json_object“), den aktuelle LM-Studio-Versionen nicht mehr akzeptieren. Für lokale Server wird er jetzt weggelassen – das JSON-Schema liegt ohnehin schon im Prompt. DeepSeek bleibt unverändert.",
+      "Lokales Modell (LM Studio / Ollama): Der Einrichtungshinweis erklärt jetzt, dass der lokale Server Cross-Origin-Zugriffe erlauben muss – in LM Studio die Option „Enable CORS“, bei Ollama OLLAMA_ORIGINS. Ohne das blockt der Browser die Verbindung von dieser Seite. Zusätzlich der Tipp, bei Verbindungsproblemen 127.0.0.1 statt localhost zu verwenden.",
+    ],
+  },
   {
     version: "1.0.14",
     date: "13.06.2026",
@@ -758,9 +766,12 @@ async function callLLM(systemPrompt, userPrompt, schema, onProgress) {
     body.messages[0].content +=
       "\n\nAntworte ausschliesslich mit einem JSON-Objekt, das exakt diesem JSON-Schema entspricht (keine Erklaerungen, kein Markdown):\n" +
       JSON.stringify(schema);
-    // JSON-Modus, wo unterstuetzt. DeepSeek-Reasoner kennt ihn nicht; lokale
-    // Server (Ollama, LM Studio) unterstuetzen ihn.
-    if (isLocal || model === "deepseek-chat") {
+    // JSON-Modus nur fuer DeepSeek-Chat. Neuere LM-Studio-Versionen lehnen
+    // response_format.type "json_object" mit HTTP 400 ab (akzeptieren nur noch
+    // "json_schema" oder "text"), und Ollama-Versionen verhalten sich ebenfalls
+    // uneinheitlich. Fuer lokale Server verlassen wir uns daher allein auf das
+    // in den Prompt eingebettete Schema; parseJsonLoose toleriert Beiwerk.
+    if (model === "deepseek-chat") {
       body.response_format = { type: "json_object" };
     }
   } else {

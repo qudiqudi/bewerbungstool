@@ -77,7 +77,7 @@
       </div>
       <div id="ob-baseurl-wrap" class="hidden">
         <input type="text" id="ob-base-url" placeholder="http://localhost:1234/v1" autocomplete="off" spellcheck="false" aria-label="Adresse des lokalen Modellservers">
-        <p class="hint">Das ist die Adresse, unter der LM Studio auf deinem Rechner läuft – normalerweise musst du hier nichts ändern.</p>
+        <p class="hint">Das ist die Adresse, unter der LM Studio auf deinem Rechner läuft – an der Adresse musst du normalerweise nichts ändern. Wichtig: Aktiviere in LM Studio im Server-Tab („Developer“) die Option „Enable CORS“ und starte den Server neu – sonst blockt der Browser den Zugriff von dieser Seite. Klappt die Verbindung nicht, probiere <code>127.0.0.1</code> statt <code>localhost</code>.</p>
         <details id="ob-local-advanced" class="ob-advanced">
           <summary>Lieber Ollama benutzen? (etwas technischer, mit Terminal)</summary>
           <ol>
@@ -117,7 +117,7 @@
       <div id="row-base-url" class="hidden">
         <label for="base-url">Adresse des lokalen Servers</label>
         <input type="text" id="base-url" placeholder="http://localhost:11434/v1" autocomplete="off" spellcheck="false">
-        <p class="hint">Ollama: <code>http://localhost:11434/v1</code> · LM Studio: <code>http://localhost:1234/v1</code>. Es werden keine Daten an einen Anbieter gesendet, alles bleibt auf deinem Rechner.</p>
+        <p class="hint">Ollama: <code>http://localhost:11434/v1</code> · LM Studio: <code>http://localhost:1234/v1</code>. Es werden keine Daten an einen Anbieter gesendet, alles bleibt auf deinem Rechner. Wichtig: Damit diese Seite über https auf den lokalen Server zugreifen darf, muss er Cross-Origin-Anfragen erlauben – in LM Studio im Server-Tab die Option „Enable CORS“ aktivieren, bei Ollama den Server mit <code>OLLAMA_ORIGINS</code> starten. Klappt die Verbindung mit <code>localhost</code> nicht, probiere <code>127.0.0.1</code>.</p>
       </div>
 
       <label for="model">Modell</label>
