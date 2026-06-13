@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.25";
+const APP_VERSION = "1.0.26";
 
 const CHANGELOG = [
+  {
+    version: "1.0.26",
+    date: "14.06.2026",
+    items: [
+      "Stellenseite: Schwierigkeitsgrad und Fragenzahl stehen jetzt direkt über den Startknöpfen, statt hinter „Optionen“ versteckt zu sein. Du siehst und änderst die Einstellungen mit einem Blick, bevor du einen Test startest.",
+    ],
+  },
   {
     version: "1.0.25",
     date: "14.06.2026",
@@ -2913,43 +2920,17 @@ function normalizeTestConfig(c) {
   return { mode: c2.mode === "pruefung" ? "pruefung" : "lernen", difficulty: valid(c2.difficulty), num: snapNum(num) };
 }
 
-// Start-Panel der Subpage: zwei Knoepfe (Lern-/Pruefungsmodus) mit den zuletzt
-// genutzten Optionen plus ein aufklappbarer Optionen-Bereich. Generiert wird
-// erst beim ausdruecklichen Klick - kein versehentlicher Kosten-Trigger.
+// Start-Panel der Subpage: Schwierigkeit und Fragenzahl stehen direkt sichtbar
+// ueber zwei Startknoepfen (Lern-/Pruefungsmodus) - kein aufklappbarer Bereich
+// mehr. Generiert wird erst beim ausdruecklichen Klick auf einen Startknopf,
+// damit nichts versehentlich Kosten ausloest.
 function buildStartPanel(job) {
   const state = normalizeTestConfig(job.lastTestConfig);
   const panel = document.createElement("div");
   panel.className = "start-panel";
 
-  const btnRow = document.createElement("div");
-  btnRow.className = "start-buttons";
-  const lernBtn = document.createElement("button");
-  lernBtn.className = "primary";
-  const pruefBtn = document.createElement("button");
-  pruefBtn.className = "primary";
-  function refreshLabels() {
-    const meta = `${difficultyLabel(state.difficulty)} · ${state.num} Fragen`;
-    lernBtn.textContent = `Lernmodus starten — ${meta}`;
-    pruefBtn.textContent = `Prüfungsmodus starten — ${meta}`;
-  }
-  refreshLabels();
-  lernBtn.addEventListener("click", () => startTestForJob(job, "lernen", state));
-  pruefBtn.addEventListener("click", () => startTestForJob(job, "pruefung", state));
-  btnRow.appendChild(lernBtn);
-  btnRow.appendChild(pruefBtn);
-  panel.appendChild(btnRow);
-
-  const optToggle = document.createElement("button");
-  optToggle.className = "ghost options-toggle";
-  optToggle.type = "button";
-  optToggle.textContent = "Optionen";
-  const opts = document.createElement("div");
-  opts.className = "start-options hidden";
-  optToggle.addEventListener("click", () => {
-    const open = opts.classList.toggle("hidden");
-    optToggle.classList.toggle("active", !open);
-  });
-  panel.appendChild(optToggle);
+  const controls = document.createElement("div");
+  controls.className = "start-controls";
 
   // Schwierigkeit
   const diffWrap = document.createElement("div");
@@ -2969,12 +2950,11 @@ function buildStartPanel(job) {
       state.difficulty = val;
       diffBtns.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
       b.classList.add("active");
-      refreshLabels();
     });
     diffBtns.appendChild(b);
   });
   diffWrap.appendChild(diffBtns);
-  opts.appendChild(diffWrap);
+  controls.appendChild(diffWrap);
 
   // Anzahl Fragen
   const numWrap = document.createElement("div");
@@ -2991,14 +2971,26 @@ function buildStartPanel(job) {
     if (n === state.num) o.selected = true;
     numSel.appendChild(o);
   });
-  numSel.addEventListener("change", () => {
-    state.num = Number(numSel.value);
-    refreshLabels();
-  });
+  numSel.addEventListener("change", () => { state.num = Number(numSel.value); });
   numWrap.appendChild(numSel);
-  opts.appendChild(numWrap);
+  controls.appendChild(numWrap);
 
-  panel.appendChild(opts);
+  panel.appendChild(controls);
+
+  const btnRow = document.createElement("div");
+  btnRow.className = "start-buttons";
+  const lernBtn = document.createElement("button");
+  lernBtn.className = "primary";
+  lernBtn.textContent = "Lernmodus starten";
+  const pruefBtn = document.createElement("button");
+  pruefBtn.className = "primary";
+  pruefBtn.textContent = "Prüfungsmodus starten";
+  lernBtn.addEventListener("click", () => startTestForJob(job, "lernen", state));
+  pruefBtn.addEventListener("click", () => startTestForJob(job, "pruefung", state));
+  btnRow.appendChild(lernBtn);
+  btnRow.appendChild(pruefBtn);
+  panel.appendChild(btnRow);
+
   return panel;
 }
 

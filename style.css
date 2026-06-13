@@ -1087,14 +1087,11 @@ button.ghost {
 .start-panel { margin: 0.4rem 0 1rem; }
 .start-buttons { display: flex; flex-direction: column; gap: 0.5rem; }
 .start-buttons .primary { width: 100%; }
-.options-toggle { margin-top: 0.5rem; padding: 0.4rem 0.7rem; font-size: 0.85rem; }
-.options-toggle.active { border-color: var(--border-strong); }
-.start-options {
-  margin-top: 0.6rem;
-  padding: 0.8rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--card-2);
+.start-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 0.8rem;
 }
 .start-opt-row {
   display: flex;
@@ -1102,7 +1099,6 @@ button.ghost {
   justify-content: space-between;
   gap: 0.8rem;
 }
-.start-opt-row + .start-opt-row { margin-top: 0.6rem; }
 .start-opt-label { font-size: 0.85rem; color: var(--muted); }
 .start-opt-choices { display: flex; gap: 0.4rem; }
 .chip {
