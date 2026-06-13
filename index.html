@@ -55,13 +55,29 @@
         <option value="anthropic">Claude (Anthropic) – empfohlen, beste Ergebnisse</option>
         <option value="openai">OpenAI (ChatGPT-Modelle)</option>
         <option value="deepseek">DeepSeek – am günstigsten</option>
+        <option value="local">Lokales Modell (Ollama / LM Studio) – kostenlos, läuft auf deinem Rechner</option>
       </select>
 
-      <h3><span class="step-num">2</span> API-Schlüssel erstellen</h3>
+      <h3><span class="step-num">2</span> <span id="ob-step2-title">API-Schlüssel erstellen</span></h3>
       <ol id="ob-steps"></ol>
 
-      <h3><span class="step-num">3</span> Schlüssel einfügen und testen</h3>
-      <input type="password" id="ob-key" placeholder="API-Schlüssel hier einfügen" autocomplete="off">
+      <h3><span class="step-num">3</span> <span id="ob-step3-title">Schlüssel einfügen und testen</span></h3>
+      <div id="ob-key-wrap">
+        <input type="password" id="ob-key" placeholder="API-Schlüssel hier einfügen" autocomplete="off">
+      </div>
+      <div id="ob-baseurl-wrap" class="hidden">
+        <input type="text" id="ob-base-url" placeholder="http://localhost:1234/v1" autocomplete="off" spellcheck="false">
+        <p class="hint">Das ist die Adresse, unter der LM Studio auf deinem Rechner läuft – normalerweise muss hier nichts geändert werden.</p>
+        <details id="ob-local-advanced" class="ob-advanced">
+          <summary>Lieber Ollama benutzen? (etwas technischer, mit Terminal)</summary>
+          <ol>
+            <li>Ollama installieren von <a href="https://ollama.com" target="_blank" rel="noopener noreferrer">ollama.com</a>.</li>
+            <li>Im Terminal ein Modell laden (mindestens etwa 8B):<code class="ob-code">ollama pull llama3.1:8b</code></li>
+            <li>Den Server so starten, dass diese Seite zugreifen darf:<code class="ob-code" id="ob-ollama-cmd"></code></li>
+            <li>Oben die Adresse auf <code>http://localhost:11434/v1</code> ändern und auf „Verbindung testen“ klicken.</li>
+          </ol>
+        </details>
+      </div>
       <p id="ob-status" class="hint" role="status"></p>
 
       <div class="row">
@@ -78,17 +94,35 @@
         <option value="anthropic">Claude (Anthropic)</option>
         <option value="openai">OpenAI</option>
         <option value="deepseek">DeepSeek</option>
+        <option value="local">Lokales Modell (Ollama / LM Studio)</option>
       </select>
 
-      <label for="api-key">API-Key</label>
-      <input type="password" id="api-key" placeholder="sk-..." autocomplete="off">
-      <p class="hint">Der Key wird nur lokal in deinem Browser gespeichert und direkt an den Anbieter gesendet.</p>
+      <div id="row-api-key">
+        <label for="api-key">API-Key</label>
+        <input type="password" id="api-key" placeholder="sk-..." autocomplete="off">
+        <p class="hint">Der Key wird nur lokal in deinem Browser gespeichert und direkt an den Anbieter gesendet.</p>
+      </div>
+
+      <div id="row-base-url" class="hidden">
+        <label for="base-url">Adresse des lokalen Servers</label>
+        <input type="text" id="base-url" placeholder="http://localhost:11434/v1" autocomplete="off" spellcheck="false">
+        <p class="hint">Ollama: <code>http://localhost:11434/v1</code> · LM Studio: <code>http://localhost:1234/v1</code>. Es werden keine Daten an einen Anbieter gesendet, alles bleibt auf deinem Rechner.</p>
+      </div>
 
       <label for="model">Modell</label>
       <select id="model"></select>
+      <div id="row-local-models" class="hidden">
+        <div class="row wrap">
+          <button id="btn-load-models" type="button" class="ghost">Modelle laden</button>
+        </div>
+        <p id="local-models-status" class="hint" role="status"></p>
+      </div>
       <p id="model-desc" class="hint"></p>
-      <p class="hint">Die Kostenangabe je Modell ist eine grobe Schätzung für einen Test mit etwa 10 Fragen (Erstellen samt Stellenanzeige und Auswerten). Die tatsächlichen Kosten hängen von Länge der Anzeige, Anzahl der Fragen und Denkaufwand des Modells ab; abgerechnet wird direkt beim Anbieter.</p>
-      <p class="hint">Es stehen bewusst nur leistungsstarke Modelle zur Auswahl: Kleine Modelle (z.&nbsp;B. Haiku oder die Mini-Varianten) erzeugen keine zuverlässig strukturierten Fragenkataloge und bewerten Antworten zu oberflächlich.</p>
+      <div id="row-cloud-hints">
+        <p class="hint">Die Kostenangabe je Modell ist eine grobe Schätzung für einen Test mit etwa 10 Fragen (Erstellen samt Stellenanzeige und Auswerten). Die tatsächlichen Kosten hängen von Länge der Anzeige, Anzahl der Fragen und Denkaufwand des Modells ab; abgerechnet wird direkt beim Anbieter.</p>
+        <p class="hint">Es stehen bewusst nur leistungsstarke Modelle zur Auswahl: Kleine Modelle (z.&nbsp;B. Haiku oder die Mini-Varianten) erzeugen keine zuverlässig strukturierten Fragenkataloge und bewerten Antworten zu oberflächlich.</p>
+      </div>
+      <p id="hint-local" class="hint hidden">Lokale Modelle laufen kostenlos auf deinem Rechner, sind aber meist kleiner als die Cloud-Modelle: Fragen und Bewertung können dadurch oberflächlicher ausfallen. Für brauchbare Ergebnisse empfiehlt sich ein größeres Modell (ab ca. 8B, z.&nbsp;B. <code>llama3.1:8b</code> oder <code>qwen2.5:7b</code>).</p>
 
       <div class="row">
         <button id="btn-save-settings" class="primary">Speichern</button>

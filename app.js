@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.6";
+const APP_VERSION = "1.0.7";
 
 const CHANGELOG = [
+  {
+    version: "1.0.7",
+    date: "13.06.2026",
+    items: [
+      "Neuer Anbieter „Lokales Modell“: Tests lassen sich jetzt kostenlos und datenschutzfreundlich mit einem lokal laufenden Modell (Ollama oder LM Studio) erstellen und auswerten – die installierten Modelle werden direkt aus dem lokalen Server geladen. Hinweis: Kleine lokale Modelle liefern oberflächlichere Fragen und Bewertungen als die Cloud-Modelle.",
+    ],
+  },
   {
     version: "1.0.6",
     date: "13.06.2026",
@@ -132,8 +139,46 @@ const MODELS = {
   ],
 };
 
+// Lokale Modelle (Ollama / LM Studio) haben keinen festen Katalog: Welche
+// Modelle bereitstehen, haengt davon ab, was der Nutzer lokal installiert hat.
+// Sie werden daher zur Laufzeit vom Server abgefragt (fetchLocalModels).
+MODELS.local = [];
+
 function modelsFor(provider) {
   return MODELS[provider] || MODELS.anthropic;
+}
+
+/* ---------- Lokaler Anbieter (Ollama / LM Studio) ---------- */
+
+// OpenAI-kompatible Standardadresse von Ollama. LM Studio nutzt :1234/v1.
+const LOCAL_BASE_DEFAULT = "http://localhost:11434/v1";
+
+// Vereinheitlicht eine eingegebene Server-Adresse: Leerwert -> Standard,
+// abschliessende Schraegstriche weg (sonst entstehen doppelte Slashes).
+function normalizeBaseUrl(raw) {
+  const base = (raw || "").trim() || LOCAL_BASE_DEFAULT;
+  return base.replace(/\/+$/, "");
+}
+
+// Aktuell gespeicherte Server-Adresse des lokalen Anbieters.
+function localBaseUrl() {
+  return normalizeBaseUrl(settings.baseUrl);
+}
+
+// Fragt die installierten Modelle am OpenAI-kompatiblen /models-Endpunkt ab.
+// Gibt ein Array von Modell-IDs zurueck, oder null, wenn keine Verbindung
+// zustande kommt (Server aus, falsche Adresse, CORS geblockt).
+async function fetchLocalModels(rawBaseUrl) {
+  let res;
+  try {
+    res = await fetch(normalizeBaseUrl(rawBaseUrl) + "/models");
+  } catch {
+    return null;
+  }
+  if (!res.ok) return null;
+  const data = await res.json().catch(() => null);
+  const list = data && Array.isArray(data.data) ? data.data : [];
+  return list.map((m) => m && m.id).filter(Boolean);
 }
 
 /* ---------- Kosten (US-Dollar) ---------- */
@@ -473,16 +518,25 @@ async function readSSEText(res, extractDelta, onChunk) {
 }
 
 async function callLLM(systemPrompt, userPrompt, schema, onProgress) {
-  if (!settings.apiKey) {
+  const provider = settings.provider || "anthropic";
+  // Lokale Modelle brauchen keinen Key (laufen ohne Anbieter-Konto).
+  if (provider !== "local" && !settings.apiKey) {
     throw new Error("Kein API-Key hinterlegt. Bitte zuerst die Einstellungen ausfüllen.");
   }
-  const provider = settings.provider || "anthropic";
-  const catalog = modelsFor(provider);
-  const model = catalog.some((m) => m.id === settings.model)
-    ? settings.model
-    : catalog[0].id;
+
+  let model;
+  if (provider === "local") {
+    model = (settings.model || "").trim();
+    if (!model) {
+      throw new Error("Kein lokales Modell ausgewählt. Bitte in den Einstellungen ein Modell laden und auswählen.");
+    }
+  } else {
+    const catalog = modelsFor(provider);
+    model = catalog.some((m) => m.id === settings.model) ? settings.model : catalog[0].id;
+  }
 
   if (provider === "anthropic") {
+    const catalog = modelsFor(provider);
     // Per-Modell-Tuning: Sonnet denkt bei dieser Aufgabe sonst minutenlang
     // (gemessen ~148s vor dem ersten Token); Opus bleibt auf dem
     // Qualitaets-Default
@@ -546,9 +600,16 @@ async function callLLM(systemPrompt, userPrompt, schema, onProgress) {
     return { data: parseJsonLoose(text), cost: callCost(model, inputTokens, outputTokens) };
   }
 
-  // OpenAI und DeepSeek (OpenAI-kompatible API)
+  // OpenAI, DeepSeek und lokale Modelle (Ollama / LM Studio) sprechen alle
+  // dieselbe OpenAI-kompatible Chat-Completions-API.
   const isDeepseek = provider === "deepseek";
-  const endpoint = isDeepseek
+  const isLocal = provider === "local";
+  // Weder DeepSeek noch die meisten lokalen Modelle beherrschen striktes
+  // JSON-Schema zuverlaessig - dort wird das Schema in den Prompt gelegt.
+  const embedSchema = isDeepseek || isLocal;
+  const endpoint = isLocal
+    ? localBaseUrl() + "/chat/completions"
+    : isDeepseek
     ? "https://api.deepseek.com/chat/completions"
     : "https://api.openai.com/v1/chat/completions";
 
@@ -563,13 +624,14 @@ async function callLLM(systemPrompt, userPrompt, schema, onProgress) {
     ],
   };
 
-  if (isDeepseek) {
-    // DeepSeek kennt kein striktes JSON-Schema, nur einen JSON-Modus.
-    // Das Schema wird daher im Prompt mitgegeben.
+  if (embedSchema) {
+    // Schema in den Prompt geben (kein striktes json_schema verfuegbar).
     body.messages[0].content +=
       "\n\nAntworte ausschliesslich mit einem JSON-Objekt, das exakt diesem JSON-Schema entspricht (keine Erklaerungen, kein Markdown):\n" +
       JSON.stringify(schema);
-    if (model === "deepseek-chat") {
+    // JSON-Modus, wo unterstuetzt. DeepSeek-Reasoner kennt ihn nicht; lokale
+    // Server (Ollama, LM Studio) unterstuetzen ihn.
+    if (isLocal || model === "deepseek-chat") {
       body.response_format = { type: "json_object" };
     }
   } else {
@@ -579,14 +641,24 @@ async function callLLM(systemPrompt, userPrompt, schema, onProgress) {
     };
   }
 
-  const res = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${settings.apiKey}`,
-    },
-    body: JSON.stringify(body),
-  });
+  const headers = { "Content-Type": "application/json" };
+  // Lokale Server brauchen keinen Key; ist trotzdem einer gesetzt (manche
+  // LM-Studio-Konfigurationen), wird er mitgeschickt.
+  if (settings.apiKey) headers.Authorization = `Bearer ${settings.apiKey}`;
+
+  let res;
+  try {
+    res = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    if (isLocal) {
+      throw new Error("Keine Verbindung zum lokalen Modellserver. Läuft Ollama bzw. LM Studio, und ist die Adresse in den Einstellungen korrekt? Bei Aufruf über https muss der Server zudem Cross-Origin-Anfragen dieser Seite erlauben (z. B. OLLAMA_ORIGINS).");
+    }
+    throw e;
+  }
 
   if (!res.ok) {
     const err = await res.json().catch(() => null);
@@ -1527,6 +1599,27 @@ const ONBOARDING_STEPS = {
     { text: "Unter „API Keys“ einen neuen Schlüssel erstellen" },
     { text: "Den Schlüssel kopieren (beginnt mit sk-) – er wird nur einmal angezeigt" },
   ],
+  local: [
+    { text: "Lade die kostenlose App „LM Studio“ herunter und installiere sie von", link: "https://lmstudio.ai", label: "lmstudio.ai", note: "für Windows, Mac und Linux – kein Fachwissen nötig" },
+    { text: "Öffne in LM Studio links die Lupe (Suche), tippe „Llama 3.1 8B“ ein und klicke bei einem Treffer auf „Download“. Tipp: Modelle ab etwa 8B liefern brauchbare Ergebnisse; größere sind besser, brauchen aber mehr Arbeitsspeicher." },
+    { text: "Klicke links auf „Developer“ (bzw. „Local Server“), schalte den Server oben auf „Running“ und setze das Häkchen bei „Enable CORS“ – das erlaubt dieser Seite den Zugriff." },
+    { text: "Fertig: Unten steht die Adresse schon passend für LM Studio. Klicke auf „Verbindung testen und Modelle laden“." },
+  ],
+};
+
+// Texte und Felder des Onboardings je nach Anbieter (lokal hat keinen Key,
+// dafuer eine Server-Adresse).
+const ONBOARDING_UI = {
+  local: {
+    step2: "Modell auf deinen Rechner holen",
+    step3: "Mit dem lokalen Modell verbinden",
+    button: "Verbindung testen und Modelle laden",
+  },
+  default: {
+    step2: "API-Schlüssel erstellen",
+    step3: "Schlüssel einfügen und testen",
+    button: "Verbindung testen und loslegen",
+  },
 };
 
 function renderOnboardingSteps(provider) {
@@ -1543,8 +1636,31 @@ function renderOnboardingSteps(provider) {
       a.textContent = step.label;
       li.appendChild(a);
     }
+    if (step.note) {
+      li.appendChild(document.createTextNode(" (" + step.note + ")"));
+    }
+    if (step.code) {
+      const code = document.createElement("code");
+      code.className = "ob-code";
+      code.textContent = step.code;
+      li.appendChild(code);
+    }
     ol.appendChild(li);
   });
+
+  const ui = ONBOARDING_UI[provider] || ONBOARDING_UI.default;
+  $("ob-step2-title").textContent = ui.step2;
+  $("ob-step3-title").textContent = ui.step3;
+  $("btn-ob-test").textContent = ui.button;
+  const isLocal = provider === "local";
+  $("ob-key-wrap").classList.toggle("hidden", isLocal);
+  $("ob-baseurl-wrap").classList.toggle("hidden", !isLocal);
+  if (isLocal) {
+    // Empfohlener (non-techy) Weg ist LM Studio -> Adresse vorbefuellen
+    if (!$("ob-base-url").value.trim()) $("ob-base-url").value = "http://localhost:1234/v1";
+    // Ollama-Befehl mit der tatsaechlichen Adresse dieser Seite
+    $("ob-ollama-cmd").textContent = "OLLAMA_ORIGINS=" + location.origin + " ollama serve";
+  }
 }
 
 // Kostenloser Verbindungstest ueber den Models-Endpoint des Anbieters
@@ -1571,15 +1687,34 @@ $("ob-provider").addEventListener("change", () => renderOnboardingSteps($("ob-pr
 
 $("btn-ob-test").addEventListener("click", async () => {
   const provider = $("ob-provider").value;
-  const key = $("ob-key").value.trim();
   const status = $("ob-status");
-  if (!key) {
-    status.textContent = "Bitte zuerst den API-Schlüssel einfügen.";
-    return;
-  }
-  status.textContent = "Verbindung wird getestet...";
   $("btn-ob-test").disabled = true;
   try {
+    if (provider === "local") {
+      const baseUrl = $("ob-base-url").value.trim();
+      status.textContent = "Verbindung zum lokalen Server wird getestet...";
+      const models = await fetchLocalModels(baseUrl);
+      if (models === null) {
+        status.textContent = "Keine Verbindung zum lokalen Server. Läuft Ollama bzw. LM Studio, stimmt die Adresse, und erlaubt der Server Anfragen dieser Seite (OLLAMA_ORIGINS bzw. CORS)?";
+        return;
+      }
+      if (models.length === 0) {
+        status.textContent = "Verbindung steht, aber es ist noch kein Modell installiert. Bitte zuerst eines laden, z. B. „ollama pull llama3.1:8b“.";
+        return;
+      }
+      settings = { provider, apiKey: "", baseUrl: normalizeBaseUrl(baseUrl), model: models[0] };
+      saveSettings(settings);
+      status.textContent = "";
+      showView("view-input");
+      return;
+    }
+
+    const key = $("ob-key").value.trim();
+    if (!key) {
+      status.textContent = "Bitte zuerst den API-Schlüssel einfügen.";
+      return;
+    }
+    status.textContent = "Verbindung wird getestet...";
     const ok = await validateKey(provider, key);
     if (ok) {
       settings = { provider, apiKey: key, model: modelsFor(provider)[0].id };
@@ -1625,15 +1760,58 @@ function populateModelSelect(provider, selectedId) {
   updateModelDesc();
 }
 
+// Fuellt die Modellauswahl fuer den lokalen Anbieter aus einer Liste von
+// Modell-IDs. Das aktuell gewaehlte Modell bleibt erhalten, auch wenn es
+// gerade nicht in der Liste steht (z. B. weil der Server gerade aus ist).
+function populateLocalModelSelect(models, selectedId) {
+  const select = $("model");
+  select.innerHTML = "";
+  const ids = Array.isArray(models) ? models.slice() : [];
+  if (selectedId && !ids.includes(selectedId)) ids.unshift(selectedId);
+  ids.forEach((id) => {
+    const opt = document.createElement("option");
+    opt.value = id;
+    opt.textContent = id;
+    select.appendChild(opt);
+  });
+  if (selectedId && ids.includes(selectedId)) select.value = selectedId;
+  updateModelDesc();
+}
+
 function updateModelDesc() {
-  const m = modelsFor($("provider").value).find((x) => x.id === $("model").value);
+  const provider = $("provider").value;
+  if (provider === "local") {
+    $("model-desc").textContent = $("model").value
+      ? "Lokales Modell – kostenlos, läuft auf deinem Rechner."
+      : "Noch kein Modell ausgewählt – auf „Modelle laden“ klicken.";
+    return;
+  }
+  const m = modelsFor(provider).find((x) => x.id === $("model").value);
   $("model-desc").textContent = m ? m.desc : "";
+}
+
+// Blendet je nach Anbieter die passenden Felder ein (lokal: keine Key-Eingabe,
+// dafuer Server-Adresse, „Modelle laden“ und der Hinweis zu kleinen Modellen).
+function updateSettingsProviderUI() {
+  const isLocal = $("provider").value === "local";
+  $("row-api-key").classList.toggle("hidden", isLocal);
+  $("row-base-url").classList.toggle("hidden", !isLocal);
+  $("row-local-models").classList.toggle("hidden", !isLocal);
+  $("row-cloud-hints").classList.toggle("hidden", isLocal);
+  $("hint-local").classList.toggle("hidden", !isLocal);
 }
 
 function initSettingsForm() {
   $("provider").value = settings.provider || "anthropic";
   $("api-key").value = settings.apiKey || "";
-  populateModelSelect($("provider").value, settings.model);
+  $("base-url").value = settings.baseUrl || "";
+  updateSettingsProviderUI();
+  if ($("provider").value === "local") {
+    populateLocalModelSelect([], settings.model);
+    $("local-models-status").textContent = "";
+  } else {
+    populateModelSelect($("provider").value, settings.model);
+  }
 }
 
 $("btn-settings").addEventListener("click", () => {
@@ -1643,17 +1821,49 @@ $("btn-settings").addEventListener("click", () => {
 });
 
 $("provider").addEventListener("change", () => {
-  populateModelSelect($("provider").value);
+  updateSettingsProviderUI();
+  if ($("provider").value === "local") {
+    // Modell-ID nur uebernehmen, wenn vorher schon lokal gewaehlt war
+    const keep = settings.provider === "local" ? settings.model : "";
+    populateLocalModelSelect([], keep);
+    $("local-models-status").textContent = "Auf „Modelle laden“ klicken, um die installierten Modelle anzuzeigen.";
+  } else {
+    populateModelSelect($("provider").value, settings.model);
+  }
 });
 
 $("model").addEventListener("change", updateModelDesc);
 
+$("btn-load-models").addEventListener("click", async () => {
+  const status = $("local-models-status");
+  const baseUrl = $("base-url").value.trim();
+  $("btn-load-models").disabled = true;
+  status.textContent = "Modelle werden geladen...";
+  try {
+    const models = await fetchLocalModels(baseUrl);
+    if (models === null) {
+      status.textContent = "Keine Verbindung. Läuft der Server, stimmt die Adresse, und erlaubt er Anfragen dieser Seite (OLLAMA_ORIGINS bzw. CORS)?";
+    } else if (models.length === 0) {
+      status.textContent = "Verbindung steht, aber es ist kein Modell installiert (z. B. „ollama pull llama3.1:8b“).";
+    } else {
+      const keep = $("model").value;
+      populateLocalModelSelect(models, models.includes(keep) ? keep : models[0]);
+      status.textContent = models.length + (models.length === 1 ? " Modell" : " Modelle") + " gefunden.";
+    }
+  } finally {
+    $("btn-load-models").disabled = false;
+  }
+});
+
 $("btn-save-settings").addEventListener("click", () => {
+  const provider = $("provider").value;
   settings = {
-    provider: $("provider").value,
+    provider,
     apiKey: $("api-key").value.trim(),
     model: $("model").value.trim(),
   };
+  // Server-Adresse nur fuer den lokalen Anbieter sichern (optionales Feld)
+  if (provider === "local") settings.baseUrl = normalizeBaseUrl($("base-url").value);
   saveSettings(settings);
   showView(returnView);
 });
