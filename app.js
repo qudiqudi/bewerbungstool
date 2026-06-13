@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.2";
+const APP_VERSION = "1.0.3";
 
 const CHANGELOG = [
+  {
+    version: "1.0.3",
+    date: "13.06.2026",
+    items: [
+      "Historie und Einstellungen führen zurück zum laufenden Test bzw. zur offenen Auswertung statt zur Startseite – ein angefangener Test geht dadurch nicht mehr verloren.",
+    ],
+  },
   {
     version: "1.0.2",
     date: "13.06.2026",
@@ -252,6 +259,27 @@ const views = ["view-onboarding", "view-settings", "view-input", "view-quiz", "v
 
 function showView(id) {
   views.forEach((v) => $(v).classList.toggle("hidden", v !== id));
+}
+
+function currentView() {
+  return views.find((v) => !$(v).classList.contains("hidden")) || "view-input";
+}
+
+// Merkt sich beim Oeffnen von Historie/Einstellungen, wohin Zurueck/Abbrechen/
+// Speichern fuehren sollen: zurueck zu einem laufenden Test (view-quiz) bzw.
+// einer offenen Auswertung (view-result) statt immer zur Eingabe - sonst waere
+// ein angefangener Test ueber die Kopfzeilen-Buttons unwiederbringlich weg.
+let returnView = "view-input";
+
+function rememberReturnView() {
+  const cv = currentView();
+  if (cv === "view-quiz" || cv === "view-result") {
+    returnView = cv;
+  } else if (cv !== "view-history" && cv !== "view-settings") {
+    // Wechsel zwischen Historie und Einstellungen erbt das Ziel; alles
+    // andere (Eingabe, Onboarding) setzt es zurueck
+    returnView = "view-input";
+  }
 }
 
 let loadingTicker = null;
@@ -1558,6 +1586,7 @@ function initSettingsForm() {
 }
 
 $("btn-settings").addEventListener("click", () => {
+  rememberReturnView();
   initSettingsForm();
   showView("view-settings");
 });
@@ -1575,10 +1604,10 @@ $("btn-save-settings").addEventListener("click", () => {
     model: $("model").value.trim(),
   };
   saveSettings(settings);
-  showView("view-input");
+  showView(returnView);
 });
 
-$("btn-cancel-settings").addEventListener("click", () => showView("view-input"));
+$("btn-cancel-settings").addEventListener("click", () => showView(returnView));
 
 /* ---------- Daten-Export / -Import (Umzug zwischen Adressen/Browsern) ---------- */
 
@@ -1741,11 +1770,12 @@ $("btn-review-questions").addEventListener("click", () => {
 });
 
 $("btn-history").addEventListener("click", () => {
+  rememberReturnView();
   renderHistory();
   showView("view-history");
 });
 
-$("btn-history-back").addEventListener("click", () => showView("view-input"));
+$("btn-history-back").addEventListener("click", () => showView(returnView));
 
 // Farbschema-Schalter (Auto -> Hell -> Dunkel -> Auto)
 syncThemeButton(loadTheme());
