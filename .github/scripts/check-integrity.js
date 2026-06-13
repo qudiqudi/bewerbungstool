@@ -72,6 +72,30 @@ const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
   .filter((ref) => !/^(https?:|mailto:|data:|#)/.test(ref))
   .forEach((ref) => checkExists(ref.split(/[?#]/)[0], "index.html"));
 
+// CSP: Der Hash des Inline-Skripts in der Content-Security-Policy muss zum
+// tatsächlichen Inline-Skript passen, sonst blockt der Browser es (stiller
+// Bruch in Produktion). Hier hart prüfen, damit ein geändertes Inline-Skript
+// ohne aktualisierten Hash den CI-Check rot macht.
+// Inline-Skript bewusst ohne Regex extrahieren: eine Tag-Filter-Regex würde
+// Groß-/Kleinschreibung und Attribute übersehen. Das Inline-Theme-Skript steht
+// als attributloses <script> ganz oben; per indexOf bleibt der Hash exakt der
+// Bytebereich zwischen den Tags (identisch zu dem, was der Browser hasht).
+const SCRIPT_OPEN = "<script>";
+const sOpen = html.indexOf(SCRIPT_OPEN);
+const sClose = sOpen === -1 ? -1 : html.indexOf("</script>", sOpen + SCRIPT_OPEN.length);
+const cspMeta = html.match(/http-equiv="Content-Security-Policy"\s+content="([^"]*)"/);
+if (sOpen === -1 || sClose === -1) {
+  errors.push("index.html: Inline-Skript nicht gefunden (für den CSP-Hash erwartet)");
+} else if (!cspMeta) {
+  errors.push("index.html: Content-Security-Policy-Meta nicht gefunden");
+} else {
+  const inlineBody = html.slice(sOpen + SCRIPT_OPEN.length, sClose);
+  const want = "sha256-" + require("crypto").createHash("sha256").update(inlineBody, "utf8").digest("base64");
+  if (!cspMeta[1].includes(want)) {
+    errors.push(`index.html: CSP-Skript-Hash passt nicht zum Inline-Skript (erwartet '${want}'). Hash in der CSP-Meta aktualisieren.`);
+  }
+}
+
 if (errors.length > 0) {
   console.error("Integritätsprüfung fehlgeschlagen:");
   errors.forEach((e) => console.error(`  - ${e}`));

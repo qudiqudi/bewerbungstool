@@ -23,7 +23,12 @@ const ASSETS = [
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting())
+    caches.open(CACHE)
+      // "reload" umgeht den HTTP-Cache des Browsers: ein frisch installierter
+      // Service Worker legt so garantiert die aktuellen Dateien ab und nicht
+      // bis zu 10 Minuten alte Versionen aus dem GitHub-Pages-Cache.
+      .then((cache) => cache.addAll(ASSETS.map((a) => new Request(a, { cache: "reload" }))))
+      .then(() => self.skipWaiting())
   );
 });
 
@@ -60,6 +65,16 @@ self.addEventListener("fetch", (event) => {
         }
         return res;
       })
-      .catch(() => caches.match(event.request))
+      .catch(async () => {
+        const hit = await caches.match(event.request);
+        if (hit) return hit;
+        // Offline und nicht im Cache: bei einer Seitennavigation (z. B. Reload
+        // einer Unteradresse) auf die gecachte App-Huelle zurueckfallen, damit
+        // die App offline laedt statt einer Browser-Fehlerseite.
+        if (event.request.mode === "navigate") {
+          return (await caches.match("index.html")) || (await caches.match("."));
+        }
+        return Response.error();
+      })
   );
 });

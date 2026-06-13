@@ -171,7 +171,9 @@ header h1 {
 }
 header h1 .brand-dot { color: oklch(0.9 0.07 45); }
 header h1 .brand-tld { font-weight: 500; opacity: 0.82; }
-header .subtitle { margin: 0.15rem 0 0; font-size: 0.85rem; opacity: 0.85; }
+/* Deckkraft so gewaehlt, dass weisser Text auf der Korall-Kopfzeile WCAG AA
+   (>= 4.5:1) erreicht und der Untertitel trotzdem leicht zurueckgenommen wirkt */
+header .subtitle { margin: 0.15rem 0 0; font-size: 0.85rem; opacity: 0.97; }
 
 .header-actions {
   display: flex;
@@ -181,7 +183,8 @@ header .subtitle { margin: 0.15rem 0 0; font-size: 0.85rem; opacity: 0.85; }
 
 .header-actions button {
   color: var(--header-on);
-  border-color: color-mix(in srgb, var(--header-on) 45%, transparent);
+  /* Sichtbarer Rand: hoeherer Weissanteil hebt den Nicht-Text-Kontrast (>= 3:1) */
+  border-color: color-mix(in srgb, var(--header-on) 60%, transparent);
   background: transparent;
 }
 

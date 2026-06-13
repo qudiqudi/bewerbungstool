@@ -3,6 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <!-- Content-Security-Policy als Defense-in-Depth. Scripts nur von hier (plus
+       der Hash des Inline-Theme-Skripts unten - wird er geaendert, muss der Hash
+       angepasst werden; der CI-Check erzwingt das). connect-src listet die
+       genutzten Dienste: KI-Anbieter und der Jina-Reader fuers URL-Laden. Neue
+       externe Hosts muessen hier ergaenzt werden, sonst blockt der Browser sie. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-AS03majGGAgYGEK0v1Hwe170PaXGMA1A1goCTG9ZANs='; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self' https://api.anthropic.com https://api.openai.com https://api.deepseek.com https://r.jina.ai; manifest-src 'self'; worker-src 'self'; base-uri 'none'; object-src 'none'; form-action 'self'">
   <meta name="theme-color" content="#c5543a" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#3a2a25" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#c5543a">
@@ -63,7 +69,7 @@
 
       <h3><span class="step-num">3</span> <span id="ob-step3-title">Schlüssel einfügen und testen</span></h3>
       <div id="ob-key-wrap">
-        <input type="password" id="ob-key" placeholder="API-Schlüssel hier einfügen" autocomplete="off">
+        <input type="password" id="ob-key" placeholder="API-Schlüssel hier einfügen" autocomplete="off" aria-label="API-Schlüssel">
       </div>
       <div id="ob-baseurl-wrap" class="hidden">
         <input type="text" id="ob-base-url" placeholder="http://localhost:1234/v1" autocomplete="off" spellcheck="false">
@@ -165,8 +171,8 @@
         <textarea id="job-text" rows="12" placeholder="Stellenbeschreibung hier einfügen..."></textarea>
       </div>
 
-      <label>Modus</label>
-      <div class="mode-row">
+      <label id="label-mode">Modus</label>
+      <div class="mode-row" role="radiogroup" aria-labelledby="label-mode">
         <label class="mode-option">
           <input type="radio" name="mode" value="lernen" checked>
           <span>
@@ -183,8 +189,8 @@
         </label>
       </div>
 
-      <label>Schwierigkeitsgrad</label>
-      <div class="diff-row">
+      <label id="label-difficulty">Schwierigkeitsgrad</label>
+      <div class="diff-row" role="radiogroup" aria-labelledby="label-difficulty">
         <label class="diff-option"><input type="radio" name="difficulty" value="leicht"> Leicht</label>
         <label class="diff-option"><input type="radio" name="difficulty" value="mittel" checked> Mittel</label>
         <label class="diff-option"><input type="radio" name="difficulty" value="schwer"> Schwer</label>
