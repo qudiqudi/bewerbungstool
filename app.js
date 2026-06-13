@@ -12,6 +12,7 @@ const CHANGELOG = [
     date: "13.06.2026",
     items: [
       "Lokaler Anbieter wieder nutzbar: Die Sicherheitsrichtlinie der Seite blockierte bisher jede Verbindung zum lokal laufenden Modell (Ollama oder LM Studio). Verbindungen zu localhost sind jetzt erlaubt, sodass „Verbindung testen und Modelle laden“ funktioniert.",
+      "Onboarding einsteigerfreundlicher: verständlichere Erklärung, wozu der API-Schlüssel dient, eine klare Empfehlung bei der Anbieterwahl und ausführlichere, vollständigere Schritte fürs lokale Modell (LM Studio und Ollama) inklusive der häufigen Stolpersteine.",
     ],
   },
   {
@@ -2016,28 +2017,28 @@ function openAttempt(job, att) {
 
 const ONBOARDING_STEPS = {
   anthropic: [
-    { text: "Konto erstellen auf", link: "https://console.anthropic.com", label: "console.anthropic.com" },
-    { text: "Links unter „Billing“ Guthaben aufladen (z. B. 5 $, Kreditkarte nötig)" },
-    { text: "Links unter „API Keys“ auf „Create Key“ klicken und einen beliebigen Namen vergeben" },
-    { text: "Den angezeigten Schlüssel kopieren (beginnt mit sk-ant-) – er wird nur einmal angezeigt" },
+    { text: "Lege ein kostenloses Konto an auf", link: "https://console.anthropic.com", label: "console.anthropic.com" },
+    { text: "Lade links unter „Billing“ etwas Guthaben auf – 5 $ reichen für viele Tests (eine Kreditkarte wird gebraucht)" },
+    { text: "Klicke links unter „API Keys“ auf „Create Key“ und gib einen beliebigen Namen ein (z. B. „Bewerbungstool“)" },
+    { text: "Kopiere den angezeigten Schlüssel (beginnt mit sk-ant-). Wichtig: Er wird nur dieses eine Mal gezeigt – kopiere ihn gleich und füge ihn unten ein" },
   ],
   openai: [
-    { text: "Konto erstellen auf", link: "https://platform.openai.com", label: "platform.openai.com" },
-    { text: "Unter „Settings“ → „Billing“ Guthaben aufladen (z. B. 5 $)" },
-    { text: "Unter „API Keys“ auf „Create new secret key“ klicken" },
-    { text: "Den Schlüssel kopieren (beginnt mit sk-) – er wird nur einmal angezeigt" },
+    { text: "Lege ein kostenloses Konto an auf", link: "https://platform.openai.com", label: "platform.openai.com" },
+    { text: "Lade unter „Settings“ → „Billing“ etwas Guthaben auf (z. B. 5 $)" },
+    { text: "Klicke unter „API Keys“ auf „Create new secret key“" },
+    { text: "Kopiere den Schlüssel (beginnt mit sk-). Wichtig: Er wird nur dieses eine Mal gezeigt – kopiere ihn gleich und füge ihn unten ein" },
   ],
   deepseek: [
-    { text: "Konto erstellen auf", link: "https://platform.deepseek.com", label: "platform.deepseek.com" },
-    { text: "Unter „Top up“ ein kleines Guthaben aufladen (schon 2 $ reichen lange)" },
-    { text: "Unter „API Keys“ einen neuen Schlüssel erstellen" },
-    { text: "Den Schlüssel kopieren (beginnt mit sk-) – er wird nur einmal angezeigt" },
+    { text: "Lege ein kostenloses Konto an auf", link: "https://platform.deepseek.com", label: "platform.deepseek.com" },
+    { text: "Lade unter „Top up“ ein kleines Guthaben auf – schon 2 $ reichen lange" },
+    { text: "Erstelle unter „API Keys“ einen neuen Schlüssel" },
+    { text: "Kopiere den Schlüssel (beginnt mit sk-). Wichtig: Er wird nur dieses eine Mal gezeigt – kopiere ihn gleich und füge ihn unten ein" },
   ],
   local: [
-    { text: "Lade die kostenlose App „LM Studio“ herunter und installiere sie von", link: "https://lmstudio.ai", label: "lmstudio.ai", note: "für Windows, Mac und Linux – kein Fachwissen nötig" },
-    { text: "Öffne in LM Studio links die Lupe (Suche), tippe „Llama 3.1 8B“ ein und klicke bei einem Treffer auf „Download“. Tipp: Modelle ab etwa 8B liefern brauchbare Ergebnisse; größere sind besser, brauchen aber mehr Arbeitsspeicher." },
-    { text: "Klicke links auf „Developer“ (bzw. „Local Server“), schalte den Server oben auf „Running“ und setze das Häkchen bei „Enable CORS“ – das erlaubt dieser Seite den Zugriff." },
-    { text: "Fertig: Unten steht die Adresse schon passend für LM Studio. Klicke auf „Verbindung testen und Modelle laden“." },
+    { text: "Lade die kostenlose App „LM Studio“ herunter, installiere sie und öffne sie:", link: "https://lmstudio.ai", label: "lmstudio.ai", note: "für Windows, Mac und Linux – kein Fachwissen nötig" },
+    { text: "Hol dir ein Modell auf den Rechner: Klicke links auf die Lupe (Suche), tippe „Llama 3.1 8B“ ein und klicke bei einem Treffer auf „Download“. Der Download ist einige Gigabyte groß und passiert nur einmal. Tipp: Modelle ab etwa 8B liefern brauchbare Ergebnisse, größere sind besser – sie brauchen aber mehr Arbeitsspeicher (etwa 8 GB frei sind empfehlenswert)." },
+    { text: "Schalte den lokalen Server an: Klicke links auf „Developer“ (in älteren Versionen „Local Server“) und stelle den Schalter oben auf „Running“. Wichtig: Setze das Häkchen bei „Enable CORS“ – nur damit darf diese Seite mit dem Modell sprechen. Ohne dieses Häkchen schlägt der Test gleich fehl." },
+    { text: "Fast geschafft: Die Adresse unten passt schon für LM Studio. Klicke auf „Verbindung testen und Modelle laden“ – wenn dein Modell in der Liste auftaucht, bist du fertig." },
   ],
 };
 
