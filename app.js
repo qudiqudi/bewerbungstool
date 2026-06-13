@@ -4,9 +4,17 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.3";
+const APP_VERSION = "1.0.4";
 
 const CHANGELOG = [
+  {
+    version: "1.0.4",
+    date: "13.06.2026",
+    items: [
+      "Robustheit: Punktwerte aus der KI-Auswertung und aus importierten Sicherungen werden vor der Anzeige strikt als Zahl behandelt.",
+      "Offline-Modus: Fehlerseiten (z. B. während eines Deployments) überschreiben nicht mehr den funktionierenden Offline-Speicher.",
+    ],
+  },
   {
     version: "1.0.3",
     date: "13.06.2026",
@@ -1230,7 +1238,12 @@ function renderResult(result, durationMs) {
     const div = document.createElement("div");
     div.className = "detail-item";
 
-    const pts = r.punkte ?? 0;
+    // punkte stammt aus der Modellantwort bzw. aus importierten Dateien und
+    // landet per innerHTML im DOM - deshalb hart auf eine Zahl zwingen
+    // (DeepSeek erzwingt kein Schema, Importe sind beliebig)
+    const pts = Number.isFinite(Number(r.punkte))
+      ? Math.max(0, Math.min(10, Math.round(Number(r.punkte))))
+      : 0;
     const cls = pts >= 7 ? "good" : pts >= 4 ? "mid" : "bad";
 
     div.innerHTML = `

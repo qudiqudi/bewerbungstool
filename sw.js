@@ -49,8 +49,15 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(
     fetch(event.request, { cache: "no-cache" })
       .then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((cache) => cache.put(event.request, copy));
+        // Nur vollstaendige, erfolgreiche Antworten cachen: 404/500 (z. B.
+        // waehrend eines Deploys) wuerden sonst den funktionierenden
+        // Offline-Fallback ueberschreiben
+        if (res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE)
+            .then((cache) => cache.put(event.request, copy))
+            .catch(() => {});
+        }
         return res;
       })
       .catch(() => caches.match(event.request))
