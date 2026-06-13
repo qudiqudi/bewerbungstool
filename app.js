@@ -836,7 +836,7 @@ function candidateUrls(url) {
     const u = new URL(url);
     // Onlyfy (Prescreen): Print-Version enthält die volle Anzeige
     const m = u.pathname.match(/\/job\/([a-z0-9]+)/i);
-    if (u.hostname.endsWith("onlyfy.jobs") && m) {
+    if (/(^|\.)onlyfy\.jobs$/i.test(u.hostname) && m) {
       list.unshift(u.origin + "/candidate/job/print/" + m[1] + "?mode=print");
     }
     // LinkedIn: Gast-Endpunkt mit der reinen Beschreibung zuerst versuchen
@@ -855,7 +855,7 @@ function candidateUrls(url) {
     }
     // StepStone: die normale Anzeige lädt den Beschreibungstext per JavaScript
     // nach; die -inline-Variante ist serverseitig gerendert und vollständig.
-    if (u.hostname.endsWith("stepstone.de")) {
+    if (/(^|\.)stepstone\.de$/i.test(u.hostname)) {
       const m = u.pathname.match(/--(\d+)\.html$/);
       if (m) {
         list.unshift(u.origin + u.pathname.replace(/--(\d+)\.html$/, "--$1-inline.html"));
