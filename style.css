@@ -1099,6 +1099,118 @@ button.ghost {
 }
 .error button { color: var(--red); border-color: var(--red); background: transparent; }
 
+/* ---------- Gamification (pro Stelle) ---------- */
+
+.gami {
+  margin: 0.8rem 0;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card-2);
+}
+
+/* In der Auswertung etwas praesenter */
+#result-gami { margin-top: 1rem; }
+.gami-heading {
+  margin: 0 0 0.5rem;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--text-strong);
+}
+
+.gami-level {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.gami-level strong { font-family: var(--display); color: var(--text-strong); }
+
+.level-chip {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 0.78rem;
+  color: var(--primary-on);
+  background: var(--primary);
+  border-radius: var(--radius-pill);
+  padding: 0.12rem 0.6rem;
+}
+
+.level-up {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 0.78rem;
+  color: var(--green);
+  background: var(--green-soft);
+  border-radius: var(--radius-pill);
+  padding: 0.12rem 0.6rem;
+}
+
+.xp-bar {
+  height: 9px;
+  margin: 0.55rem 0 0.3rem;
+  background: var(--border);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+.xp-fill {
+  height: 100%;
+  background: var(--primary);
+  border-radius: var(--radius-pill);
+  transition: width 0.6s ease;
+}
+
+.gami-xp { margin: 0; }
+.gami-meta { margin: 0.3rem 0 0; }
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.7rem;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+  padding: 0.2rem 0.55rem 0.2rem 0.4rem;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+}
+.badge-icon { display: inline-flex; }
+.badge-icon svg { width: 14px; height: 14px; display: block; }
+
+.badge.earned {
+  color: var(--accent-text);
+  background: var(--primary-soft);
+  border-color: var(--primary-soft-border);
+}
+.badge.earned .badge-icon svg { fill: var(--primary); }
+
+.badge.locked {
+  color: var(--muted);
+  background: transparent;
+}
+.badge.locked .badge-icon svg { stroke: var(--muted); }
+
+/* Frisch freigeschaltetes Abzeichen in der Auswertung hervorheben */
+.badge.new {
+  border-color: var(--green);
+  box-shadow: 0 0 0 1px var(--green) inset;
+}
+
+.gami-announce {
+  margin: 0.5rem 0 0;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--green);
+}
+
 /* Reduzierte Bewegung respektieren */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
