@@ -248,6 +248,18 @@
       </div>
     </div>
 
+    <!-- Rückfrage: unbeantwortete Fragen vor dem Auswerten -->
+    <div id="confirm-eval-modal" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="confirm-eval-title">
+      <div class="modal card">
+        <h2 id="confirm-eval-title">Unbeantwortete Fragen</h2>
+        <p id="confirm-eval-text"></p>
+        <div class="row">
+          <button id="btn-confirm-eval" class="primary">Trotzdem auswerten</button>
+          <button id="btn-confirm-eval-cancel" class="ghost">Zurück</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Changelog -->
     <div id="changelog-modal" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="changelog-title">
       <div class="modal card changelog-modal">

@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.5";
+const APP_VERSION = "1.0.6";
 
 const CHANGELOG = [
+  {
+    version: "1.0.6",
+    date: "13.06.2026",
+    items: [
+      "Die Rückfrage vor dem Auswerten bei unbeantworteten Fragen erscheint jetzt als Fenster in der App statt als blockierender Browser-Dialog.",
+    ],
+  },
   {
     version: "1.0.5",
     date: "13.06.2026",
@@ -1127,10 +1134,17 @@ function prevQuestion() {
 async function evaluateQuiz() {
   if (actionRunning) return;
   const unanswered = answers.filter((a) => !a.trim()).length;
-  if (unanswered > 0 && !confirm(`${unanswered} Frage(n) sind unbeantwortet. Trotzdem auswerten?`)) {
+  // Bei unbeantworteten Fragen erst im UI-Modal rueckfragen (kein blockierendes
+  // natives confirm()). runEvaluation() laeuft erst nach Bestaetigung.
+  if (unanswered > 0) {
+    openConfirmEval(unanswered);
     return;
   }
+  runEvaluation();
+}
 
+async function runEvaluation() {
+  if (actionRunning) return;
   stopTimer();
   $("timeout-modal").classList.add("hidden");
   const durationMs = Date.now() - startTime;
@@ -1840,6 +1854,30 @@ $("btn-timeout-continue").addEventListener("click", () => {
 
 $("btn-error-close").addEventListener("click", () => $("error-box").classList.add("hidden"));
 
+// Rueckfrage vor dem Auswerten bei unbeantworteten Fragen (ersetzt das
+// blockierende native confirm()). Fokus wird gesetzt und nach dem Schliessen
+// auf das ausloesende Element zurueckgegeben.
+let confirmEvalReturnFocus = null;
+function openConfirmEval(unanswered) {
+  $("confirm-eval-text").textContent =
+    `${unanswered} Frage(n) sind unbeantwortet. Trotzdem auswerten?`;
+  confirmEvalReturnFocus = document.activeElement;
+  $("confirm-eval-modal").classList.remove("hidden");
+  $("btn-confirm-eval").focus();
+}
+function closeConfirmEval() {
+  $("confirm-eval-modal").classList.add("hidden");
+  if (confirmEvalReturnFocus && typeof confirmEvalReturnFocus.focus === "function") {
+    confirmEvalReturnFocus.focus();
+  }
+  confirmEvalReturnFocus = null;
+}
+$("btn-confirm-eval").addEventListener("click", () => {
+  closeConfirmEval();
+  runEvaluation();
+});
+$("btn-confirm-eval-cancel").addEventListener("click", closeConfirmEval);
+
 // Versionsanzeige im Footer und Changelog-Fenster
 function renderChangelog() {
   const list = $("changelog-list");
@@ -1886,6 +1924,8 @@ $("btn-changelog-close").addEventListener("click", closeChangelog);
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !$("changelog-modal").classList.contains("hidden")) {
     closeChangelog();
+  } else if (e.key === "Escape" && !$("confirm-eval-modal").classList.contains("hidden")) {
+    closeConfirmEval();
   }
 });
 
