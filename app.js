@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.17";
+const APP_VERSION = "1.0.18";
 
 const CHANGELOG = [
+  {
+    version: "1.0.18",
+    date: "13.06.2026",
+    items: [
+      "Der zuletzt geladene Stand des Eingabe-Bildschirms (Stellen-URL, eingelesener Text und der aktive Tab) bleibt jetzt über ein App-Update oder das Neuladen hinweg erhalten. Bisher war nach einer neuen Version die URL weg, sodass die Anzeige neu geladen werden musste – dabei legte das Tool die Stelle als neuen Eintrag in der Historie an, statt die Versuche bei der bestehenden Stelle fortzuschreiben. Jetzt wird dieselbe Stelle zuverlässig wiedererkannt. Zusätzlich übernimmt „Weiter üben“ in der Historie die Stellen-URL, damit ein dort erstellter Test ebenfalls bei der richtigen Stelle landet.",
+    ],
+  },
   {
     version: "1.0.17",
     date: "13.06.2026",
@@ -1111,6 +1118,69 @@ let actionRunning = false;
 // zu geben - aber nur solange der geladene Text nicht manuell ersetzt wurde.
 let lastFetch = { url: "", text: "" };
 
+/* ---------- Eingabe-Entwurf (localStorage) ---------- */
+
+// Hält den zuletzt geladenen/eingegebenen Stand des Eingabe-Bildschirms über
+// Reloads und Versions-Updates hinweg fest: URL-Feld, Anzeigentext, aktiver
+// Tab und vor allem lastFetch. Letzteres ist die Brücke, über die eine per URL
+// geladene Stelle ihre stabile Identität (urlKey) an den erzeugten Fragebogen
+// weitergibt. Ginge der Stand beim Update verloren, bekäme dieselbe Stelle beim
+// erneuten Laden einen anderen Text-Hash und damit einen neuen Eintrag in der
+// Historie, statt die Versuche bei der bestehenden Stelle fortzuschreiben.
+// Neuer, optionaler Storage-Key - bestehende Daten bleiben unberührt.
+const DRAFT_KEY = "bewerbungstool.draft";
+
+function saveDraft() {
+  try {
+    localStorage.setItem(
+      DRAFT_KEY,
+      JSON.stringify({
+        url: $("job-url").value,
+        text: $("job-text").value,
+        // Aktiver Tab: source-url ist sichtbar -> URL-Tab, sonst Text-Tab
+        tab: $("source-url").classList.contains("hidden") ? "text" : "url",
+        lastFetch,
+      }),
+    );
+  } catch {
+    // localStorage voll oder gesperrt: Entwurf ist nur Komfort, nicht kritisch
+  }
+}
+
+// Entwurf verzoegert sichern, damit nicht jeder Tastendruck schreibt
+let draftSaveTimer = 0;
+function scheduleDraftSave() {
+  clearTimeout(draftSaveTimer);
+  draftSaveTimer = setTimeout(saveDraft, 400);
+}
+
+function restoreDraft() {
+  let draft;
+  try {
+    draft = JSON.parse(localStorage.getItem(DRAFT_KEY));
+  } catch {
+    return;
+  }
+  if (!draft || typeof draft !== "object") return;
+  // Defensiv lesen - jedes Feld kann fehlen (aelterer/teilweiser Entwurf)
+  if (typeof draft.url === "string") $("job-url").value = draft.url;
+  if (typeof draft.text === "string") $("job-text").value = draft.text;
+  if (
+    draft.lastFetch &&
+    typeof draft.lastFetch.url === "string" &&
+    typeof draft.lastFetch.text === "string"
+  ) {
+    lastFetch = { url: draft.lastFetch.url, text: draft.lastFetch.text };
+  }
+  // Nur auf den URL-Tab schalten, wenn dort wirklich etwas steht - sonst beim
+  // Text-Tab bleiben, damit kein leeres URL-Feld den Einstieg verdeckt.
+  if (draft.tab === "url" && $("job-url").value.trim()) {
+    setSourceTab("url");
+  } else if ($("job-text").value.trim()) {
+    setSourceTab("text");
+  }
+}
+
 async function generateQuiz() {
   if (actionRunning) return;
   const jobText = $("job-text").value.trim();
@@ -2149,7 +2219,15 @@ function renderHistory() {
     practiceBtn.title = "Neuen Test zu dieser Stelle erstellen";
     practiceBtn.addEventListener("click", () => {
       $("job-text").value = job.jobText;
+      // URL der Stelle wieder ins Feld holen und als lastFetch hinterlegen, damit
+      // ein frisch erstellter Test wieder denselben urlKey traegt und bei dieser
+      // Stelle landet - nicht als neue Stelle ueber den Text-Hash.
+      if (job.url) {
+        $("job-url").value = job.url;
+        lastFetch = { url: job.url, text: job.jobText };
+      }
       setSourceTab("text");
+      saveDraft();
       showView("view-input");
     });
     head.appendChild(title);
@@ -2672,8 +2750,13 @@ function setSourceTab(which) {
   $("source-text").classList.toggle("hidden", which !== "text");
 }
 
-$("tab-url").addEventListener("click", () => setSourceTab("url"));
-$("tab-text").addEventListener("click", () => setSourceTab("text"));
+$("tab-url").addEventListener("click", () => { setSourceTab("url"); saveDraft(); });
+$("tab-text").addEventListener("click", () => { setSourceTab("text"); saveDraft(); });
+
+// Eingaben in URL- und Textfeld in den Entwurf uebernehmen, damit sie ein
+// Reload/Update ueberleben (verzoegert, nicht bei jedem Tastendruck)
+$("job-url").addEventListener("input", scheduleDraftSave);
+$("job-text").addEventListener("input", scheduleDraftSave);
 
 $("btn-fetch-url").addEventListener("click", async () => {
   if (actionRunning) return;
@@ -2686,6 +2769,7 @@ $("btn-fetch-url").addEventListener("click", async () => {
     $("job-text").value = text;
     lastFetch = { url, text: text.trim() };
     setSourceTab("text");
+    saveDraft();
     if (!looksLikeRealContent(text)) {
       showError("Die Seite konnte nur unvollständig ausgelesen werden (vermutlich eine JavaScript-Anwendung). Bitte prüfen und die Stellenbeschreibung ggf. manuell einfügen.");
     }
@@ -2847,6 +2931,10 @@ document.addEventListener("keydown", (e) => {
     cancelConfirmEval();
   }
 });
+
+// Zuletzt geladenen Eingabe-Stand wiederherstellen, damit URL und Anzeige ein
+// Update/Reload ueberleben (und die Stelle ueber lastFetch wiedererkannt wird)
+restoreDraft();
 
 // Beim ersten Start zum Onboarding
 if (!settings.apiKey) {
