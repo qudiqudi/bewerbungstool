@@ -62,7 +62,7 @@
 
       <h3><span class="step-num">3</span> Schlüssel einfügen und testen</h3>
       <input type="password" id="ob-key" placeholder="API-Schlüssel hier einfügen" autocomplete="off">
-      <p id="ob-status" class="hint"></p>
+      <p id="ob-status" class="hint" role="status"></p>
 
       <div class="row">
         <button id="btn-ob-test" class="primary">Verbindung testen und loslegen</button>
@@ -113,8 +113,8 @@
       <p class="hint">Entweder die Anzeige per URL laden oder den Text direkt einfügen.</p>
 
       <div class="tabs">
-        <button id="tab-url" class="tab active">Per URL laden</button>
-        <button id="tab-text" class="tab">Text einfügen</button>
+        <button id="tab-url" class="tab active" aria-pressed="true">Per URL laden</button>
+        <button id="tab-text" class="tab" aria-pressed="false">Text einfügen</button>
       </div>
 
       <div id="source-url">
@@ -237,9 +237,9 @@
     </section>
 
     <!-- Zeit abgelaufen (Prüfungsmodus) -->
-    <div id="timeout-modal" class="overlay hidden">
+    <div id="timeout-modal" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="timeout-title">
       <div class="modal card">
-        <h2>Zeit abgelaufen</h2>
+        <h2 id="timeout-title">Zeit abgelaufen</h2>
         <p>Das Zeitlimit ist erreicht. Du kannst jetzt abgeben oder bewusst überziehen &ndash; die Überziehung wird in der Auswertung vermerkt.</p>
         <div class="row">
           <button id="btn-timeout-submit" class="primary">Jetzt auswerten</button>
@@ -249,9 +249,9 @@
     </div>
 
     <!-- Changelog -->
-    <div id="changelog-modal" class="overlay hidden">
+    <div id="changelog-modal" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="changelog-title">
       <div class="modal card changelog-modal">
-        <h2>Was ist neu</h2>
+        <h2 id="changelog-title">Was ist neu</h2>
         <div id="changelog-list"></div>
         <div class="row">
           <button id="btn-changelog-close" class="primary">Schließen</button>
@@ -270,14 +270,14 @@
     </div>
 
     <!-- Update-Hinweis -->
-    <div id="update-banner" class="update-banner hidden">
+    <div id="update-banner" class="update-banner hidden" role="status">
       <span>Eine neue Version ist verfügbar.</span>
       <button id="btn-update-reload" class="primary">Jetzt aktualisieren</button>
       <button id="btn-update-later" class="ghost">Später</button>
     </div>
 
     <!-- Fehleranzeige -->
-    <div id="error-box" class="error hidden">
+    <div id="error-box" class="error hidden" role="alert">
       <span id="error-text"></span>
       <button id="btn-error-close" class="ghost">Schließen</button>
     </div>

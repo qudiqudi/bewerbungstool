@@ -453,6 +453,13 @@ button.ghost {
 
 .diff-option input { position: absolute; opacity: 0; pointer-events: none; }
 
+/* Die Radios selbst sind unsichtbar - der Tastaturfokus muss deshalb auf der
+   Pille sichtbar werden */
+.diff-option:focus-within {
+  outline: 2px solid var(--primary);
+  outline-offset: -1px;
+}
+
 .diff-option:has(input:checked) {
   border-color: var(--primary);
   border-width: 1.5px;

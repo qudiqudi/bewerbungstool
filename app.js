@@ -4,9 +4,17 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.4";
+const APP_VERSION = "1.0.5";
 
 const CHANGELOG = [
+  {
+    version: "1.0.5",
+    date: "13.06.2026",
+    items: [
+      "Bessere Bedienbarkeit mit Tastatur und Screenreader: Dialoge sind als solche ausgezeichnet und erhalten den Fokus, der Fokus geht beim Beantworten und Auflösen nicht mehr verloren, Auswahlzustände und Fehlermeldungen werden angesagt, und der Tastaturfokus beim Schwierigkeitsgrad ist sichtbar.",
+      "Das Changelog-Fenster lässt sich mit Escape schließen.",
+    ],
+  },
   {
     version: "1.0.4",
     date: "13.06.2026",
@@ -918,6 +926,9 @@ function updateTimerDisplay() {
     stopTimer();
     el.textContent = "0:00";
     $("timeout-modal").classList.remove("hidden");
+    // Fokus in den Dialog setzen, damit Tastatur-/Screenreader-Nutzer ihn
+    // mitbekommen und nicht die Seite dahinter weiterbedienen
+    $("btn-timeout-submit").focus();
     return;
   }
 
@@ -954,7 +965,7 @@ function renderQuestion() {
   const locked = isRevealed || reviewing;
 
   if (q.typ === "multiple_choice") {
-    q.optionen.forEach((opt) => {
+    q.optionen.forEach((opt, idx) => {
       const btn = document.createElement("button");
       let cls = "option";
       if (answers[current] === opt) cls += " selected";
@@ -966,10 +977,16 @@ function renderQuestion() {
       }
       btn.className = cls;
       btn.textContent = opt;
+      // Auswahlzustand auch fuer Screenreader, nicht nur als CSS-Klasse
+      btn.setAttribute("aria-pressed", answers[current] === opt ? "true" : "false");
       if (!locked) {
         btn.addEventListener("click", () => {
           answers[current] = opt;
           renderQuestion();
+          // Das Neuzeichnen ersetzt alle Buttons - den Fokus auf die gewaehlte
+          // Option zurueckgeben, sonst landet er auf <body> (Tastaturbedienung)
+          const fresh = $("answer-area").children[idx];
+          if (fresh) fresh.focus();
         });
       } else {
         btn.disabled = true;
@@ -1027,6 +1044,13 @@ function renderLearnArea(q, isRevealed) {
     btn.addEventListener("click", () => {
       revealed[current] = true;
       renderQuestion();
+      // Fokus in die neue Erklaerungsbox setzen, damit Tastatur- und
+      // Screenreader-Nutzer direkt bei der Aufloesung weiterlesen
+      const box = $("learn-area").querySelector(".learn-box");
+      if (box) {
+        box.setAttribute("tabindex", "-1");
+        box.focus();
+      }
     });
     area.appendChild(btn);
     return;
@@ -1726,6 +1750,9 @@ $("import-file").addEventListener("change", async (e) => {
 function setSourceTab(which) {
   $("tab-url").classList.toggle("active", which === "url");
   $("tab-text").classList.toggle("active", which === "text");
+  // Aktiven Tab auch fuer Screenreader kennzeichnen
+  $("tab-url").setAttribute("aria-pressed", which === "url" ? "true" : "false");
+  $("tab-text").setAttribute("aria-pressed", which === "text" ? "true" : "false");
   $("source-url").classList.toggle("hidden", which !== "url");
   $("source-text").classList.toggle("hidden", which !== "text");
 }
@@ -1846,10 +1873,20 @@ $("link-changelog").addEventListener("click", (e) => {
   e.preventDefault();
   renderChangelog();
   $("changelog-modal").classList.remove("hidden");
+  $("btn-changelog-close").focus();
 });
 
-$("btn-changelog-close").addEventListener("click", () => {
+function closeChangelog() {
   $("changelog-modal").classList.add("hidden");
+  $("link-changelog").focus();
+}
+
+$("btn-changelog-close").addEventListener("click", closeChangelog);
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("changelog-modal").classList.contains("hidden")) {
+    closeChangelog();
+  }
 });
 
 // Beim ersten Start zum Onboarding
