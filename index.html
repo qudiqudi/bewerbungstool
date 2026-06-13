@@ -6,9 +6,11 @@
   <!-- Content-Security-Policy als Defense-in-Depth. Scripts nur von hier (plus
        der Hash des Inline-Theme-Skripts unten - wird er geaendert, muss der Hash
        angepasst werden; der CI-Check erzwingt das). connect-src listet die
-       genutzten Dienste: KI-Anbieter und der Jina-Reader fuers URL-Laden. Neue
-       externe Hosts muessen hier ergaenzt werden, sonst blockt der Browser sie. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-AS03majGGAgYGEK0v1Hwe170PaXGMA1A1goCTG9ZANs='; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self' https://api.anthropic.com https://api.openai.com https://api.deepseek.com https://r.jina.ai; manifest-src 'self'; worker-src 'self'; base-uri 'none'; object-src 'none'; form-action 'self'">
+       genutzten Dienste: KI-Anbieter und der Jina-Reader fuers URL-Laden. Die
+       localhost-Eintraege erlauben den lokalen Anbieter (Ollama :11434, LM Studio
+       :1234 oder eine eigene Adresse). Neue externe Hosts muessen hier ergaenzt
+       werden, sonst blockt der Browser sie. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-AS03majGGAgYGEK0v1Hwe170PaXGMA1A1goCTG9ZANs='; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self' https://api.anthropic.com https://api.openai.com https://api.deepseek.com https://r.jina.ai http://localhost:* http://127.0.0.1:*; manifest-src 'self'; worker-src 'self'; base-uri 'none'; object-src 'none'; form-action 'self'">
   <meta name="theme-color" content="#c5543a" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#3a2a25" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#c5543a">

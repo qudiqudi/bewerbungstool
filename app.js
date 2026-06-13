@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.10";
+const APP_VERSION = "1.0.11";
 
 const CHANGELOG = [
+  {
+    version: "1.0.11",
+    date: "13.06.2026",
+    items: [
+      "Lokaler Anbieter wieder nutzbar: Die Sicherheitsrichtlinie der Seite blockierte bisher jede Verbindung zum lokal laufenden Modell (Ollama oder LM Studio). Verbindungen zu localhost sind jetzt erlaubt, sodass „Verbindung testen und Modelle laden“ funktioniert.",
+    ],
+  },
   {
     version: "1.0.10",
     date: "13.06.2026",
