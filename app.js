@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.1";
+const APP_VERSION = "1.0.2";
 
 const CHANGELOG = [
+  {
+    version: "1.0.2",
+    date: "13.06.2026",
+    items: [
+      "Test erstellen, Auswerten und URL-Laden lassen sich während des Ladens nicht mehr versehentlich doppelt auslösen (z. B. per Enter-Taste) – keine doppelten API-Kosten und Historie-Einträge mehr.",
+    ],
+  },
   {
     version: "1.0.1",
     date: "13.06.2026",
@@ -723,7 +730,14 @@ async function fetchJobFromUrl(url) {
 
 /* ---------- Fragen generieren ---------- */
 
+// Schuetzt laufende Lade-/LLM-Aktionen vor doppeltem Ausloesen: Das
+// Lade-Overlay blockt nur Zeiger-Eingaben, der ausloesende Button behaelt
+// aber den Fokus - erneutes Enter wuerde sonst einen zweiten, parallelen
+// (und bei LLM-Aufrufen kostenpflichtigen) Request starten.
+let actionRunning = false;
+
 async function generateQuiz() {
+  if (actionRunning) return;
   const jobText = $("job-text").value.trim();
   if (jobText.length < 50) {
     showError("Bitte zuerst eine Stellenanzeige per URL laden oder den Text unter „Text einfügen“ einfügen.");
@@ -741,6 +755,7 @@ async function generateQuiz() {
     schwer: "etwa 10% leichte, 30% mittlere und 60% schwere Fragen",
   };
 
+  actionRunning = true;
   showLoading("Fragenkatalog wird erstellt...");
   try {
     const system =
@@ -808,6 +823,7 @@ async function generateQuiz() {
   } catch (e) {
     showError(e.message);
   } finally {
+    actionRunning = false;
     hideLoading();
   }
 }
@@ -1049,6 +1065,7 @@ function prevQuestion() {
 /* ---------- Auswertung ---------- */
 
 async function evaluateQuiz() {
+  if (actionRunning) return;
   const unanswered = answers.filter((a) => !a.trim()).length;
   if (unanswered > 0 && !confirm(`${unanswered} Frage(n) sind unbeantwortet. Trotzdem auswerten?`)) {
     return;
@@ -1058,6 +1075,7 @@ async function evaluateQuiz() {
   $("timeout-modal").classList.add("hidden");
   const durationMs = Date.now() - startTime;
 
+  actionRunning = true;
   showLoading("Antworten werden ausgewertet...");
   try {
     const system =
@@ -1103,6 +1121,7 @@ async function evaluateQuiz() {
   } catch (e) {
     showError(e.message);
   } finally {
+    actionRunning = false;
     hideLoading();
   }
 }
@@ -1673,8 +1692,10 @@ $("tab-url").addEventListener("click", () => setSourceTab("url"));
 $("tab-text").addEventListener("click", () => setSourceTab("text"));
 
 $("btn-fetch-url").addEventListener("click", async () => {
+  if (actionRunning) return;
   const url = $("job-url").value.trim();
   if (!url) return;
+  actionRunning = true;
   showLoading("Stellenanzeige wird geladen...");
   try {
     const text = cleanPageText(await fetchJobFromUrl(url));
@@ -1686,6 +1707,7 @@ $("btn-fetch-url").addEventListener("click", async () => {
   } catch (e) {
     showError(e.message);
   } finally {
+    actionRunning = false;
     hideLoading();
   }
 });
