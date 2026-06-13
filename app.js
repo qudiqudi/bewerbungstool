@@ -12,6 +12,7 @@ const CHANGELOG = [
     date: "14.06.2026",
     items: [
       "Die Abzeichen haben jetzt je ein eigenes Symbol im jobreif-Stil: kleine Korall-Sticker mit weißem Rand statt des einen generischen Sterns – Fahne, Stoppuhr, Haken, Schild, Pokal, Trendpfeil, Flamme und Gipfel. Frisch freigeschaltete Abzeichen ploppen kurz auf (Animation respektiert reduzierte Bewegung). Freischaltbedingungen und Beschriftungen bleiben unverändert.",
+      "Ein Tipp auf ein Abzeichen öffnet es jetzt groß und zeigt Gruppe, Status (freigeschaltet oder noch nicht erreicht), Bedingung und Ziel.",
     ],
   },
   {
@@ -1959,6 +1960,27 @@ const BADGE_ICONS = {
   "hartnaeckig": '<svg viewBox="0 0 48 48" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 36 L19 15 L27 27 L32 19 L40 36 Z"/><path d="M15.5 21 L19 15 L22.5 21"/></svg>',
 };
 
+// Gruppen der Abzeichen (fuer die Detailansicht). Aus dem jobreif-Abzeichen-
+// Design. Reine Anzeige-Metadaten - der BADGES-Katalog bleibt unveraendert.
+const BADGE_GROUPS = {
+  fleiss: { label: "Fleiß", note: "Modusunabhängig — fürs Dranbleiben" },
+  leistung: { label: "Leistung", note: "Nur im Prüfungsmodus — echtes Können" },
+};
+
+// Zusatz-Infos je Abzeichen-id fuer die Detailansicht: Gruppe, optionales
+// Ziel (Zahl/Schwelle als Sticker-Pille) und Prestige-Glow. Additiv und
+// defensiv - unbekannte ids haben einfach keine Metadaten.
+const BADGE_META = {
+  "erster-test": { group: "fleiss" },
+  "drei-serie": { group: "fleiss", goal: "3" },
+  "hartnaeckig": { group: "fleiss", goal: "10" },
+  "ernstfall": { group: "leistung" },
+  "bestanden": { group: "leistung", goal: "50%" },
+  "souveraen": { group: "leistung", goal: "70%" },
+  "spitze": { group: "leistung", goal: "90%", prestige: true },
+  "aufwaerts": { group: "leistung" },
+};
+
 function buildXpBar(progress) {
   const wrap = document.createElement("div");
   wrap.className = "xp-bar";
@@ -1986,9 +2008,85 @@ function buildBadges(progress, highlightIds) {
     pill.appendChild(icon);
     pill.appendChild(lab);
     pill.title = b.desc + (b.earned ? "" : " (noch nicht erreicht)");
+    // Tippen/Klicken oeffnet die Detailansicht (grosser Sticker + Bedingung).
+    pill.setAttribute("role", "button");
+    pill.setAttribute("tabindex", "0");
+    pill.setAttribute("aria-haspopup", "dialog");
+    pill.setAttribute("aria-label",
+      `${b.label}, ${b.earned ? "freigeschaltet" : "noch nicht erreicht"}. Details öffnen`);
+    pill.addEventListener("click", () => openBadgeModal(b));
+    pill.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openBadgeModal(b); }
+    });
     row.appendChild(pill);
   });
   return row;
+}
+
+// Grosser Abzeichen-Sticker fuer die Detailansicht: getiltetes Squircle mit
+// weissem Die-Cut-Rand, Strahlenkranz, Ordensband, Funkeln und optionaler
+// Ziel-Pille. Gesperrt = gedaempfte graue Variante mit Schloss.
+function buildBadgeSticker(badge) {
+  const meta = BADGE_META[badge.id] || {};
+  const el = document.createElement("div");
+  el.className = "sticker" + (badge.earned ? "" : " locked")
+    + (badge.earned && meta.prestige ? " prestige" : "");
+  const glyph = badge.earned ? (BADGE_ICONS[badge.id] || BADGE_ICON_EARNED) : BADGE_ICON_LOCKED;
+  let html = '<div class="sticker-rays"></div>'
+    + '<div class="sticker-ribbon left"></div><div class="sticker-ribbon right"></div>'
+    + '<div class="sticker-squircle">' + glyph + '</div>';
+  if (badge.earned) {
+    html += '<div class="sticker-spark a"></div><div class="sticker-spark b"></div>';
+    if (meta.goal) html += '<div class="sticker-goal">' + meta.goal + '</div>';
+  }
+  el.innerHTML = html;
+  return el;
+}
+
+// Merkt sich das ausloesende Abzeichen-Pill, um den Fokus beim Schliessen
+// wieder dorthin zurueckzugeben.
+let lastBadgeTrigger = null;
+
+function openBadgeModal(badge) {
+  const body = $("badge-modal-body");
+  if (!body) return;
+  lastBadgeTrigger = document.activeElement;
+  body.innerHTML = "";
+  body.appendChild(buildBadgeSticker(badge));
+
+  const meta = BADGE_META[badge.id] || {};
+  const grp = BADGE_GROUPS[meta.group];
+  if (grp) {
+    const g = document.createElement("div");
+    g.className = "badge-detail-group";
+    g.textContent = `${grp.label} · ${grp.note}`;
+    body.appendChild(g);
+  }
+
+  const h = document.createElement("h2");
+  h.id = "badge-modal-title";
+  h.className = "badge-detail-title";
+  h.textContent = badge.label;
+  body.appendChild(h);
+
+  const st = document.createElement("span");
+  st.className = "badge-status " + (badge.earned ? "earned" : "locked");
+  st.textContent = badge.earned ? "Freigeschaltet" : "Noch nicht erreicht";
+  body.appendChild(st);
+
+  const d = document.createElement("p");
+  d.className = "badge-detail-desc";
+  d.textContent = badge.desc;
+  body.appendChild(d);
+
+  $("badge-modal").classList.remove("hidden");
+  $("btn-badge-close").focus();
+}
+
+function closeBadgeModal() {
+  $("badge-modal").classList.add("hidden");
+  if (lastBadgeTrigger && typeof lastBadgeTrigger.focus === "function") lastBadgeTrigger.focus();
+  lastBadgeTrigger = null;
 }
 
 // Kompaktes Fortschrittspanel fuer eine Stelle (Historie und Auswertung).
@@ -3303,11 +3401,19 @@ function closeChangelog() {
 
 $("btn-changelog-close").addEventListener("click", closeChangelog);
 
+$("btn-badge-close").addEventListener("click", closeBadgeModal);
+// Klick auf den abgedunkelten Hintergrund (nicht auf die Karte) schliesst
+$("badge-modal").addEventListener("click", (e) => {
+  if (e.target === $("badge-modal")) closeBadgeModal();
+});
+
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !$("changelog-modal").classList.contains("hidden")) {
     closeChangelog();
   } else if (e.key === "Escape" && !$("confirm-eval-modal").classList.contains("hidden")) {
     cancelConfirmEval();
+  } else if (e.key === "Escape" && !$("badge-modal").classList.contains("hidden")) {
+    closeBadgeModal();
   }
 });
 

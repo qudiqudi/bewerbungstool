@@ -1353,6 +1353,146 @@ button.ghost {
   100% { transform: scale(1); }
 }
 
+/* Abzeichen sind antippbar -> Detailansicht */
+.badge[role="button"] { cursor: pointer; }
+.badge[role="button"]:hover { filter: brightness(1.02); transform: translateY(-1px); }
+.badge[role="button"]:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* ===== Abzeichen-Detail (Modal) ===== */
+.badge-modal { max-width: 360px; text-align: center; }
+.badge-detail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+.badge-detail-group {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.badge-detail-title {
+  margin: 0.1rem 0 0;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.3rem;
+  color: var(--text-strong);
+}
+.badge-status {
+  font-size: 0.74rem;
+  font-weight: 700;
+  border-radius: var(--radius-pill);
+  padding: 0.12rem 0.65rem;
+}
+.badge-status.earned { color: var(--green); background: var(--green-soft); }
+.badge-status.locked { color: var(--muted); background: var(--card-2); border: 1px solid var(--border); }
+.badge-detail-desc {
+  margin: 0.2rem 0 0;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: var(--text);
+  max-width: 280px;
+}
+
+/* Grosser Sticker im jobreif-Stil */
+.sticker {
+  position: relative;
+  width: 132px;
+  height: 130px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  margin: 0.4rem 0 0.2rem;
+}
+.sticker-rays {
+  position: absolute;
+  width: 130px;
+  height: 130px;
+  border-radius: 50%;
+  background: repeating-conic-gradient(from 4deg, oklch(0.80 0.11 46 / 0.55) 0 7deg, transparent 7deg 17deg);
+  -webkit-mask: radial-gradient(circle, #000 24%, transparent 68%);
+  mask: radial-gradient(circle, #000 24%, transparent 68%);
+}
+.sticker-ribbon {
+  position: absolute;
+  top: 62px;
+  left: 50%;
+  width: 32px;
+  height: 66px;
+  transform-origin: 50% 0;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 74%, 0 100%);
+  border-radius: 0 0 2px 2px;
+  box-shadow: 0 7px 11px -6px oklch(0.40 0.12 30 / 0.5);
+}
+.sticker-ribbon.left {
+  background: linear-gradient(180deg, oklch(0.52 0.17 34), oklch(0.47 0.17 33));
+  transform: translateX(-50%) rotate(-13deg);
+}
+.sticker-ribbon.right {
+  background: linear-gradient(180deg, oklch(0.57 0.17 35), oklch(0.51 0.17 34));
+  transform: translateX(-50%) rotate(13deg);
+}
+.sticker-squircle {
+  position: relative;
+  width: 88px;
+  height: 88px;
+  border-radius: 25px;
+  color: #fff;
+  background: linear-gradient(150deg, oklch(0.75 0.15 45), oklch(0.57 0.17 35) 68%, oklch(0.50 0.17 33));
+  border: 5px solid #fff;
+  box-shadow: 0 14px 24px -10px oklch(0.55 0.17 35 / 0.6), inset 0 3px 8px oklch(1 0 0 / 0.30);
+  transform: rotate(-5deg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.sticker-squircle svg { width: 42px; height: 42px; display: block; }
+.sticker-spark { position: absolute; border-radius: 50%; background: oklch(0.64 0.16 42); }
+.sticker-spark.a { top: 14px; right: 20px; width: 8px; height: 8px; }
+.sticker-spark.b { top: 26px; left: 24px; width: 5px; height: 5px; background: oklch(0.70 0.14 45); }
+.sticker-goal {
+  position: absolute;
+  right: 4px;
+  bottom: 24px;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 9px;
+  border-radius: 99px;
+  background: #fff;
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: 14px;
+  box-shadow: 0 6px 14px -3px oklch(0.45 0.04 40 / 0.55);
+  border: 2px solid oklch(0.95 0.03 40);
+  transform: rotate(8deg);
+}
+
+/* Prestige (Spitzenreiter): Gold-Glow */
+.sticker.prestige .sticker-squircle {
+  background: linear-gradient(150deg, oklch(0.83 0.13 50), oklch(0.60 0.17 38) 66%, oklch(0.51 0.17 34));
+  box-shadow: 0 0 0 5px oklch(0.65 0.16 40 / 0.12), 0 0 28px oklch(0.65 0.16 40 / 0.5),
+    0 14px 24px -10px oklch(0.55 0.17 35 / 0.6), inset 0 3px 8px oklch(1 0 0 / 0.4);
+}
+
+/* Gesperrt: gedaempfte graue Variante */
+.sticker.locked .sticker-rays {
+  background: repeating-conic-gradient(from 4deg, oklch(0.82 0.004 60 / 0.5) 0 7deg, transparent 7deg 17deg);
+}
+.sticker.locked .sticker-ribbon.left { background: linear-gradient(180deg, oklch(0.78 0.005 60), oklch(0.72 0.006 60)); }
+.sticker.locked .sticker-ribbon.right { background: linear-gradient(180deg, oklch(0.85 0.005 60), oklch(0.78 0.006 60)); }
+.sticker.locked .sticker-squircle {
+  color: oklch(0.58 0.005 60);
+  background: linear-gradient(150deg, oklch(0.92 0.004 60), oklch(0.82 0.005 60) 68%, oklch(0.77 0.006 60));
+  box-shadow: 0 14px 24px -12px oklch(0.5 0 0 / 0.45), inset 0 3px 8px oklch(1 0 0 / 0.4);
+}
+
 .gami-announce {
   margin: 0.5rem 0 0;
   font-family: var(--display);
