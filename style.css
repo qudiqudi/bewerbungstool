@@ -994,6 +994,113 @@ button.ghost {
 .attempt-score.mid { color: var(--orange); }
 .attempt-score.bad { color: var(--red); }
 
+/* Arbeitgeber/Ort-Zeile (Startliste, Stellen-Block, Subpage) */
+.job-employer,
+.home-card-sub {
+  margin: 0.1rem 0 0;
+  font-size: 0.85rem;
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+/* Zurueck-Link oben in Eingabe und Stellen-Subpage */
+.back-link {
+  margin-bottom: 0.9rem;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.85rem;
+}
+
+/* Startliste: Kopf mit Titel und "Neue Stelle" */
+.home-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 0.4rem;
+}
+.home-head h2 { margin: 0; }
+
+/* Stellen-Karte in der Startliste */
+.home-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.9rem 1rem;
+  margin-bottom: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+.home-card:hover { border-color: var(--border-strong); background: var(--card-2); }
+.home-card-main { min-width: 0; flex: 1; }
+.home-card-main strong {
+  font-family: var(--display);
+  font-weight: 700;
+  color: var(--text-strong);
+  display: block;
+}
+.home-card-main .hint { margin: 0.25rem 0 0; }
+.home-card-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+.home-card-score { font-family: var(--display); font-weight: 800; font-size: 1.1rem; }
+.home-card-score.good { color: var(--green); }
+.home-card-score.mid { color: var(--orange); }
+.home-card-score.bad { color: var(--red); }
+
+/* Kompakter Trend ohne Rahmen (Startliste) */
+.trend.mini {
+  height: 30px;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+.trend.mini .trend-bar { width: 9px; }
+
+#home-all-row { margin-top: 0.4rem; }
+
+/* Start-Panel der Stellen-Subpage (One-Tap-Repeat) */
+.start-panel { margin: 0.4rem 0 1rem; }
+.start-buttons { display: flex; flex-direction: column; gap: 0.5rem; }
+.start-buttons .primary { width: 100%; }
+.options-toggle { margin-top: 0.5rem; padding: 0.4rem 0.7rem; font-size: 0.85rem; }
+.options-toggle.active { border-color: var(--border-strong); }
+.start-options {
+  margin-top: 0.6rem;
+  padding: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card-2);
+}
+.start-opt-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+.start-opt-row + .start-opt-row { margin-top: 0.6rem; }
+.start-opt-label { font-size: 0.85rem; color: var(--muted); }
+.start-opt-choices { display: flex; gap: 0.4rem; }
+.chip {
+  padding: 0.4rem 0.8rem;
+  font-size: 0.85rem;
+  border-radius: 999px;
+}
+.chip.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+.chip.active:hover { background: var(--primary-dark); border-color: var(--primary-dark); }
+
 /* Mobil (Smartphones) */
 @media (max-width: 600px) {
   header { padding: 0.8rem 1rem; padding-top: calc(0.8rem + env(safe-area-inset-top)); }
@@ -1035,6 +1142,12 @@ button.ghost {
   .job-head { flex-direction: column; }
   .job-head button { align-self: stretch; }
   .attempt-list li { flex-wrap: wrap; }
+
+  .home-head { flex-wrap: wrap; }
+  .home-head h2 { flex: 1; }
+  .start-opt-row { flex-wrap: wrap; }
+  .start-opt-choices { flex: 1; }
+  .start-opt-choices .chip { flex: 1; }
 }
 
 /* Footer */

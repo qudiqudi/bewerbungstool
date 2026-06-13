@@ -153,7 +153,21 @@
     </section>
 
     <!-- Stellenbeschreibung -->
-    <section id="view-input" class="card">
+    <!-- Startliste: meine Stellen -->
+    <section id="view-home" class="card">
+      <div class="home-head">
+        <h2>Meine Stellen</h2>
+        <button id="btn-new-job" class="primary">+ Neue Stelle</button>
+      </div>
+      <p class="hint hidden" id="home-empty">Noch keine Stelle. Lege mit &bdquo;Neue Stelle&ldquo; eine Stellenanzeige an und erstelle deinen ersten Test &ndash; danach erscheint die Stelle hier mit deinem Fortschritt.</p>
+      <div id="home-list"></div>
+      <div class="row" id="home-all-row">
+        <button id="btn-all-jobs" class="ghost">Alle Stellen ansehen</button>
+      </div>
+    </section>
+
+    <section id="view-input" class="card hidden">
+      <button id="btn-input-back" class="ghost back-link" type="button">‹ Meine Stellen</button>
       <h2>Stellenbeschreibung</h2>
       <p class="hint">Entweder die Anzeige per URL laden oder den Text direkt einfügen.</p>
 
@@ -218,6 +232,12 @@
         </div>
         <button id="btn-generate" class="primary">Test erstellen</button>
       </div>
+    </section>
+
+    <!-- Stellen-Subpage: eine Stelle mit Fortschritt, Tests starten -->
+    <section id="view-job" class="card hidden">
+      <button id="btn-job-back" class="ghost back-link" type="button">‹ Meine Stellen</button>
+      <div id="job-detail"></div>
     </section>
 
     <!-- Quiz -->
