@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.18";
+const APP_VERSION = "1.0.19";
 
 const CHANGELOG = [
+  {
+    version: "1.0.19",
+    date: "13.06.2026",
+    items: [
+      "Neue Startseite „Meine Stellen“: Beim Öffnen erscheint zuerst eine Liste deiner Stellen mit Bestwert und Fortschritt. Ein Tipp öffnet die Stelle, von dort lässt sich ein neuer Test im Lern- oder Prüfungsmodus mit den zuletzt genutzten Einstellungen per Klick starten. Stellen werden jetzt mit Arbeitgeber und Arbeitsort angezeigt, damit sich ähnliche Bezeichnungen (z. B. dieselbe Position bei verschiedenen Unternehmen) klar unterscheiden lassen. „Neue Stelle“ führt wie bisher zum Laden per URL oder Einfügen des Textes.",
+    ],
+  },
   {
     version: "1.0.18",
     date: "13.06.2026",
@@ -441,7 +448,7 @@ const timer = { intervalId: null, deadline: 0, overtime: false, limitMin: 0 };
 
 const $ = (id) => document.getElementById(id);
 
-const views = ["view-onboarding", "view-settings", "view-input", "view-quiz", "view-result", "view-history"];
+const views = ["view-onboarding", "view-settings", "view-home", "view-input", "view-job", "view-quiz", "view-result", "view-history"];
 
 function showView(id) {
   views.forEach((v) => $(v).classList.toggle("hidden", v !== id));
@@ -455,16 +462,31 @@ function currentView() {
 // Speichern fuehren sollen: zurueck zu einem laufenden Test (view-quiz) bzw.
 // einer offenen Auswertung (view-result) statt immer zur Eingabe - sonst waere
 // ein angefangener Test ueber die Kopfzeilen-Buttons unwiederbringlich weg.
-let returnView = "view-input";
+let returnView = "view-home";
 
 function rememberReturnView() {
   const cv = currentView();
   if (cv === "view-quiz" || cv === "view-result") {
     returnView = cv;
+  } else if (cv === "view-home" || cv === "view-job" || cv === "view-input") {
+    // Von Startliste, Stellen-Subpage oder Eingabe dorthin zurueckkehren
+    returnView = cv;
   } else if (cv !== "view-history" && cv !== "view-settings") {
-    // Wechsel zwischen Historie und Einstellungen erbt das Ziel; alles
-    // andere (Eingabe, Onboarding) setzt es zurueck
-    returnView = "view-input";
+    // Wechsel zwischen Historie und Einstellungen erbt das Ziel; Onboarding
+    // u. ae. setzt auf die Startliste zurueck
+    returnView = "view-home";
+  }
+}
+
+// Zurueck-Ziel ansteuern: Startliste und Stellen-Subpage muessen neu gerendert
+// werden (Subpage haengt an der zuletzt geoeffneten Stelle).
+function goReturn() {
+  if (returnView === "view-job" && activeJob) {
+    openJob(activeJob);
+  } else if (returnView === "view-home") {
+    goHome();
+  } else {
+    showView(returnView);
   }
 }
 
@@ -507,6 +529,14 @@ const QUESTIONS_SCHEMA = {
   type: "object",
   properties: {
     titel: { type: "string", description: "Kurzer Titel der Stelle" },
+    arbeitgeber: {
+      type: "string",
+      description: "Name des ausschreibenden Unternehmens/Arbeitgebers, leerer String wenn nicht erkennbar",
+    },
+    arbeitsort: {
+      type: "string",
+      description: "Arbeitsort (Stadt bzw. Region) der Stelle, leerer String wenn nicht genannt oder rein remote",
+    },
     empfohlene_zeit_minuten: {
       type: "integer",
       description: "Realistisches Zeitlimit fuer den gesamten Test in Minuten, abhaengig von Anzahl und Umfang der Fragen",
@@ -562,7 +592,7 @@ const QUESTIONS_SCHEMA = {
       },
     },
   },
-  required: ["titel", "empfohlene_zeit_minuten", "fragen"],
+  required: ["titel", "arbeitgeber", "arbeitsort", "empfohlene_zeit_minuten", "fragen"],
   additionalProperties: false,
 };
 
@@ -649,6 +679,8 @@ function normalizeQuizData(result) {
   const zeit = Math.round(Number(result.empfohlene_zeit_minuten));
   return {
     titel: typeof result.titel === "string" && result.titel.trim() ? result.titel.trim() : "Einstellungstest",
+    arbeitgeber: typeof result.arbeitgeber === "string" ? result.arbeitgeber.trim() : "",
+    arbeitsort: typeof result.arbeitsort === "string" ? result.arbeitsort.trim() : "",
     empfohlene_zeit_minuten: Number.isFinite(zeit) && zeit > 0 ? zeit : 0,
     fragen,
   };
@@ -1221,6 +1253,8 @@ async function generateQuiz() {
       "stabile Adressen, keine tief verschachtelten Links. Sonst lasse die URL leer und waehle einen praegnanten Titel, " +
       "der sich gut als Suchbegriff eignet. " +
       "Schätze ausserdem ein realistisches Zeitlimit in Minuten für den gesamten Test. " +
+      "Lies zusätzlich den ausschreibenden Arbeitgeber (Unternehmensname) und den Arbeitsort (Stadt bzw. Region) " +
+      "aus der Anzeige aus. Ist eines davon nicht erkennbar oder die Stelle rein remote, gib dafür einen leeren String zurück. " +
       "Der folgende Text stammt oft von einer Jobportal-Seite und kann Navigation, Cookie-Hinweise, " +
       "Unternehmens-Werbung, Fusszeilen und Teaser zu ähnlichen Stellen enthalten. Ignoriere all das " +
       "und beziehe dich ausschliesslich auf die eigentliche Stellenanzeige. Enthält der Text mehrere " +
@@ -2144,6 +2178,19 @@ function saveAttempt(result, durationMs, evalCost, evalTokens) {
     if (quiz.jobUrl) job.url = quiz.jobUrl;
   }
   job.titel = quiz.titel;
+  // Arbeitgeber und Arbeitsort auffrischen, sobald erkannt - sie machen zwei
+  // gleichnamige Stellen (z. B. "Fachinformatiker") in der Liste unterscheidbar.
+  // Additiv: aeltere Stellen ohne diese Felder bleiben gueltig, Anzeige faellt
+  // dann auf den Titel allein zurueck. Leere Werte ueberschreiben nichts.
+  if (typeof quiz.arbeitgeber === "string" && quiz.arbeitgeber.trim()) job.arbeitgeber = quiz.arbeitgeber.trim();
+  if (typeof quiz.arbeitsort === "string" && quiz.arbeitsort.trim()) job.arbeitsort = quiz.arbeitsort.trim();
+  // Zuletzt genutzte Test-Einstellungen merken, damit die Stellen-Subpage einen
+  // Test mit denselben Optionen per Tipp wiederholen kann (One-Tap-Repeat).
+  job.lastTestConfig = {
+    mode,
+    difficulty: quiz.schwierigkeitsgrad || "",
+    num: quiz.fragen.length,
+  };
 
   const cost = buildCost(quiz.genCost, evalCost);
   const tokens = buildTokens(quiz.genTokens, evalTokens);
@@ -2187,100 +2234,344 @@ function scoreClass(p) {
   return p >= 70 ? "good" : p >= 40 ? "mid" : "bad";
 }
 
+// Arbeitgeber und Arbeitsort als eine Zeile zur Unterscheidung gleichnamiger
+// Stellen ("Fachinformatiker bei IBM in Bonn" vs. "... bei Stadtwerke Halle").
+// Leer, wenn beide Felder fehlen (aeltere Stellen) - dann traegt nur der Titel.
+function jobSubtitle(job) {
+  const parts = [];
+  if (job && typeof job.arbeitgeber === "string" && job.arbeitgeber.trim()) parts.push(job.arbeitgeber.trim());
+  if (job && typeof job.arbeitsort === "string" && job.arbeitsort.trim()) parts.push(job.arbeitsort.trim());
+  return parts.join(" · ");
+}
+
+// Detaillierter Block einer Stelle: Kopf (Titel, Arbeitgeber/Ort, Statistik),
+// Trend, Spielfortschritt und Versuchsliste. Wird in der Vollansicht (Historie)
+// und auf der Stellen-Subpage genutzt. Auf der Subpage entfaellt der Oeffnen-
+// Knopf, weil das Start-Panel dort schon oben sitzt.
+function renderJobBlock(job, opts) {
+  const subpage = !!(opts && opts.subpage);
+  const block = document.createElement("div");
+  block.className = "job-block";
+
+  const best = Math.max(...job.attempts.map((a) => a.prozent));
+  const last = job.attempts[job.attempts.length - 1].prozent;
+
+  const head = document.createElement("div");
+  head.className = "job-head";
+  const title = document.createElement("div");
+  const strong = document.createElement("strong");
+  strong.textContent = job.titel;
+  title.appendChild(strong);
+  const subt = jobSubtitle(job);
+  if (subt) {
+    const emp = document.createElement("p");
+    emp.className = "job-employer";
+    emp.textContent = subt;
+    title.appendChild(emp);
+  }
+  const sub = document.createElement("p");
+  sub.className = "hint";
+  sub.textContent = `${job.attempts.length} Versuch${job.attempts.length === 1 ? "" : "e"} · Bester: ${best} % · Letzter: ${last} %`;
+  title.appendChild(sub);
+  head.appendChild(title);
+  if (!subpage) {
+    const openBtn = document.createElement("button");
+    openBtn.textContent = "Öffnen";
+    openBtn.title = "Stelle öffnen: Tests starten und Fortschritt ansehen";
+    openBtn.addEventListener("click", () => openJob(job));
+    head.appendChild(openBtn);
+  }
+  block.appendChild(head);
+
+  // Verlauf als Balken (chronologisch, max. die letzten 12)
+  const trend = document.createElement("div");
+  trend.className = "trend";
+  job.attempts.slice(-12).forEach((a) => {
+    const bar = document.createElement("div");
+    bar.className = "trend-bar " + scoreClass(a.prozent);
+    bar.style.height = Math.max(4, Math.round(a.prozent * 0.44)) + "px";
+    bar.title = `${formatDate(a.date)}: ${a.prozent} %`;
+    trend.appendChild(bar);
+  });
+  block.appendChild(trend);
+
+  // Spielfortschritt dieser Stelle (Level, XP, Serie, Abzeichen)
+  block.appendChild(buildJobProgressPanel(computeJobProgress(job)));
+
+  // Versuche, neueste zuerst
+  const ul = document.createElement("ul");
+  ul.className = "attempt-list";
+  job.attempts.slice().reverse().forEach((att) => {
+    const li = document.createElement("li");
+    const info = document.createElement("span");
+    info.textContent = `${formatDate(att.date)} · ${att.mode === "pruefung" ? "Prüfung" : "Lernen"}` +
+      (att.schwierigkeitsgrad ? ` · ${difficultyLabel(att.schwierigkeitsgrad)}` : "") +
+      ` · ${att.quiz.fragen.length} Fragen` +
+      // Kosten zeigen, wenn fuer diesen Versuch erfasst (Cloud-Anbieter mit
+      // Preis); sonst bei lokalen Modellen ersatzweise den Token-Verbrauch.
+      // Aeltere Versuche haben keins von beidem - dann bleibt der Slot leer.
+      (att.cost && typeof att.cost.total === "number"
+        ? ` · ca. ${formatUsd(att.cost.total)}`
+        : att.tokens && typeof att.tokens.total === "number" && att.tokens.total > 0
+        ? ` · ${formatTokens(att.tokens.total)}`
+        : "");
+    const score = document.createElement("span");
+    score.className = "attempt-score " + scoreClass(att.prozent);
+    score.textContent = att.prozent + " %";
+    const openBtn = document.createElement("button");
+    openBtn.textContent = "Ansehen";
+    openBtn.addEventListener("click", () => openAttempt(job, att));
+    li.appendChild(info);
+    li.appendChild(score);
+    li.appendChild(openBtn);
+    ul.appendChild(li);
+  });
+  block.appendChild(ul);
+
+  return block;
+}
+
 function renderHistory() {
   const h = loadHistory();
   const list = $("history-list");
   list.innerHTML = "";
-  $("history-empty").classList.toggle("hidden", h.jobs.length > 0);
+  const jobs = h.jobs.filter((j) => j && Array.isArray(j.attempts) && j.attempts.length > 0);
+  $("history-empty").classList.toggle("hidden", jobs.length > 0);
+  jobs.forEach((job) => list.appendChild(renderJobBlock(job)));
+}
 
-  h.jobs.forEach((job) => {
-    // Eine Stelle ohne Versuche (z. B. aus einer manipulierten Importdatei)
-    // wuerde best/last unten zum Absturz bringen - solche Eintraege ueberspringen
-    if (!job || !Array.isArray(job.attempts) || job.attempts.length === 0) return;
+/* ---------- Startliste (Home) und Stellen-Subpage ---------- */
 
-    const block = document.createElement("div");
-    block.className = "job-block";
+// Wie viele Stellen die Startliste direkt zeigt; der Rest ist ueber "Alle
+// Stellen ansehen" (Vollansicht/Historie) erreichbar.
+const HOME_MAX = 5;
 
-    const best = Math.max(...job.attempts.map((a) => a.prozent));
-    const last = job.attempts[job.attempts.length - 1].prozent;
+// Kompakte Karte einer Stelle fuer die Startliste: Titel, Arbeitgeber/Ort,
+// kurze Kennzahlen, Bestwert und ein Mini-Trend. Tippen oeffnet die Subpage.
+function buildHomeCard(job) {
+  const best = Math.max(...job.attempts.map((a) => a.prozent));
+  const prog = computeJobProgress(job);
+  // Bewusst ein div mit role/tabindex statt <button>: die Karte enthaelt
+  // Block-Inhalte (Titel, Untertitel, Kennzahlen, Mini-Trend), die im
+  // Button-Inhaltsmodell nicht zulaessig waeren. Tastaturbedienung (Enter/Leer)
+  // wird unten nachgebildet.
+  const card = document.createElement("div");
+  card.className = "home-card";
+  card.setAttribute("role", "button");
+  card.tabIndex = 0;
 
-    const head = document.createElement("div");
-    head.className = "job-head";
-    const title = document.createElement("div");
-    const strong = document.createElement("strong");
-    strong.textContent = job.titel;
-    const sub = document.createElement("p");
-    sub.className = "hint";
-    sub.textContent = `${job.attempts.length} Versuch${job.attempts.length === 1 ? "" : "e"} · Bester: ${best} % · Letzter: ${last} %`;
-    title.appendChild(strong);
-    title.appendChild(sub);
-    const practiceBtn = document.createElement("button");
-    practiceBtn.textContent = "Weiter üben";
-    practiceBtn.title = "Neuen Test zu dieser Stelle erstellen";
-    practiceBtn.addEventListener("click", () => {
-      $("job-text").value = job.jobText;
-      // URL der Stelle wieder ins Feld holen und als lastFetch hinterlegen, damit
-      // ein frisch erstellter Test wieder denselben urlKey traegt und bei dieser
-      // Stelle landet - nicht als neue Stelle ueber den Text-Hash.
-      if (job.url) {
-        $("job-url").value = job.url;
-        lastFetch = { url: job.url, text: job.jobText };
-      }
-      setSourceTab("text");
-      saveDraft();
-      showView("view-input");
-    });
-    head.appendChild(title);
-    head.appendChild(practiceBtn);
-    block.appendChild(head);
+  const main = document.createElement("div");
+  main.className = "home-card-main";
+  const strong = document.createElement("strong");
+  strong.textContent = job.titel;
+  main.appendChild(strong);
+  const subt = jobSubtitle(job);
+  if (subt) {
+    const emp = document.createElement("p");
+    emp.className = "home-card-sub";
+    emp.textContent = subt;
+    main.appendChild(emp);
+  }
+  const meta = document.createElement("p");
+  meta.className = "hint";
+  meta.textContent = `${job.attempts.length} Versuch${job.attempts.length === 1 ? "" : "e"} · Level ${prog.level}`;
+  main.appendChild(meta);
 
-    // Verlauf als Balken (chronologisch, max. die letzten 12)
-    const trend = document.createElement("div");
-    trend.className = "trend";
-    job.attempts.slice(-12).forEach((a) => {
-      const bar = document.createElement("div");
-      bar.className = "trend-bar " + scoreClass(a.prozent);
-      bar.style.height = Math.max(4, Math.round(a.prozent * 0.44)) + "px";
-      bar.title = `${formatDate(a.date)}: ${a.prozent} %`;
-      trend.appendChild(bar);
-    });
-    block.appendChild(trend);
-
-    // Spielfortschritt dieser Stelle (Level, XP, Serie, Abzeichen)
-    block.appendChild(buildJobProgressPanel(computeJobProgress(job)));
-
-    // Versuche, neueste zuerst
-    const ul = document.createElement("ul");
-    ul.className = "attempt-list";
-    job.attempts.slice().reverse().forEach((att) => {
-      const li = document.createElement("li");
-      const info = document.createElement("span");
-      info.textContent = `${formatDate(att.date)} · ${att.mode === "pruefung" ? "Prüfung" : "Lernen"}` +
-        (att.schwierigkeitsgrad ? ` · ${difficultyLabel(att.schwierigkeitsgrad)}` : "") +
-        ` · ${att.quiz.fragen.length} Fragen` +
-        // Kosten zeigen, wenn fuer diesen Versuch erfasst (Cloud-Anbieter mit
-        // Preis); sonst bei lokalen Modellen ersatzweise den Token-Verbrauch.
-        // Aeltere Versuche haben keins von beidem - dann bleibt der Slot leer.
-        (att.cost && typeof att.cost.total === "number"
-          ? ` · ca. ${formatUsd(att.cost.total)}`
-          : att.tokens && typeof att.tokens.total === "number" && att.tokens.total > 0
-          ? ` · ${formatTokens(att.tokens.total)}`
-          : "");
-      const score = document.createElement("span");
-      score.className = "attempt-score " + scoreClass(att.prozent);
-      score.textContent = att.prozent + " %";
-      const openBtn = document.createElement("button");
-      openBtn.textContent = "Ansehen";
-      openBtn.addEventListener("click", () => openAttempt(job, att));
-      li.appendChild(info);
-      li.appendChild(score);
-      li.appendChild(openBtn);
-      ul.appendChild(li);
-    });
-    block.appendChild(ul);
-
-    list.appendChild(block);
+  const side = document.createElement("div");
+  side.className = "home-card-side";
+  const score = document.createElement("span");
+  score.className = "home-card-score " + scoreClass(best);
+  score.textContent = best + " %";
+  side.appendChild(score);
+  const trend = document.createElement("div");
+  trend.className = "trend mini";
+  job.attempts.slice(-8).forEach((a) => {
+    const bar = document.createElement("div");
+    bar.className = "trend-bar " + scoreClass(a.prozent);
+    bar.style.height = Math.max(3, Math.round(a.prozent * 0.28)) + "px";
+    trend.appendChild(bar);
   });
+  side.appendChild(trend);
+
+  card.appendChild(main);
+  card.appendChild(side);
+  card.addEventListener("click", () => openJob(job));
+  card.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      openJob(job);
+    }
+  });
+  return card;
+}
+
+function renderHome() {
+  const h = loadHistory();
+  const jobs = h.jobs.filter((j) => j && Array.isArray(j.attempts) && j.attempts.length > 0);
+  const list = $("home-list");
+  list.innerHTML = "";
+  $("home-empty").classList.toggle("hidden", jobs.length > 0);
+  $("home-all-row").classList.toggle("hidden", jobs.length === 0);
+  jobs.slice(0, HOME_MAX).forEach((job) => list.appendChild(buildHomeCard(job)));
+}
+
+// Auswaehlbare Fragenzahlen - identisch zum Auswahlfeld im Eingabe-Bildschirm
+// (#num-questions). Eine Stelle.
+const NUM_OPTIONS = [6, 8, 10, 12, 15, 20, 25, 30];
+
+// Test-Einstellungen defensiv lesen: aeltere Stellen haben kein lastTestConfig,
+// dann Standard (Lernmodus, mittel, 10 Fragen). Die gespeicherte Fragenzahl ist
+// die tatsaechlich erzeugte (quiz.fragen.length) und kann daneben liegen, wenn
+// ein Modell mehr/weniger Fragen liefert - auf den naechsten waehlbaren Wert
+// rasten, damit Dropdown, Label und das Eingabe-Auswahlfeld nicht auseinander
+// laufen.
+function snapNum(n) {
+  return NUM_OPTIONS.reduce((best, o) => (Math.abs(o - n) < Math.abs(best - n) ? o : best), NUM_OPTIONS[0]);
+}
+
+function normalizeTestConfig(c) {
+  const valid = (d) => (d === "leicht" || d === "mittel" || d === "schwer" ? d : "mittel");
+  const c2 = c && typeof c === "object" ? c : {};
+  let num = Number(c2.num);
+  if (!Number.isFinite(num) || num < 1) num = 10;
+  return { mode: c2.mode === "pruefung" ? "pruefung" : "lernen", difficulty: valid(c2.difficulty), num: snapNum(num) };
+}
+
+// Start-Panel der Subpage: zwei Knoepfe (Lern-/Pruefungsmodus) mit den zuletzt
+// genutzten Optionen plus ein aufklappbarer Optionen-Bereich. Generiert wird
+// erst beim ausdruecklichen Klick - kein versehentlicher Kosten-Trigger.
+function buildStartPanel(job) {
+  const state = normalizeTestConfig(job.lastTestConfig);
+  const panel = document.createElement("div");
+  panel.className = "start-panel";
+
+  const btnRow = document.createElement("div");
+  btnRow.className = "start-buttons";
+  const lernBtn = document.createElement("button");
+  lernBtn.className = "primary";
+  const pruefBtn = document.createElement("button");
+  pruefBtn.className = "primary";
+  function refreshLabels() {
+    const meta = `${difficultyLabel(state.difficulty)} · ${state.num} Fragen`;
+    lernBtn.textContent = `Lernmodus starten — ${meta}`;
+    pruefBtn.textContent = `Prüfungsmodus starten — ${meta}`;
+  }
+  refreshLabels();
+  lernBtn.addEventListener("click", () => startTestForJob(job, "lernen", state));
+  pruefBtn.addEventListener("click", () => startTestForJob(job, "pruefung", state));
+  btnRow.appendChild(lernBtn);
+  btnRow.appendChild(pruefBtn);
+  panel.appendChild(btnRow);
+
+  const optToggle = document.createElement("button");
+  optToggle.className = "ghost options-toggle";
+  optToggle.type = "button";
+  optToggle.textContent = "Optionen";
+  const opts = document.createElement("div");
+  opts.className = "start-options hidden";
+  optToggle.addEventListener("click", () => {
+    const open = opts.classList.toggle("hidden");
+    optToggle.classList.toggle("active", !open);
+  });
+  panel.appendChild(optToggle);
+
+  // Schwierigkeit
+  const diffWrap = document.createElement("div");
+  diffWrap.className = "start-opt-row";
+  const diffLabel = document.createElement("span");
+  diffLabel.className = "start-opt-label";
+  diffLabel.textContent = "Schwierigkeit";
+  diffWrap.appendChild(diffLabel);
+  const diffBtns = document.createElement("div");
+  diffBtns.className = "start-opt-choices";
+  [["leicht", "Leicht"], ["mittel", "Mittel"], ["schwer", "Schwer"]].forEach(([val, label]) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip" + (state.difficulty === val ? " active" : "");
+    b.textContent = label;
+    b.addEventListener("click", () => {
+      state.difficulty = val;
+      diffBtns.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
+      b.classList.add("active");
+      refreshLabels();
+    });
+    diffBtns.appendChild(b);
+  });
+  diffWrap.appendChild(diffBtns);
+  opts.appendChild(diffWrap);
+
+  // Anzahl Fragen
+  const numWrap = document.createElement("div");
+  numWrap.className = "start-opt-row";
+  const numLabel = document.createElement("span");
+  numLabel.className = "start-opt-label";
+  numLabel.textContent = "Fragen";
+  numWrap.appendChild(numLabel);
+  const numSel = document.createElement("select");
+  NUM_OPTIONS.forEach((n) => {
+    const o = document.createElement("option");
+    o.value = String(n);
+    o.textContent = String(n);
+    if (n === state.num) o.selected = true;
+    numSel.appendChild(o);
+  });
+  numSel.addEventListener("change", () => {
+    state.num = Number(numSel.value);
+    refreshLabels();
+  });
+  numWrap.appendChild(numSel);
+  opts.appendChild(numWrap);
+
+  panel.appendChild(opts);
+  return panel;
+}
+
+let activeJob = null;
+
+function renderJob(job) {
+  activeJob = job;
+  const block = renderJobBlock(job, { subpage: true });
+  // Start-Panel direkt unter den Kopf (vor den Trend) setzen, damit der Titel
+  // zuerst kommt und die Startknoepfe gleich darunter sichtbar sind.
+  block.insertBefore(buildStartPanel(job), block.children[1] || null);
+  const wrap = $("job-detail");
+  wrap.innerHTML = "";
+  wrap.appendChild(block);
+}
+
+function openJob(job) {
+  renderJob(job);
+  showView("view-job");
+}
+
+function goHome() {
+  renderHome();
+  showView("view-home");
+}
+
+// Einen Test fuer eine bestehende Stelle starten (One-Tap-Repeat): die Eingabe-
+// Steuerelemente, die generateQuiz liest, mit Stellentext, URL und Konfiguration
+// fuellen und dann normal generieren. lastFetch wie beim Laden setzen, damit der
+// frische Test wieder denselben urlKey traegt und bei dieser Stelle landet.
+function startTestForJob(job, testMode, cfg) {
+  if (actionRunning) return;
+  $("job-text").value = job.jobText;
+  if (job.url) {
+    $("job-url").value = job.url;
+    lastFetch = { url: job.url, text: job.jobText };
+  } else {
+    // Kein verlaesslicher URL-Bezug: ueber den Text-key wird die Stelle erkannt.
+    lastFetch = { url: "", text: "" };
+  }
+  setSourceTab("text");
+  const mEl = document.querySelector(`input[name="mode"][value="${testMode}"]`);
+  if (mEl) mEl.checked = true;
+  const dEl = document.querySelector(`input[name="difficulty"][value="${cfg.difficulty}"]`);
+  if (dEl) dEl.checked = true;
+  const numSel = $("num-questions");
+  if ([...numSel.options].some((o) => o.value === String(cfg.num))) numSel.value = String(cfg.num);
+  saveDraft();
+  generateQuiz();
 }
 
 // Gespeicherten Versuch wieder oeffnen: Auswertung anzeigen, Fragebogen
@@ -2292,6 +2583,8 @@ function openAttempt(job, att) {
   // der Review heraus wieder zur selben Stelle gespeichert wird
   if (job.urlKey) quiz.urlKey = job.urlKey;
   if (job.url) quiz.jobUrl = job.url;
+  if (job.arbeitgeber) quiz.arbeitgeber = job.arbeitgeber;
+  if (job.arbeitsort) quiz.arbeitsort = job.arbeitsort;
   answers = att.answers.slice();
   revealed = (att.revealed || []).slice();
   while (revealed.length < quiz.fragen.length) revealed.push(false);
@@ -2613,10 +2906,10 @@ $("btn-save-settings").addEventListener("click", () => {
   // Server-Adresse nur fuer den lokalen Anbieter sichern (optionales Feld)
   if (provider === "local") settings.baseUrl = normalizeBaseUrl($("base-url").value);
   saveSettings(settings);
-  showView(returnView);
+  goReturn();
 });
 
-$("btn-cancel-settings").addEventListener("click", () => showView(returnView));
+$("btn-cancel-settings").addEventListener("click", goReturn);
 
 /* ---------- Daten-Export / -Import (Umzug zwischen Adressen/Browsern) ---------- */
 
@@ -2824,7 +3117,17 @@ $("btn-history").addEventListener("click", () => {
   showView("view-history");
 });
 
-$("btn-history-back").addEventListener("click", () => showView(returnView));
+$("btn-history-back").addEventListener("click", goReturn);
+
+// Startliste und Stellen-Subpage
+$("btn-new-job").addEventListener("click", () => showView("view-input"));
+$("btn-input-back").addEventListener("click", goHome);
+$("btn-job-back").addEventListener("click", goHome);
+$("btn-all-jobs").addEventListener("click", () => {
+  rememberReturnView();
+  renderHistory();
+  showView("view-history");
+});
 
 // Farbschema-Schalter (Auto -> Hell -> Dunkel -> Auto)
 syncThemeButton(loadTheme());
@@ -2936,10 +3239,15 @@ document.addEventListener("keydown", (e) => {
 // Update/Reload ueberleben (und die Stelle ueber lastFetch wiedererkannt wird)
 restoreDraft();
 
-// Beim ersten Start zum Onboarding
-if (!settings.apiKey) {
+// Beim ersten Start zum Onboarding, sonst auf die Startliste der Stellen.
+// Lokaler Anbieter laeuft ohne API-Schluessel - dort gilt ein gewaehltes Modell
+// als eingerichtet, sonst landeten lokale Nutzer bei jedem Reload im Onboarding.
+const isConfigured = settings.provider === "local" ? !!settings.model : !!settings.apiKey;
+if (!isConfigured) {
   renderOnboardingSteps($("ob-provider").value);
   showView("view-onboarding");
+} else {
+  goHome();
 }
 
 /* ---------- Service Worker (PWA) ---------- */
