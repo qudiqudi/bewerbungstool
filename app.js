@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.23";
+const APP_VERSION = "1.0.24";
 
 const CHANGELOG = [
+  {
+    version: "1.0.24",
+    date: "14.06.2026",
+    items: [
+      "Lernmodus: Fragen, die du aufgelöst hast, lösen vor dem Auswerten nicht mehr die Rückfrage „Unbeantwortete Fragen“ aus. Bisher galt eine nur aufgelöste Multiple-Choice-Frage als unbeantwortet, obwohl die Lösung schon eingeblendet war. In der Auswertung gehen solche Fragen weiterhin als aufgelöst ohne eigene Antwort ein.",
+    ],
+  },
   {
     version: "1.0.23",
     date: "14.06.2026",
@@ -1620,7 +1627,13 @@ function prevQuestion() {
 
 async function evaluateQuiz() {
   if (actionRunning) return;
-  const unanswered = answers.filter((a) => !a.trim()).length;
+  // Aufgeloeste Fragen im Lernmodus zaehlen nicht als unbeantwortet: wer die
+  // Loesung bewusst angesehen hat, hat die Frage nicht versehentlich
+  // uebersprungen. Sie gehen in der Auswertung als aufgeloest ohne eigene
+  // Antwort ein (siehe payload.aufgeloest), loesen aber keine Rueckfrage aus.
+  const unanswered = answers.filter(
+    (a, i) => !a.trim() && !(mode === "lernen" && revealed[i]),
+  ).length;
   // Bei unbeantworteten Fragen erst im UI-Modal rueckfragen (kein blockierendes
   // natives confirm()). runEvaluation() laeuft erst nach Bestaetigung; das
   // Abbrechen erledigt closeConfirmEval (inkl. Rueckkehr in den Ueberzieh-Modus).
