@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.24";
+const APP_VERSION = "1.0.25";
 
 const CHANGELOG = [
+  {
+    version: "1.0.25",
+    date: "14.06.2026",
+    items: [
+      "Lokale Modelle (Ollama/LM Studio): Die Fragen werden jetzt in kleinen Blöcken erzeugt statt alle auf einmal. Das hält den Kontext klein – kleine Modelle brechen nicht mehr mitten in der Antwort ab –, du siehst die Fragen einzeln entstehen und kannst die Erstellung jederzeit mit „Stoppen & verwenden“ abbrechen und mit den bereits fertigen Fragen weitermachen. Lernhintergrund und Quellen werden bei lokalen Modellen erst beim Auflösen einer Frage einzeln nachgeladen, damit die Erstellung deutlich schneller läuft. Cloud-Anbieter und gespeicherte Versuche bleiben unverändert.",
+    ],
+  },
   {
     version: "1.0.24",
     date: "14.06.2026",
@@ -477,6 +484,13 @@ let current = 0;
 let mode = "lernen";  // "lernen" | "pruefung"
 let reviewing = false; // Durchgehen eines bereits bewerteten Fragebogens (keine erneute Auswertung)
 let revealed = [];    // Lernmodus: welche Fragen bereits aufgeloest wurden
+// Lokaler Lernmodus: lerninfo/quellen werden erst beim Aufloesen nachgeladen.
+// enrichingIdx = Index der Frage, die gerade angereichert wird (-1 = keine);
+// enrichTried merkt sich versuchte Indizes, damit ein Fehlschlag nicht in einer
+// Schleife endlos neu anfragt. Bewusst Modul-Zustand statt Felder am Frage-
+// Objekt, damit nichts davon in den gespeicherten Versuch wandert.
+let enrichingIdx = -1;
+let enrichTried = new Set();
 let startTime = 0;
 const timer = { intervalId: null, deadline: 0, overtime: false, limitMin: 0 };
 
@@ -532,6 +546,7 @@ function showLoading(text) {
   $("loading-text").textContent = text;
   $("loading-progress").classList.add("hidden");
   $("loading-fill").style.width = "0%";
+  hideAbortButton();
   $("loading").classList.remove("hidden");
 
   const started = Date.now();
@@ -551,7 +566,30 @@ function setLoadingProgress(done, total, label) {
 function hideLoading() {
   clearInterval(loadingTicker);
   loadingTicker = null;
+  hideAbortButton();
   $("loading").classList.add("hidden");
+}
+
+// Abbruch-Knopf im Lade-Overlay (nur bei der lokalen Batch-Generierung sichtbar)
+function showAbortButton(onAbort) {
+  const btn = $("loading-abort");
+  btn.textContent = "Stoppen & verwenden";
+  btn.disabled = false;
+  btn.classList.remove("hidden");
+  btn.onclick = () => {
+    btn.disabled = true;
+    btn.textContent = "Wird gestoppt...";
+    onAbort();
+  };
+}
+
+function hideAbortButton() {
+  const btn = $("loading-abort");
+  if (!btn) return;
+  btn.classList.add("hidden");
+  btn.onclick = null;
+  btn.disabled = false;
+  btn.textContent = "Stoppen & verwenden";
 }
 
 function showError(msg) {
@@ -629,6 +667,48 @@ const QUESTIONS_SCHEMA = {
     },
   },
   required: ["titel", "arbeitgeber", "arbeitsort", "empfohlene_zeit_minuten", "fragen"],
+  additionalProperties: false,
+};
+
+// Schlanke Variante fuer lokale Modelle (Ollama/LM Studio): ohne lerninfo und
+// quellen. Diese beiden Felder sind beim Generieren am teuersten (viel Text,
+// und "echte" Quellen kosten das Modell zusaetzlich Denkarbeit). Kleine
+// Modelle auf dem eigenen Rechner muessen so pro Frage deutlich weniger
+// erzeugen - das beugt dem Abschneiden am Kontextlimit vor und ist schneller.
+// Beides wird erst beim Aufloesen einer Frage einzeln nachgeladen
+// (enrichQuestionLocal), und nur wenn der Nutzer die Frage wirklich aufdeckt.
+const QUESTIONS_SCHEMA_LOCAL = (() => {
+  const s = JSON.parse(JSON.stringify(QUESTIONS_SCHEMA));
+  const item = s.properties.fragen.items;
+  delete item.properties.lerninfo;
+  delete item.properties.quellen;
+  item.required = item.required.filter((k) => k !== "lerninfo" && k !== "quellen");
+  return s;
+})();
+
+// Nur die beim Aufloesen nachgeladenen Felder (lokaler Lernmodus)
+const ENRICH_SCHEMA = {
+  type: "object",
+  properties: {
+    lerninfo: {
+      type: "string",
+      description: "Lernrelevanter Hintergrund zum Thema der Frage, 2 bis 4 Saetze",
+    },
+    quellen: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          titel: { type: "string", description: "Name der Quelle, z. B. Gesetz, Norm, Standardwerk oder Dokumentation" },
+          url: { type: "string", description: "URL der Quelle, nur wenn sicher bekannt; sonst leerer String" },
+        },
+        required: ["titel", "url"],
+        additionalProperties: false,
+      },
+      description: "1 bis 3 real existierende Quellen zur Vertiefung",
+    },
+  },
+  required: ["lerninfo", "quellen"],
   additionalProperties: false,
 };
 
@@ -780,7 +860,7 @@ async function readSSEText(res, extractDelta, onChunk) {
   return acc;
 }
 
-async function callLLM(systemPrompt, userPrompt, schema, onProgress) {
+async function callLLM(systemPrompt, userPrompt, schema, onProgress, opts = {}) {
   const provider = settings.provider || "anthropic";
   // Lokale Modelle brauchen keinen Key (laufen ohne Anbieter-Konto).
   if (provider !== "local" && !settings.apiKey) {
@@ -923,12 +1003,16 @@ async function callLLM(systemPrompt, userPrompt, schema, onProgress) {
   if (settings.apiKey) headers.Authorization = `Bearer ${settings.apiKey}`;
 
   const localConnError = "Keine Verbindung zum lokalen Modellserver. Läuft Ollama bzw. LM Studio, und ist die Adresse in den Einstellungen korrekt? Bei Aufruf über https muss der Server zudem Cross-Origin-Anfragen dieser Seite erlauben (z. B. OLLAMA_ORIGINS).";
-  const doPost = () => fetch(endpoint, { method: "POST", headers, body: JSON.stringify(body) });
+  const doPost = () => fetch(endpoint, { method: "POST", headers, body: JSON.stringify(body), signal: opts.signal });
 
   let res;
   try {
     res = await doPost();
   } catch (e) {
+    // Abbruch durch den Nutzer (AbortController) unveraendert weiterreichen,
+    // damit die Batch-Schleife ihn als Abbruch und nicht als Verbindungsfehler
+    // behandelt.
+    if (e && e.name === "AbortError") throw e;
     if (isLocal) throw new Error(localConnError);
     throw e;
   }
@@ -942,6 +1026,7 @@ async function callLLM(systemPrompt, userPrompt, schema, onProgress) {
     try {
       res = await doPost();
     } catch (e) {
+      if (e && e.name === "AbortError") throw e;
       throw new Error(localConnError);
     }
   }
@@ -1249,6 +1334,162 @@ function restoreDraft() {
   }
 }
 
+// Lokale Modelle bekommen einen kuerzeren Jobtext (kleinerer Kontext) und die
+// Fragen in kleinen Bloecken. Die Werte sind bewusst konservativ: lieber ein
+// paar Runden mehr als ein abgeschnittener Block.
+const LOCAL_JOBTEXT_CAP = 8000;
+const LOCAL_BATCH_SIZE = 3;
+
+// Lokale Generierung in kleinen Bloecken. Vorteile gegenueber einem einzigen
+// grossen Aufruf: der Kontext pro Aufruf bleibt klein (kein Abschneiden bei
+// kleinen Modellen), der Fortschritt ist sichtbar, und der Nutzer kann
+// jederzeit abbrechen und mit den bereits fertigen Fragen weitermachen. Der
+// Jobtext steht als konstanter Prompt-Prefix vorn, nur die kurze
+// Zusatzanweisung variiert - so kann der lokale Server den Prefix cachen.
+// Liefert dieselbe Form wie callLLM: { data, cost, tokens }.
+async function generateLocalBatches(system, jobText, total, onProgress) {
+  const collected = [];
+  let meta = null;
+  let cost = 0, input = 0, output = 0;
+  let aborted = false;
+
+  const controller = new AbortController();
+  // Knopf im Lade-Overlay: bricht den laufenden Block ab; die schon fertigen
+  // Bloecke bleiben erhalten.
+  showAbortButton(() => { aborted = true; controller.abort(); });
+
+  try {
+    // Obergrenze gegen Endlosschleifen, falls ein Modell wiederholt zu wenige
+    // (oder keine) Fragen liefert.
+    const maxRounds = Math.ceil(total / LOCAL_BATCH_SIZE) + 2;
+    let round = 0;
+    while (collected.length < total && round < maxRounds && !aborted) {
+      round++;
+      const n = Math.min(LOCAL_BATCH_SIZE, total - collected.length);
+      const asked = collected.map((q) => "- " + q.frage).join("\n");
+      const user =
+        `Erstelle genau ${n} Fragen eines Einstellungstests zu dieser Stellenausschreibung:\n\n` +
+        jobText +
+        (asked
+          ? `\n\nDiese Fragen wurden bereits gestellt - stelle inhaltlich andere, ohne Wiederholungen:\n${asked}`
+          : "");
+
+      let out;
+      try {
+        out = await callLLM(system, user, QUESTIONS_SCHEMA_LOCAL, (acc) => {
+          const seen = (acc.match(/"frage"\s*:/g) || []).length;
+          onProgress(collected.length + seen);
+        }, { signal: controller.signal });
+      } catch (e) {
+        if (e && e.name === "AbortError") { aborted = true; break; }
+        // Spaeterer Block scheitert, aber es gibt schon brauchbare Fragen ->
+        // diese behalten statt den ganzen Lauf zu verwerfen.
+        if (collected.length) break;
+        throw e;
+      }
+
+      let norm;
+      try {
+        norm = normalizeQuizData(out.data);
+      } catch (e) {
+        if (collected.length) break;
+        throw e;
+      }
+      if (!meta) meta = norm;
+      collected.push(...norm.fragen);
+      cost += out.cost || 0;
+      input += out.tokens?.input || 0;
+      output += out.tokens?.output || 0;
+      onProgress(collected.length);
+    }
+  } finally {
+    hideAbortButton();
+  }
+
+  if (!collected.length) {
+    throw new Error(aborted
+      ? "Abgebrochen, bevor die erste Frage fertig war."
+      : "Die Modellantwort enthielt keine verwertbaren Fragen.");
+  }
+
+  // Fragen fortlaufend neu nummerieren (jeder Block zaehlt bei 1 los) und auf
+  // die gewuenschte Zahl kappen, falls der letzte Block ueberliefert hat.
+  const fragen = collected.slice(0, total).map((q, i) => ({ ...q, id: i + 1 }));
+  // Die Zeitschaetzung kommt aus dem ersten Block (nur wenige Fragen) und wird
+  // auf die Gesamtzahl hochgerechnet; computeTimeLimitMin faengt Ausreisser
+  // ohnehin mit einer Faustregel ab.
+  const zeitProFrage = meta.empfohlene_zeit_minuten / Math.max(1, meta.fragen.length);
+  const zeit = Math.round(zeitProFrage * fragen.length);
+
+  return {
+    data: {
+      titel: meta.titel,
+      arbeitgeber: meta.arbeitgeber,
+      arbeitsort: meta.arbeitsort,
+      empfohlene_zeit_minuten: Number.isFinite(zeit) && zeit > 0 ? zeit : 0,
+      fragen,
+    },
+    cost,
+    tokens: { input, output },
+  };
+}
+
+// Laedt fuer eine einzelne Frage Lernhintergrund und Quellen nach. Wird nur im
+// lokalen Lernmodus beim Aufloesen aufgerufen (kleiner, billiger Aufruf statt
+// alles bei der Generierung mitzuerzeugen).
+async function enrichQuestionLocal(q) {
+  const system =
+    "Du bist ein erfahrener Recruiter und Fachexperte. Liefere zu einer Pruefungsfrage einen kurzen, " +
+    "lernrelevanten Hintergrund (2 bis 4 Saetze) und 1 bis 3 reale Quellen zur Vertiefung. " +
+    "Nenne nur real existierende Quellen (Gesetze, Normen, Standardwerke, offizielle Dokumentation, etablierte Fachseiten). " +
+    "Gib die URL einer Quelle nur an, wenn du dir sicher bist, dass sie existiert - bevorzugt stabile Startseiten oder " +
+    "bekannte Adressen. Sonst lasse die URL leer und waehle einen praegnanten Titel, der sich als Suchbegriff eignet. " +
+    "Antworte auf Deutsch.";
+  const user =
+    `Frage: ${q.frage}\n` +
+    (q.optionen && q.optionen.length ? `Antwortoptionen: ${q.optionen.join(" | ")}\n` : "") +
+    `Korrekte Antwort: ${q.korrekte_antwort || ""}`;
+  const { data } = await callLLM(system, user, ENRICH_SCHEMA);
+  const lerninfo = data && typeof data.lerninfo === "string" ? data.lerninfo.trim() : "";
+  const quellen = data && Array.isArray(data.quellen)
+    ? data.quellen
+        .filter((s) => s && typeof s === "object")
+        .map((s) => ({
+          titel: typeof s.titel === "string" ? s.titel : "",
+          url: typeof s.url === "string" ? s.url : "",
+        }))
+        .filter((s) => s.titel || s.url)
+    : [];
+  return { lerninfo, quellen };
+}
+
+// Reichert die gerade aufgeloeste Frage nach, sofern noetig und erlaubt: nur bei
+// lokalem Anbieter, nicht beim Durchsehen eines alten Versuchs, nicht wenn die
+// Felder schon da sind (z. B. aus der Cloud-Generierung oder bereits geladen),
+// und je Frage nur einmal versucht. Kostet bei lokalen Modellen nichts.
+function maybeEnrichRevealed(idx) {
+  if ((settings.provider || "anthropic") !== "local" || reviewing) return;
+  const q = quiz && quiz.fragen && quiz.fragen[idx];
+  if (!q || enrichTried.has(idx)) return;
+  if (q.lerninfo || (q.quellen && q.quellen.length)) return;
+  enrichTried.add(idx);
+  enrichingIdx = idx;
+  renderQuestion();
+  enrichQuestionLocal(q)
+    .then((res) => {
+      if (res.lerninfo) q.lerninfo = res.lerninfo;
+      if (res.quellen && res.quellen.length) q.quellen = res.quellen;
+    })
+    .catch(() => {
+      // Fehlschlag bleibt still: die Aufloesung zeigt dann nur die Erklaerungen.
+    })
+    .finally(() => {
+      if (enrichingIdx === idx) enrichingIdx = -1;
+      // Nur neu zeichnen, wenn der Nutzer noch bei dieser aufgeloesten Frage ist.
+      if (current === idx && revealed[idx] && !reviewing) renderQuestion();
+    });
+}
+
 async function generateQuiz() {
   if (actionRunning) return;
   const jobText = $("job-text").value.trim();
@@ -1268,9 +1509,26 @@ async function generateQuiz() {
     schwer: "etwa 10% leichte, 30% mittlere und 60% schwere Fragen",
   };
 
+  // Lokale Modelle bekommen ein schlankeres Schema (ohne lerninfo/quellen) und
+  // entsprechend einen Prompt ohne die teuren Quellen-Anweisungen - beides wird
+  // erst beim Aufloesen einer Frage nachgeladen.
+  const isLocal = (settings.provider || "anthropic") === "local";
+
   actionRunning = true;
   showLoading("Fragenkatalog wird erstellt...");
   try {
+    const antwortHinweis = isLocal
+      ? "Gib zu jeder Frage die korrekte Antwort an (bei Multiple-Choice exakt den Wortlaut der besten Option, " +
+        "bei offenen Fragen eine knappe Musterantwort), bei Multiple-Choice zu jeder Option eine kurze Erklärung, " +
+        "warum sie richtig oder falsch ist. "
+      : "Gib zu jeder Frage die korrekte Antwort an (bei Multiple-Choice exakt den Wortlaut der besten Option, " +
+        "bei offenen Fragen eine knappe Musterantwort), bei Multiple-Choice zu jeder Option eine kurze Erklärung, " +
+        "warum sie richtig oder falsch ist, einen lernrelevanten Hintergrund (lerninfo) sowie 1 bis 3 Quellen zur Vertiefung. " +
+        "Nenne nur real existierende Quellen (Gesetze, Normen, Standardwerke, offizielle Dokumentation, etablierte Fachseiten). " +
+        "Gib die URL einer Quelle nur an, wenn du dir sicher bist, dass sie existiert - bevorzugt Startseiten oder bekannte, " +
+        "stabile Adressen, keine tief verschachtelten Links. Sonst lasse die URL leer und waehle einen praegnanten Titel, " +
+        "der sich gut als Suchbegriff eignet. ";
+
     const system =
       "Du bist ein erfahrener Recruiter und erstellst realistische Einstellungstests. " +
       "Erstelle präzise, anspruchsvolle Fragen, die exakt auf die gegebene Stelle zugeschnitten sind. " +
@@ -1281,13 +1539,7 @@ async function generateQuiz() {
       "oder Vorstellungsgespräch für genau diese Stelle am wahrscheinlichsten gestellt werden - realistisch, " +
       "spezifisch und anspruchsvoll. 'mittel' sind solide Fachfragen, 'leicht' sind Grundlagen- und Einstiegsfragen. " +
       `Stelle die Mischung so zusammen: ${DIFFICULTY_MIX[difficulty]}. ` +
-      "Gib zu jeder Frage die korrekte Antwort an (bei Multiple-Choice exakt den Wortlaut der besten Option, " +
-      "bei offenen Fragen eine knappe Musterantwort), bei Multiple-Choice zu jeder Option eine kurze Erklärung, " +
-      "warum sie richtig oder falsch ist, einen lernrelevanten Hintergrund (lerninfo) sowie 1 bis 3 Quellen zur Vertiefung. " +
-      "Nenne nur real existierende Quellen (Gesetze, Normen, Standardwerke, offizielle Dokumentation, etablierte Fachseiten). " +
-      "Gib die URL einer Quelle nur an, wenn du dir sicher bist, dass sie existiert - bevorzugt Startseiten oder bekannte, " +
-      "stabile Adressen, keine tief verschachtelten Links. Sonst lasse die URL leer und waehle einen praegnanten Titel, " +
-      "der sich gut als Suchbegriff eignet. " +
+      antwortHinweis +
       "Schätze ausserdem ein realistisches Zeitlimit in Minuten für den gesamten Test. " +
       "Lies zusätzlich den ausschreibenden Arbeitgeber (Unternehmensname) und den Arbeitsort (Stadt bzw. Region) " +
       "aus der Anzeige aus. Ist eines davon nicht erkennbar oder die Stelle rein remote, gib dafür einen leeren String zurück. " +
@@ -1296,19 +1548,31 @@ async function generateQuiz() {
       "und beziehe dich ausschliesslich auf die eigentliche Stellenanzeige. Enthält der Text mehrere " +
       "Stellen, nimm die mit Abstand am ausführlichsten beschriebene. Antworte auf Deutsch.";
 
-    const user =
-      `Erstelle einen Einstellungstest mit genau ${numQuestions} Fragen zu dieser Stellenausschreibung:\n\n` +
-      jobText.slice(0, 30000);
-
     const total = Number(numQuestions);
     setLoadingProgress(0, total, "Das Modell liest die Stellenanzeige...");
-    const { data: result, cost: genCost, tokens: genTokens } = await callLLM(system, user, QUESTIONS_SCHEMA, (acc) => {
-      // Jede fertige Frage hat im gestreamten JSON genau einen "frage"-Schluessel
-      const seen = (acc.match(/"frage"\s*:/g) || []).length;
-      setLoadingProgress(seen, total, seen > 0
-        ? `Frage ${Math.min(seen, total)} von ${total} wird erstellt...`
-        : "Fragenkatalog wird erstellt...");
-    });
+    const progress = (done) => setLoadingProgress(Math.min(done, total), total, done > 0
+      ? `Frage ${Math.min(done, total)} von ${total} wird erstellt...`
+      : "Fragenkatalog wird erstellt...");
+
+    let result, genCost, genTokens;
+    if (isLocal) {
+      // Lokal: in kleinen Bloecken erzeugen (abbrechbar). Zustand der
+      // Nach-dem-Aufloesen-Anreicherung fuer den neuen Fragebogen zuruecksetzen.
+      enrichTried = new Set();
+      enrichingIdx = -1;
+      const out = await generateLocalBatches(system, jobText.slice(0, LOCAL_JOBTEXT_CAP), total, progress);
+      result = out.data; genCost = out.cost; genTokens = out.tokens;
+    } else {
+      const user =
+        `Erstelle einen Einstellungstest mit genau ${numQuestions} Fragen zu dieser Stellenausschreibung:\n\n` +
+        jobText.slice(0, 30000);
+      const out = await callLLM(system, user, QUESTIONS_SCHEMA, (acc) => {
+        // Jede fertige Frage hat im gestreamten JSON genau einen "frage"-Schluessel
+        const seen = (acc.match(/"frage"\s*:/g) || []).length;
+        progress(seen);
+      });
+      result = out.data; genCost = out.cost; genTokens = out.tokens;
+    }
     // Defensiv gegen Modelle ohne striktes Schema (DeepSeek, lokale Modelle):
     // Form pruefen und harmlose Luecken auffuellen, statt spaeter beim Rendern
     // an einem fehlenden Feld zu scheitern
@@ -1545,6 +1809,9 @@ function renderLearnArea(q, isRevealed) {
     btn.addEventListener("click", () => {
       revealed[current] = true;
       renderQuestion();
+      // Lokaler Lernmodus: Lernhintergrund und Quellen jetzt einzeln nachladen
+      // (zeichnet die Box bei Erfolg neu). Bei Cloud-Fragen ist beides schon da.
+      maybeEnrichRevealed(current);
       // Fokus in die neue Erklaerungsbox setzen, damit Tastatur- und
       // Screenreader-Nutzer direkt bei der Aufloesung weiterlesen
       const box = $("learn-area").querySelector(".learn-box");
@@ -1579,6 +1846,14 @@ function renderLearnArea(q, isRevealed) {
       ul.appendChild(li);
     });
     box.appendChild(ul);
+  }
+
+  // Lokaler Lernmodus: Lernhintergrund/Quellen werden gerade nachgeladen
+  if (enrichingIdx === current) {
+    const p = document.createElement("p");
+    p.className = "learn-loading";
+    p.textContent = "Lernhintergrund und Quellen werden geladen...";
+    box.appendChild(p);
   }
 
   if (q.lerninfo) {
@@ -2769,6 +3044,8 @@ function startTestForJob(job, testMode, cfg) {
 // laesst sich von dort im Lernmodus erneut durchgehen
 function openAttempt(job, att) {
   quiz = JSON.parse(JSON.stringify(att.quiz));
+  enrichTried = new Set();
+  enrichingIdx = -1;
   quiz.jobText = job.jobText;
   // urlKey/Quelle aus der Stelle übernehmen, damit ein erneutes Auswerten aus
   // der Review heraus wieder zur selben Stelle gespeichert wird

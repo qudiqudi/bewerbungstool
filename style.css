@@ -680,6 +680,7 @@ button.ghost {
 
 .learn-box p { margin: 0 0 0.6rem; }
 .learn-box p:last-child, .learn-box ul:last-child { margin-bottom: 0; }
+.learn-loading { font-style: italic; opacity: 0.75; }
 
 .learn-answer { font-family: var(--display); font-weight: 700; color: var(--accent-text); }
 
@@ -859,6 +860,20 @@ button.ghost {
   opacity: 0.75;
   font-variant-numeric: tabular-nums;
 }
+
+.loading-abort {
+  margin-top: 0.4rem;
+  padding: 0.45rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #fff;
+  background: transparent;
+  border: 1px solid oklch(0.5 0.02 50);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.loading-abort:hover:not(:disabled) { border-color: var(--primary); background: rgba(255, 255, 255, 0.06); }
+.loading-abort:disabled { opacity: 0.6; cursor: default; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
