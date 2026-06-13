@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.8";
+const APP_VERSION = "1.0.9";
 
 const CHANGELOG = [
+  {
+    version: "1.0.9",
+    date: "13.06.2026",
+    items: [
+      "Neu: Spielerischer Fortschritt je Stelle. Aus deinen Versuchen ergeben sich Erfahrungspunkte und Stufen, eine Übungsserie über mehrere Tage und Abzeichen für Meilensteine (z. B. erster Test, 90 % erreicht, Prüfung bestanden). Sichtbar in der Auswertung und in der Historie – frisch freigeschaltete Abzeichen und Stufenaufstiege werden direkt nach dem Test hervorgehoben.",
+    ],
+  },
   {
     version: "1.0.8",
     date: "13.06.2026",
@@ -1285,6 +1292,16 @@ async function runEvaluation() {
     });
     saveAttempt(result, durationMs, evalCost);
     renderResult(result, durationMs);
+    // Spielfortschritt dieser Stelle; frisch freigeschaltete Abzeichen und ein
+    // Levelaufstieg werden gegen den Stand vor diesem Versuch hervorgehoben.
+    const job = loadHistory().jobs.find((j) => j.key === jobKey(quiz.jobText));
+    if (job) {
+      const after = computeJobProgress(job);
+      const before = computeJobProgress({ attempts: job.attempts.slice(0, -1) });
+      const earnedBefore = new Set(before.badges.filter((b) => b.earned).map((b) => b.id));
+      const newBadges = after.badges.filter((b) => b.earned && !earnedBefore.has(b.id)).map((b) => b.id);
+      renderResultGami(job, { leveledUp: after.level > before.level, highlightBadges: newBadges });
+    }
     showView("view-result");
   } catch (e) {
     showError(e.message);
@@ -1340,6 +1357,9 @@ function renderResult(result, durationMs) {
   const g = result.gesamt || {};
   renderScoreRing(g.prozent, result.ergebnisse);
   $("result-summary").textContent = g.zusammenfassung || "";
+  // Gamification-Panel wird vom jeweiligen Aufrufer (frische Auswertung bzw.
+  // Review) befuellt; hier nur leeren, damit kein Stand stehen bleibt.
+  $("result-gami").innerHTML = "";
 
   const modeLabel = mode === "pruefung" ? "Prüfungsmodus" : "Lernmodus";
   let meta = `${modeLabel} · ${quiz.fragen.length} Fragen · Dauer ${formatMinSec(durationMs)} min`;
@@ -1405,6 +1425,212 @@ function renderResult(result, durationMs) {
     }
     details.appendChild(div);
   });
+}
+
+/* ---------- Gamification (pro Stelle) ---------- */
+// Bewusst rein abgeleitet aus den vorhandenen Versuchen einer Stelle: kein
+// neuer localStorage-Key, keine Formataenderung. Alles laesst sich jederzeit
+// aus job.attempts neu berechnen und bleibt damit abwaertskompatibel. Spielt
+// absichtlich nur je Stelle, nicht stellenuebergreifend.
+
+// XP eines Versuchs: das erreichte Prozentergebnis (0-100), strikt als Zahl
+// behandelt (alte/importierte Versuche koennen krumme oder fehlende Werte haben).
+function attemptXp(att) {
+  const p = Math.round(Number(att && att.prozent));
+  return Number.isFinite(p) ? Math.max(0, Math.min(100, p)) : 0;
+}
+
+// Stufentitel (ohne Emoji, nuechtern-motivierend).
+const LEVEL_TITLES = [
+  "Einsteiger", "Azubi", "Bewerber", "Routinier", "Profi",
+  "Experte", "Ass", "Meister", "Koryphäe", "Legende",
+];
+function levelTitle(level) {
+  return LEVEL_TITLES[Math.min(level, LEVEL_TITLES.length) - 1] || "Legende";
+}
+
+// Aus der Gesamt-XP die Stufe ableiten. Jede Stufe kostet 50 XP mehr als die
+// davor: Stufe 2 ab 100, 3 ab 250, 4 ab 450 ... (Einstieg leicht, dann
+// zunehmend mehr Uebung noetig).
+function levelForXp(totalXp) {
+  const xp = Math.max(0, Math.round(totalXp) || 0);
+  let level = 1, floor = 0, span = 100;
+  while (xp >= floor + span) { floor += span; level++; span += 50; }
+  return { level, floor, span, xpInLevel: xp - floor, xpForNext: span };
+}
+
+// Tagesordinalzahl (lokaler Kalendertag) ueber UTC der lokalen Y/M/D, damit
+// Sommer-/Winterzeit die Differenz zwischen zwei Tagen nicht verfaelscht.
+function dayOrdinal(ts) {
+  const d = new Date(ts);
+  return Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
+}
+
+// Aktuelle (am letzten Uebungstag endende) und laengste Serie aufeinander-
+// folgender Uebungstage.
+function computeStreaks(attempts) {
+  const days = [...new Set(attempts.map((a) => dayOrdinal(a.date)))].sort((a, b) => a - b);
+  if (!days.length) return { current: 0, best: 0 };
+  let best = 1, run = 1;
+  for (let i = 1; i < days.length; i++) {
+    run = days[i] - days[i - 1] === 1 ? run + 1 : 1;
+    if (run > best) best = run;
+  }
+  let current = 1;
+  for (let i = days.length - 1; i > 0; i--) {
+    if (days[i] - days[i - 1] === 1) current++; else break;
+  }
+  return { current, best };
+}
+
+// Abzeichen-Katalog. test(s) entscheidet aus den aggregierten Werten einer
+// Stelle, ob das Abzeichen verdient ist.
+const BADGES = [
+  { id: "erster-test", label: "Erster Schritt", desc: "Ersten Test zu dieser Stelle gemacht", test: (s) => s.count >= 1 },
+  { id: "bestanden", label: "Bestanden", desc: "Mindestens 50 % erreicht", test: (s) => s.bestPct >= 50 },
+  { id: "souveraen", label: "Souverän", desc: "Mindestens 70 % erreicht", test: (s) => s.bestPct >= 70 },
+  { id: "spitze", label: "Spitzenreiter", desc: "Mindestens 90 % erreicht", test: (s) => s.bestPct >= 90 },
+  { id: "aufwaerts", label: "Aufwärtstrend", desc: "Vom ersten zum letzten Versuch verbessert", test: (s) => s.improved },
+  { id: "drei-serie", label: "Drei am Stück", desc: "An 3 Tagen in Folge geübt", test: (s) => s.bestStreak >= 3 },
+  { id: "hartnaeckig", label: "Hartnäckig", desc: "10 Versuche zu dieser Stelle", test: (s) => s.count >= 10 },
+  { id: "ernstfall", label: "Ernstfall", desc: "Prüfungsmodus mit mindestens 70 % bestanden", test: (s) => s.pruefungPass },
+];
+
+// Aggregiert alle spielrelevanten Werte einer Stelle aus ihren Versuchen.
+function computeJobProgress(job) {
+  const attempts = (job && Array.isArray(job.attempts) ? job.attempts : []).filter(Boolean);
+  const totalXp = attempts.reduce((sum, a) => sum + attemptXp(a), 0);
+  const lvl = levelForXp(totalXp);
+  const pcts = attempts.map(attemptXp);
+  const bestPct = pcts.length ? Math.max(...pcts) : 0;
+  const byDate = attempts.slice().sort((a, b) => (a.date || 0) - (b.date || 0));
+  const improved = byDate.length >= 2 && attemptXp(byDate[byDate.length - 1]) > attemptXp(byDate[0]);
+  const pruefungPass = attempts.some((a) => a.mode === "pruefung" && attemptXp(a) >= 70);
+  const streak = computeStreaks(attempts);
+  const stats = {
+    count: attempts.length, bestPct, improved, pruefungPass,
+    currentStreak: streak.current, bestStreak: streak.best,
+  };
+  const badges = BADGES.map((b) => ({ id: b.id, label: b.label, desc: b.desc, earned: !!b.test(stats) }));
+  return {
+    totalXp, level: lvl.level, title: levelTitle(lvl.level),
+    xpInLevel: lvl.xpInLevel, xpForNext: lvl.xpForNext,
+    progressPct: lvl.xpForNext ? Math.round((lvl.xpInLevel / lvl.xpForNext) * 100) : 0,
+    bestPct, count: attempts.length,
+    currentStreak: streak.current, bestStreak: streak.best,
+    badges, earnedCount: badges.filter((b) => b.earned).length,
+  };
+}
+
+const BADGE_ICON_EARNED =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.8 6.1 20.4l1.1-6.5L2.5 8.8l6.5-.9z"/></svg>';
+const BADGE_ICON_LOCKED =
+  '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
+
+function buildXpBar(progress) {
+  const wrap = document.createElement("div");
+  wrap.className = "xp-bar";
+  wrap.setAttribute("role", "img");
+  wrap.setAttribute("aria-label", `${progress.xpInLevel} von ${progress.xpForNext} XP bis zur nächsten Stufe`);
+  const fill = document.createElement("div");
+  fill.className = "xp-fill";
+  fill.style.width = Math.max(0, Math.min(100, progress.progressPct)) + "%";
+  wrap.appendChild(fill);
+  return wrap;
+}
+
+function buildBadges(progress, highlightIds) {
+  const hi = new Set(highlightIds || []);
+  const row = document.createElement("div");
+  row.className = "badges";
+  progress.badges.forEach((b) => {
+    const pill = document.createElement("span");
+    pill.className = "badge " + (b.earned ? "earned" : "locked") + (hi.has(b.id) ? " new" : "");
+    const icon = document.createElement("span");
+    icon.className = "badge-icon";
+    icon.innerHTML = b.earned ? BADGE_ICON_EARNED : BADGE_ICON_LOCKED;
+    const lab = document.createElement("span");
+    lab.textContent = b.label + (hi.has(b.id) ? " · neu" : "");
+    pill.appendChild(icon);
+    pill.appendChild(lab);
+    pill.title = b.desc + (b.earned ? "" : " (noch nicht erreicht)");
+    row.appendChild(pill);
+  });
+  return row;
+}
+
+// Kompaktes Fortschrittspanel fuer eine Stelle (Historie und Auswertung).
+function buildJobProgressPanel(progress, opts) {
+  opts = opts || {};
+  const panel = document.createElement("div");
+  panel.className = "gami";
+
+  const lvl = document.createElement("div");
+  lvl.className = "gami-level";
+  const chip = document.createElement("span");
+  chip.className = "level-chip";
+  chip.textContent = "Level " + progress.level;
+  const title = document.createElement("strong");
+  title.textContent = progress.title;
+  lvl.appendChild(chip);
+  lvl.appendChild(title);
+  if (opts.leveledUp) {
+    const up = document.createElement("span");
+    up.className = "level-up";
+    up.textContent = "aufgestiegen!";
+    lvl.appendChild(up);
+  }
+  panel.appendChild(lvl);
+
+  panel.appendChild(buildXpBar(progress));
+  const xpText = document.createElement("p");
+  xpText.className = "hint gami-xp";
+  xpText.textContent = `${progress.xpInLevel} / ${progress.xpForNext} XP bis Level ${progress.level + 1}`;
+  panel.appendChild(xpText);
+
+  const meta = document.createElement("p");
+  meta.className = "hint gami-meta";
+  const parts = [];
+  if (progress.currentStreak >= 2) parts.push(`Serie: ${progress.currentStreak} Tage in Folge`);
+  if (progress.bestStreak >= 2) parts.push(`Beste Serie: ${progress.bestStreak} Tage`);
+  parts.push(`${progress.earnedCount} von ${progress.badges.length} Abzeichen`);
+  meta.textContent = parts.join(" · ");
+  panel.appendChild(meta);
+
+  panel.appendChild(buildBadges(progress, opts.highlightBadges));
+  return panel;
+}
+
+// Fortschrittspanel in der Auswertung; opts hebt frisch freigeschaltete
+// Level/Abzeichen hervor und sagt sie fuer Screenreader an.
+function renderResultGami(job, opts) {
+  const container = $("result-gami");
+  if (!container) return;
+  container.innerHTML = "";
+  if (!job) return;
+  opts = opts || {};
+  const progress = computeJobProgress(job);
+
+  const heading = document.createElement("h3");
+  heading.className = "gami-heading";
+  heading.textContent = "Dein Fortschritt bei dieser Stelle";
+  container.appendChild(heading);
+  container.appendChild(buildJobProgressPanel(progress, opts));
+
+  const fresh = (opts.highlightBadges || []);
+  if (opts.leveledUp || fresh.length) {
+    const say = [];
+    if (opts.leveledUp) say.push(`Neue Stufe erreicht: Level ${progress.level}, ${progress.title}.`);
+    if (fresh.length) {
+      const names = progress.badges.filter((b) => fresh.includes(b.id)).map((b) => b.label);
+      say.push(`Neues Abzeichen: ${names.join(", ")}.`);
+    }
+    const live = document.createElement("p");
+    live.className = "gami-announce";
+    live.setAttribute("role", "status");
+    live.textContent = say.join(" ");
+    container.appendChild(live);
+  }
 }
 
 /* ---------- Historie (localStorage, pro Stelle gruppiert) ---------- */
@@ -1607,6 +1833,9 @@ function renderHistory() {
     });
     block.appendChild(trend);
 
+    // Spielfortschritt dieser Stelle (Level, XP, Serie, Abzeichen)
+    block.appendChild(buildJobProgressPanel(computeJobProgress(job)));
+
     // Versuche, neueste zuerst
     const ul = document.createElement("ul");
     ul.className = "attempt-list";
@@ -1659,6 +1888,9 @@ function openAttempt(job, att) {
   timer.limitMin = att.timerLimitMin || 0;
   timer.overtime = !!att.overtime;
   renderResult(att.result, att.durationMs);
+  // Beim Ansehen eines alten Versuchs den aktuellen Stand der Stelle zeigen,
+  // aber ohne Feier (nichts wurde gerade frisch freigeschaltet).
+  renderResultGami(job, {});
   showView("view-result");
 }
 
