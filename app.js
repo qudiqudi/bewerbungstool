@@ -570,17 +570,25 @@ function hideLoading() {
   $("loading").classList.add("hidden");
 }
 
-// Abbruch-Knopf im Lade-Overlay (nur bei der lokalen Batch-Generierung sichtbar)
+// Abbruch-Knopf im Lade-Overlay (nur bei der lokalen Batch-Generierung sichtbar).
+// Startet deaktiviert: Abbrechen ergibt erst Sinn, wenn mindestens ein Block
+// fertig ist - vorher gibt es nichts zu uebernehmen (der laufende Block wird
+// verworfen). enableAbortButton() schaltet ihn frei, sobald Fragen vorliegen.
 function showAbortButton(onAbort) {
   const btn = $("loading-abort");
   btn.textContent = "Stoppen & verwenden";
-  btn.disabled = false;
+  btn.disabled = true;
   btn.classList.remove("hidden");
   btn.onclick = () => {
     btn.disabled = true;
     btn.textContent = "Wird gestoppt...";
     onAbort();
   };
+}
+
+function enableAbortButton() {
+  const btn = $("loading-abort");
+  if (btn && !btn.classList.contains("hidden")) btn.disabled = false;
 }
 
 function hideAbortButton() {
@@ -1401,6 +1409,8 @@ async function generateLocalBatches(system, jobText, total, onProgress) {
       input += out.tokens?.input || 0;
       output += out.tokens?.output || 0;
       onProgress(collected.length);
+      // Ab jetzt gibt es fertige Fragen -> Abbrechen darf etwas uebernehmen.
+      if (collected.length) enableAbortButton();
     }
   } finally {
     hideAbortButton();
