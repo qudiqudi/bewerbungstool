@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.0.1";
 
 const CHANGELOG = [
+  {
+    version: "1.0.1",
+    date: "13.06.2026",
+    items: [
+      "Gespeicherte Versuche aus älteren Versionen lassen sich wieder zuverlässig ansehen – fehlende Felder in der Auswertung oder im Fragebogen führen nicht mehr zu einer leeren Seite.",
+    ],
+  },
   {
     version: "1.0.0",
     date: "13.06.2026",
@@ -900,7 +907,9 @@ function renderQuestion() {
       let cls = "option";
       if (answers[current] === opt) cls += " selected";
       if (isRevealed) {
-        if (opt.trim() === q.korrekte_antwort.trim()) cls += " correct";
+        // Versuche aus aelteren Versionen koennen Felder wie korrekte_antwort
+        // noch nicht haben - Anzeige darf daran nie scheitern
+        if (opt.trim() === (q.korrekte_antwort || "").trim()) cls += " correct";
         else if (answers[current] === opt) cls += " wrong";
       }
       btn.className = cls;
@@ -977,18 +986,19 @@ function renderLearnArea(q, isRevealed) {
   const answerLine = document.createElement("p");
   answerLine.className = "learn-answer";
   answerLine.textContent =
-    (q.typ === "multiple_choice" ? "Richtige Antwort: " : "Musterantwort: ") + q.korrekte_antwort;
+    (q.typ === "multiple_choice" ? "Richtige Antwort: " : "Musterantwort: ") + (q.korrekte_antwort || "");
   box.appendChild(answerLine);
 
-  if (q.typ === "multiple_choice" && q.erklaerungen.length) {
+  const erklaerungen = Array.isArray(q.erklaerungen) ? q.erklaerungen : [];
+  if (q.typ === "multiple_choice" && erklaerungen.length) {
     const ul = document.createElement("ul");
     ul.className = "option-explanations";
     q.optionen.forEach((opt, i) => {
-      if (!q.erklaerungen[i]) return;
+      if (!erklaerungen[i]) return;
       const li = document.createElement("li");
-      const isCorrect = opt.trim() === q.korrekte_antwort.trim();
+      const isCorrect = opt.trim() === (q.korrekte_antwort || "").trim();
       li.className = isCorrect ? "exp-correct" : "exp-wrong";
-      li.textContent = `${opt} – ${q.erklaerungen[i]}`;
+      li.textContent = `${opt} – ${erklaerungen[i]}`;
       ul.appendChild(li);
     });
     box.appendChild(ul);
@@ -1138,9 +1148,11 @@ function renderScoreRing(prozent, ergebnisse) {
 }
 
 function renderResult(result, durationMs) {
-  const g = result.gesamt;
+  // Versuche aus aelteren Versionen koennen Teile der Auswertung nicht haben
+  // (z. B. ergebnisse/staerken) - alles hier liest deshalb defensiv
+  const g = result.gesamt || {};
   renderScoreRing(g.prozent, result.ergebnisse);
-  $("result-summary").textContent = g.zusammenfassung;
+  $("result-summary").textContent = g.zusammenfassung || "";
 
   const modeLabel = mode === "pruefung" ? "Prüfungsmodus" : "Lernmodus";
   let meta = `${modeLabel} · ${quiz.fragen.length} Fragen · Dauer ${formatMinSec(durationMs)} min`;
@@ -1155,7 +1167,7 @@ function renderResult(result, durationMs) {
   const fill = (id, items) => {
     const ul = $(id);
     ul.innerHTML = "";
-    items.forEach((s) => {
+    (Array.isArray(items) ? items : []).forEach((s) => {
       const li = document.createElement("li");
       li.textContent = s;
       ul.appendChild(li);
@@ -1167,7 +1179,7 @@ function renderResult(result, durationMs) {
   const details = $("result-details");
   details.innerHTML = "";
   quiz.fragen.forEach((q, i) => {
-    const r = result.ergebnisse.find((e) => e.id === q.id) || {};
+    const r = (result.ergebnisse || []).find((e) => e && e.id === q.id) || {};
     const div = document.createElement("div");
     div.className = "detail-item";
 
