@@ -1803,11 +1803,11 @@ function canonicalJobUrl(url) {
     const jk = indeedJobKey(u);
     if (jk) return "indeed:" + jk.toLowerCase();
   }
-  if (u.hostname.endsWith("onlyfy.jobs")) {
+  if (/(^|\.)onlyfy\.jobs$/i.test(u.hostname)) {
     const m = u.pathname.match(/\/job\/([a-z0-9]+)/i);
     if (m) return "onlyfy:" + m[1].toLowerCase();
   }
-  if (u.hostname.endsWith("stepstone.de")) {
+  if (/(^|\.)stepstone\.de$/i.test(u.hostname)) {
     const m = u.pathname.match(/--(\d+)\.html$/);
     if (m) return "stepstone:" + m[1];
   }
