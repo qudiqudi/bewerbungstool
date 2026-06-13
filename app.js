@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.16";
+const APP_VERSION = "1.0.17";
 
 const CHANGELOG = [
+  {
+    version: "1.0.17",
+    date: "13.06.2026",
+    items: [
+      "Historie: Bei lokalen Modellen wird statt der Kosten (die es dort nicht gibt) jetzt der Token-Verbrauch je Versuch angezeigt – als Orientierung, wie viel ein Test das lokale Modell gekostet hat. Für die Cloud-Anbieter bleibt die gewohnte Kostenanzeige in Dollar.",
+    ],
+  },
   {
     version: "1.0.16",
     date: "13.06.2026",
@@ -324,6 +331,14 @@ function formatUsd(usd) {
   if (typeof usd !== "number" || !isFinite(usd) || usd < 0) return "";
   const v = usd >= 0.1 ? usd.toFixed(2) : usd.toFixed(3);
   return v.replace(".", ",") + " $";
+}
+
+// Token-Anzahl kompakt ("12k Tokens"); ab 1000 auf Tausender gerundet, darunter
+// exakt. Fuer lokale Modelle, die keinen Preis haben, aber Verbrauch melden.
+function formatTokens(n) {
+  if (typeof n !== "number" || !isFinite(n) || n <= 0) return "";
+  const label = n >= 1000 ? `${Math.round(n / 1000)}k` : `${Math.round(n)}`;
+  return `${label} Tokens`;
 }
 
 /* ---------- Einstellungen (localStorage) ---------- */
@@ -770,7 +785,11 @@ async function callLLM(systemPrompt, userPrompt, schema, onProgress) {
       throw new Error("Die Anfrage wurde vom Modell abgelehnt. Bitte Stellenbeschreibung prüfen.");
     }
     if (!text) throw new Error("Leere Antwort vom Modell erhalten.");
-    return { data: parseJsonLoose(text), cost: callCost(model, inputTokens, outputTokens) };
+    return {
+      data: parseJsonLoose(text),
+      cost: callCost(model, inputTokens, outputTokens),
+      tokens: { input: inputTokens, output: outputTokens },
+    };
   }
 
   // OpenAI, DeepSeek und lokale Modelle (Ollama / LM Studio) sprechen alle
@@ -885,7 +904,11 @@ async function callLLM(systemPrompt, userPrompt, schema, onProgress) {
       : "Die Antwort wurde abgeschnitten, weil das Token-Limit erreicht wurde. Bitte mit weniger Fragen erneut versuchen.");
   }
   if (!text) throw new Error("Leere Antwort vom Modell erhalten.");
-  return { data: parseJsonLoose(text), cost: callCost(model, inputTokens, outputTokens) };
+  return {
+    data: parseJsonLoose(text),
+    cost: callCost(model, inputTokens, outputTokens),
+    tokens: { input: inputTokens, output: outputTokens },
+  };
 }
 
 // Toleriert Markdown-Zaeune und Text um das JSON herum (noetig fuer DeepSeek)
@@ -1139,7 +1162,7 @@ async function generateQuiz() {
 
     const total = Number(numQuestions);
     setLoadingProgress(0, total, "Das Modell liest die Stellenanzeige...");
-    const { data: result, cost: genCost } = await callLLM(system, user, QUESTIONS_SCHEMA, (acc) => {
+    const { data: result, cost: genCost, tokens: genTokens } = await callLLM(system, user, QUESTIONS_SCHEMA, (acc) => {
       // Jede fertige Frage hat im gestreamten JSON genau einen "frage"-Schluessel
       const seen = (acc.match(/"frage"\s*:/g) || []).length;
       setLoadingProgress(seen, total, seen > 0
@@ -1166,6 +1189,9 @@ async function generateQuiz() {
     // zur Auswertung am Quiz mitfuehren, damit der Gesamtpreis je Fragebogen
     // gespeichert werden kann
     quiz.genCost = genCost;
+    // Token-Verbrauch der Erstellung mitfuehren - bei lokalen Modellen gibt es
+    // keinen Preis, dort dient die Token-Zahl als Verbrauchsanzeige
+    quiz.genTokens = genTokens;
     answers = new Array(quiz.fragen.length).fill("");
     revealed = new Array(quiz.fragen.length).fill(false);
     current = 0;
@@ -1512,7 +1538,7 @@ async function runEvaluation() {
 
     const total = quiz.fragen.length;
     setLoadingProgress(0, total, "Das Modell prüft deine Antworten...");
-    const { data: rawResult, cost: evalCost } = await callLLM(system, user, EVAL_SCHEMA, (acc) => {
+    const { data: rawResult, cost: evalCost, tokens: evalTokens } = await callLLM(system, user, EVAL_SCHEMA, (acc) => {
       const seen = (acc.match(/"feedback"\s*:/g) || []).length;
       setLoadingProgress(seen, total, seen > 0
         ? `Antwort ${Math.min(seen, total)} von ${total} wird bewertet...`
@@ -1522,7 +1548,7 @@ async function runEvaluation() {
     // (DeepSeek, lokale Modelle) koennte z. B. das gesamt-Objekt fehlen, was
     // beim Speichern (result.gesamt.prozent) sonst einen Absturz ausloest
     const result = normalizeEvalData(rawResult);
-    saveAttempt(result, durationMs, evalCost);
+    saveAttempt(result, durationMs, evalCost, evalTokens);
     renderResult(result, durationMs);
     // Spielfortschritt dieser Stelle; frisch freigeschaltete Abzeichen und ein
     // Levelaufstieg werden gegen den Stand vor diesem Versuch hervorgehoben.
@@ -2008,7 +2034,24 @@ function buildCost(genCost, evalCost) {
   return { gen, eval: ev, total: (gen || 0) + (ev || 0) };
 }
 
-function saveAttempt(result, durationMs, evalCost) {
+// Summe der verbrauchten Tokens (Ein- und Ausgabe) eines callLLM-Aufrufs; 0,
+// wenn der Stream keine Verbrauchsdaten geliefert hat.
+function tokenSum(t) {
+  if (!t || typeof t !== "object") return 0;
+  return (t.input || 0) + (t.output || 0);
+}
+
+// Gesamter Token-Verbrauch eines Fragebogens (Erstellung + Auswertung); null,
+// wenn fuer keinen der beiden Aufrufe Verbrauchsdaten vorliegen. Dient bei
+// lokalen Modellen als Anzeige anstelle der nicht vorhandenen Kosten.
+function buildTokens(genTokens, evalTokens) {
+  const gen = tokenSum(genTokens);
+  const ev = tokenSum(evalTokens);
+  if (gen === 0 && ev === 0) return null;
+  return { gen, eval: ev, total: gen + ev };
+}
+
+function saveAttempt(result, durationMs, evalCost, evalTokens) {
   const h = loadHistory();
   const key = jobKey(quiz.jobText);
   const uKey = quiz.urlKey || null;
@@ -2033,10 +2076,12 @@ function saveAttempt(result, durationMs, evalCost) {
   job.titel = quiz.titel;
 
   const cost = buildCost(quiz.genCost, evalCost);
+  const tokens = buildTokens(quiz.genTokens, evalTokens);
 
   const quizCopy = JSON.parse(JSON.stringify(quiz));
   delete quizCopy.jobText; // liegt schon auf dem Job, spart Speicher
   delete quizCopy.genCost; // liegt als cost am Versuch, nicht doppelt sichern
+  delete quizCopy.genTokens; // liegt als tokens am Versuch, nicht doppelt sichern
   delete quizCopy.urlKey;  // liegt am Job
   delete quizCopy.jobUrl;  // liegt am Job
 
@@ -2049,6 +2094,7 @@ function saveAttempt(result, durationMs, evalCost) {
     timerLimitMin: timer.limitMin,
     overtime: timer.overtime,
     cost, // { gen, eval, total } in USD; fehlt bei aelteren Versuchen
+    tokens, // { gen, eval, total } Token-Verbrauch; v. a. fuer lokale Modelle
     quiz: quizCopy,
     answers: answers.slice(),
     revealed: revealed.slice(),
@@ -2134,9 +2180,13 @@ function renderHistory() {
       info.textContent = `${formatDate(att.date)} · ${att.mode === "pruefung" ? "Prüfung" : "Lernen"}` +
         (att.schwierigkeitsgrad ? ` · ${difficultyLabel(att.schwierigkeitsgrad)}` : "") +
         ` · ${att.quiz.fragen.length} Fragen` +
-        // Kosten nur zeigen, wenn fuer diesen Versuch erfasst (aeltere fehlen)
+        // Kosten zeigen, wenn fuer diesen Versuch erfasst (Cloud-Anbieter mit
+        // Preis); sonst bei lokalen Modellen ersatzweise den Token-Verbrauch.
+        // Aeltere Versuche haben keins von beidem - dann bleibt der Slot leer.
         (att.cost && typeof att.cost.total === "number"
           ? ` · ca. ${formatUsd(att.cost.total)}`
+          : att.tokens && typeof att.tokens.total === "number" && att.tokens.total > 0
+          ? ` · ${formatTokens(att.tokens.total)}`
           : "");
       const score = document.createElement("span");
       score.className = "attempt-score " + scoreClass(att.prozent);
