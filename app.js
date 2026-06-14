@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.36";
+const APP_VERSION = "1.0.37";
 
 const CHANGELOG = [
+  {
+    version: "1.0.37",
+    date: "14.06.2026",
+    items: [
+      "Vertiefungen liefern jetzt anspruchsvollere Fragen: Sie zielen auf das Niveau eines Fachgesprächs für die Rolle, verlangen Anwenden, Analysieren und Begründen statt reines Faktenwissen, docken an konkrete Normen, Verfahren oder Szenarien an und decken ein Themenfeld in verschiedenen Facetten ab. Es überwiegen offene Fragen; bei Multiple-Choice sind die falschen Optionen bewusst plausibel gehalten. Die Fragen werden zudem etwas über deinem bisherigen Stand bei der Stelle angesetzt.",
+    ],
+  },
   {
     version: "1.0.36",
     date: "14.06.2026",
@@ -1869,18 +1876,40 @@ async function generateQuiz(opts = {}) {
         "stabile Adressen, keine tief verschachtelten Links. Sonst lasse die URL leer und waehle einen praegnanten Titel, " +
         "der sich gut als Suchbegriff eignet. ";
 
+    // Vertiefungen tragen Tiefe ueber offene Fragen besser als ueber MC, und die
+    // Distraktoren muessen anspruchsvoll sein. Normale Tests behalten exakt die
+    // bisherige Mischung (Verzweigung nur, wenn vertiefung gesetzt ist).
+    const mcMix = vertiefung
+      ? "Etwa ein Drittel der Fragen soll Multiple-Choice sein (4 Optionen, genau eine ist die beste; " +
+        "alle uebrigen Optionen muessen plausibel sein - typische Fehlannahmen oder haeufige Verwechslungen, " +
+        "keine offensichtlich falschen Optionen), der Rest offene Fragen. "
+      : "Etwa die Hälfte der Fragen soll Multiple-Choice sein (4 plausible Optionen, genau eine ist die beste), " +
+        "der Rest offene Fragen. ";
+
+    // Tiefe-Block fuer Vertiefungen: zwingt Anspruch/Niveau statt es nur zu
+    // erhoffen. Leer bei normalen Tests.
+    const vertiefungTiefe = vertiefung
+      ? "Dies ist ein Vertiefungsbogen: Die Fragen muessen deutlich tiefer gehen als in einem Standardtest. " +
+        "Ziel-Niveau ist die Endrunde eines Fachgespraechs fuer genau diese Rolle, auf dem Stand einer erfahrenen Fachkraft. " +
+        "Stelle ueberwiegend Anwendungs-, Analyse- und Bewertungsfragen: jede Frage soll mehrschrittiges Denken, eine " +
+        "fachliche Begruendung oder das Abwaegen eines Trade-offs verlangen und an etwas Konkretes andocken (Norm, Verfahren, " +
+        "Kennzahl, realistisches Szenario mit Randbedingungen). Vermeide reine Definitions- und Faktenfragen sowie alles, " +
+        "was sich durch blosses Auswendiglernen loesen laesst. Decke innerhalb eines Themenfelds verschiedene Teilaspekte " +
+        "mit steigender Tiefe ab, statt dieselbe Teilfrage umzuformulieren. "
+      : "";
+
     const system =
       "Du bist ein erfahrener Recruiter und erstellst realistische Einstellungstests. " +
       "Erstelle präzise, anspruchsvolle Fragen, die exakt auf die gegebene Stelle zugeschnitten sind. " +
       "Jede Frage muss einen anderen Aspekt der Stelle abdecken - vermeide inhaltliche Wiederholungen " +
       "und stelle nicht mehrfach dieselbe Frage in anderer Formulierung. " +
       "Mische Fachfragen, situative Fragen und Soft-Skill-Fragen. " +
-      "Etwa die Hälfte der Fragen soll Multiple-Choice sein (4 plausible Optionen, genau eine ist die beste), " +
-      "der Rest offene Fragen. " +
+      mcMix +
       "Ordne jeder Frage eine Schwierigkeit zu: 'schwer' sind Fragen, wie sie im echten Auswahlverfahren " +
       "oder Vorstellungsgespräch für genau diese Stelle am wahrscheinlichsten gestellt werden - realistisch, " +
       "spezifisch und anspruchsvoll. 'mittel' sind solide Fachfragen, 'leicht' sind Grundlagen- und Einstiegsfragen. " +
       `Stelle die Mischung so zusammen: ${DIFFICULTY_MIX[difficulty]}. ` +
+      vertiefungTiefe +
       antwortHinweis +
       "Schätze ausserdem ein realistisches Zeitlimit in Minuten für den gesamten Test. " +
       "Lies zusätzlich den ausschreibenden Arbeitgeber (Unternehmensname) und den Arbeitsort (Stadt bzw. Region) " +
@@ -1905,11 +1934,20 @@ async function generateQuiz(opts = {}) {
       const out = await generateLocalBatches(system, jobText.slice(0, LOCAL_JOBTEXT_CAP), total, progress);
       result = out.data; genCost = out.cost; genTokens = out.tokens; localAborted = out.aborted;
     } else {
+      // Niveau-Anker: Fragen bewusst etwas ueber dem bisherigen Stand des
+      // Bewerbers ansetzen (macht es zur echten Vertiefung). niveau wird von
+      // startVertiefungForJob mitgegeben; defensiv, falls es fehlt.
+      const niveau = vertiefung && vertiefung.niveau ? vertiefung.niveau : null;
+      const niveauHinweis = niveau
+        ? `Der Bewerber uebt diese Stelle bereits laenger (Stufe ${niveau.level} von 10` +
+          (Number.isFinite(niveau.bestPct) ? `, bisher bis zu ${niveau.bestPct}% erreicht` : "") +
+          `). Setze die Fragen bewusst etwas ueber diesem Stand an, ohne unrealistisch oder fachfremd zu werden. `
+        : "";
       const vertiefungHinweis = vertiefung
         ? `Dies ist ein Vertiefungsbogen. Stelle ALLE Fragen ausschliesslich zu diesen Themenfeldern: ` +
           `${vertiefung.felder.map((f) => f.label).join("; ")}. Verteile die ${numQuestions} Fragen ` +
           `moeglichst gleichmaessig auf die ${vertiefung.felder.length} Felder und decke jedes Feld mehrfach ab. ` +
-          `Stelle keine Fragen ausserhalb dieser Felder.\n\n`
+          `Stelle keine Fragen ausserhalb dieser Felder. ` + niveauHinweis + `\n\n`
         : "";
       const user =
         vertiefungHinweis +
@@ -3923,7 +3961,11 @@ function startVertiefungForJob(job, testMode, num, felder) {
     else numInput.value = String(num);
   }
   saveDraft();
-  generateQuiz({ vertiefung: { felder } });
+  // Bisherigen Stand der Stelle mitgeben, damit der Prompt die Fragen bewusst
+  // ueber dem aktuellen Niveau ansetzt (echte Vertiefung statt nur "schwer").
+  const prog = computeJobProgress(job);
+  const niveau = { level: prog.level, bestPct: prog.bestPct };
+  generateQuiz({ vertiefung: { felder, niveau } });
 }
 
 let activeJob = null;
