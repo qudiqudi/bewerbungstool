@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.26";
+const APP_VERSION = "1.0.27";
 
 const CHANGELOG = [
+  {
+    version: "1.0.27",
+    date: "14.06.2026",
+    items: [
+      "Lokales Modell: Der Hinweis bei der Anbieterwahl warnt jetzt zusätzlich vor Halluzinationen – kleine Modelle erfinden mitunter Angaben, die gar nicht in der Anzeige stehen (z. B. einen falschen Arbeitsort oder Arbeitgeber). Solche Angaben im Zweifel selbst prüfen.",
+    ],
+  },
   {
     version: "1.0.26",
     date: "14.06.2026",
