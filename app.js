@@ -3206,8 +3206,29 @@ function saveAttempt(result, durationMs, evalCost, evalTokens) {
     num: quiz.fragen.length,
   };
 
-  const cost = buildCost(quiz.genCost, evalCost);
-  const tokens = buildTokens(quiz.genTokens, evalTokens);
+  // Vertiefung: die Themenfeld-Ableitung war ein eigener bezahlter Aufruf. Ihre
+  // Kosten/Tokens genau EINMAL in den ersten Vertiefungs-Versuch einrechnen, der
+  // die Felder tatsaechlich nutzt (costCounted-Flag) - sonst fielen sie aus der
+  // Kostenanzeige der Historie heraus oder wuerden bei jedem Versuch erneut
+  // gezaehlt. Bleibt undefiniert/aus, wenn keine Ableitung im Spiel war.
+  let genCost = quiz.genCost;
+  let genTokens = quiz.genTokens;
+  if (Array.isArray(quiz.vertiefungFelder) && quiz.vertiefungFelder.length &&
+      job.themenfelder && !job.themenfelder.costCounted) {
+    const dc = job.themenfelder.cost;
+    if (typeof dc === "number") genCost = (typeof genCost === "number" ? genCost : 0) + dc;
+    const dt = job.themenfelder.tokens;
+    if (dt && typeof dt === "object") {
+      genTokens = {
+        input: ((genTokens && genTokens.input) || 0) + (dt.input || 0),
+        output: ((genTokens && genTokens.output) || 0) + (dt.output || 0),
+      };
+    }
+    job.themenfelder.costCounted = true;
+  }
+
+  const cost = buildCost(genCost, evalCost);
+  const tokens = buildTokens(genTokens, evalTokens);
 
   const quizCopy = JSON.parse(JSON.stringify(quiz));
   delete quizCopy.jobText; // liegt schon auf dem Job, spart Speicher
@@ -4319,6 +4340,17 @@ function importData(text) {
       if (impJob.arbeitgeber && !existing.arbeitgeber) existing.arbeitgeber = impJob.arbeitgeber;
       if (impJob.arbeitsort && !existing.arbeitsort) existing.arbeitsort = impJob.arbeitsort;
       if (impIKey && !existing.identityKey) existing.identityKey = impIKey;
+      // Vertiefungs-Themenfelder aus dem Import uebernehmen: fehlt lokal eins
+      // oder ist das importierte neuer (generatedAt), das importierte behalten -
+      // sonst geht eine schon bezahlte Ableitung beim Restore/Sync verloren.
+      // Defensiv: nur eine plausible Form (fields-Array) akzeptieren.
+      const impTf = impJob.themenfelder;
+      if (impTf && typeof impTf === "object" && Array.isArray(impTf.fields) && impTf.fields.length) {
+        const curTf = existing.themenfelder;
+        if (!curTf || !(Number(curTf.generatedAt) >= Number(impTf.generatedAt))) {
+          existing.themenfelder = impTf;
+        }
+      }
       const seen = new Set(existing.attempts.map((a) => a.date));
       incoming.forEach((a) => {
         if (!seen.has(a.date)) {
