@@ -1158,6 +1158,24 @@ button.danger:hover { background: var(--red-soft); border-color: var(--red); }
 }
 .chip.active:hover { background: var(--primary-dark); border-color: var(--primary-dark); }
 
+/* Vertiefungen-Teaser im Start-Panel: gesperrter Hinweis ab Stufe 3. */
+.vertiefung-teaser {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.6rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: var(--card-2);
+  color: var(--muted);
+}
+.vertiefung-teaser-icon { display: inline-flex; flex: 0 0 auto; }
+.vertiefung-teaser-icon svg { width: 18px; height: 18px; stroke: var(--muted); }
+.vertiefung-teaser-text { display: flex; flex-direction: column; line-height: 1.3; }
+.vertiefung-teaser-title { font-weight: 600; font-size: 0.9rem; color: var(--text); }
+.vertiefung-teaser-sub { font-size: 0.8rem; color: var(--muted); }
+
 /* Mobil (Smartphones) */
 @media (max-width: 600px) {
   header { padding: 0.8rem 1rem; padding-top: calc(0.8rem + env(safe-area-inset-top)); }

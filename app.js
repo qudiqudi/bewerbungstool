@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.33";
+const APP_VERSION = "1.0.34";
 
 const CHANGELOG = [
+  {
+    version: "1.0.34",
+    date: "14.06.2026",
+    items: [
+      "Stellenseite: Ein neuer Hinweis zeigt, dass sich ab Stufe 3 „Vertiefungen“ freischalten – thematisch fokussierte Fragebögen zu einer Stelle. Die Funktion selbst ist noch in Arbeit; der Hinweis macht schon sichtbar, worauf sich das Üben lohnt, samt der noch fehlenden XP bis Stufe 3.",
+    ],
+  },
   {
     version: "1.0.33",
     date: "14.06.2026",
@@ -2302,6 +2309,22 @@ function levelForXp(totalXp) {
   return { level, floor, span, xpInLevel: xp - floor, xpForNext: span };
 }
 
+// Gesamt-XP, ab der eine Stufe erreicht ist - dieselbe Progression wie
+// levelForXp (Stufe 1 ab 0, jede weitere kostet 50 XP mehr). Anders als
+// levelForXp, das die Schwellen der aktuellen Stufe liefert, beantwortet das die
+// Frage "wie viel XP bis Stufe N" fuer beliebiges N. xpThresholdForLevel(3) = 250.
+function xpThresholdForLevel(target) {
+  let floor = 0, span = 100;
+  for (let level = 1; level < target; level++) { floor += span; span += 50; }
+  return floor;
+}
+
+// Ab welcher Stufe je Stelle die Vertiefungen freigeschaltet sind. Bewusst erst
+// ab Stufe 3 (250 XP, grob 4 Versuche): die thematisch vertieften Frageboegen
+// verursachen zusaetzliche Kosten und ergeben erst Sinn, wenn schon ein
+// Grundverstaendnis der Stelle da ist.
+const VERTIEFUNG_MIN_LEVEL = 3;
+
 // Tagesordinalzahl (lokaler Kalendertag) ueber UTC der lokalen Y/M/D, damit
 // Sommer-/Winterzeit die Differenz zwischen zwei Tagen nicht verfaelscht.
 function dayOrdinal(ts) {
@@ -3434,6 +3457,37 @@ function buildStartPanel(job) {
   btnRow.appendChild(lernBtn);
   btnRow.appendChild(pruefBtn);
   panel.appendChild(btnRow);
+
+  // Vertiefungen-Teaser: macht das ab Stufe 3 freischaltbare Feature schon
+  // vorher sichtbar, damit das Hocharbeiten ein Ziel bekommt. Hier zunaechst nur
+  // der gesperrte Hinweis - die eigentliche Vertiefung folgt separat. Fuer lokale
+  // Modelle nicht beworben, weil sie dort nicht angeboten wird (treffsichere
+  // Themenfelder sind nichts fuer kleine, halluzinierende Modelle).
+  const provider = settings.provider || "anthropic";
+  if (provider !== "local") {
+    const prog = computeJobProgress(job);
+    if (prog.level < VERTIEFUNG_MIN_LEVEL) {
+      const need = Math.max(0, xpThresholdForLevel(VERTIEFUNG_MIN_LEVEL) - prog.totalXp);
+      const teaser = document.createElement("div");
+      teaser.className = "vertiefung-teaser locked";
+      const icon = document.createElement("span");
+      icon.className = "vertiefung-teaser-icon";
+      icon.innerHTML = BADGE_ICON_LOCKED;
+      const txt = document.createElement("div");
+      txt.className = "vertiefung-teaser-text";
+      const title = document.createElement("span");
+      title.className = "vertiefung-teaser-title";
+      title.textContent = "Vertiefungen";
+      const sub = document.createElement("span");
+      sub.className = "vertiefung-teaser-sub";
+      sub.textContent = `ab Stufe ${VERTIEFUNG_MIN_LEVEL} · noch ${need} XP`;
+      txt.appendChild(title);
+      txt.appendChild(sub);
+      teaser.appendChild(icon);
+      teaser.appendChild(txt);
+      panel.appendChild(teaser);
+    }
+  }
 
   return panel;
 }
