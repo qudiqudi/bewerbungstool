@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.29";
+const APP_VERSION = "1.0.30";
 
 const CHANGELOG = [
+  {
+    version: "1.0.30",
+    date: "14.06.2026",
+    items: [
+      "Lokales Modell: Bei der blockweisen Fragengenerierung werden doppelte Fragen jetzt im Code aussortiert. Kleine Modelle haben die Bitte „keine Wiederholungen“ oft ignoriert und dieselbe Frage mehrfach gestellt – nun landen nur noch inhaltlich verschiedene Fragen im Test.",
+    ],
+  },
   {
     version: "1.0.29",
     date: "14.06.2026",
@@ -1376,6 +1383,18 @@ function restoreDraft() {
 const LOCAL_JOBTEXT_CAP = 8000;
 const LOCAL_BATCH_SIZE = 3;
 
+// Vergleichsschluessel zum Erkennen doppelter Fragen: Kleinschreibung,
+// zusammengefasste Leerzeichen, ohne Satzzeichen. Kleine lokale Modelle
+// ignorieren die Bitte "keine Wiederholungen" mitunter und liefern dieselbe
+// Frage in einem spaeteren Block erneut - die fangen wir hier im Code ab.
+function fragenKey(frage) {
+  return String(frage || "")
+    .toLowerCase()
+    .replace(/[^\wäöüß ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 // Lokale Generierung in kleinen Bloecken. Vorteile gegenueber einem einzigen
 // grossen Aufruf: der Kontext pro Aufruf bleibt klein (kein Abschneiden bei
 // kleinen Modellen), der Fortschritt ist sichtbar, und der Nutzer kann
@@ -1385,6 +1404,9 @@ const LOCAL_BATCH_SIZE = 3;
 // Liefert dieselbe Form wie callLLM: { data, cost, tokens }.
 async function generateLocalBatches(system, jobText, total, onProgress) {
   const collected = [];
+  // Schon vergebene Fragen-Schluessel, um Dubletten ueber Bloecke hinweg zu
+  // verwerfen.
+  const seenFragen = new Set();
   let meta = null;
   let cost = 0, input = 0, output = 0;
   let aborted = false;
@@ -1396,9 +1418,13 @@ async function generateLocalBatches(system, jobText, total, onProgress) {
 
   try {
     // Obergrenze gegen Endlosschleifen, falls ein Modell wiederholt zu wenige
-    // (oder keine) Fragen liefert.
-    const maxRounds = Math.ceil(total / LOCAL_BATCH_SIZE) + 2;
+    // (oder keine) Fragen liefert. Etwas grosszuegiger als noetig, weil das
+    // Verwerfen von Dubletten zusaetzliche Runden kosten kann.
+    const maxRounds = Math.ceil(total / LOCAL_BATCH_SIZE) + 4;
     let round = 0;
+    // Liefert eine Runde nur Dubletten (oder nichts), zaehlen wir das mit und
+    // brechen nach zwei solchen Runden ab, statt sinnlos weiterzuprobieren.
+    let leerlauf = 0;
     while (collected.length < total && round < maxRounds && !aborted) {
       round++;
       const n = Math.min(LOCAL_BATCH_SIZE, total - collected.length);
@@ -1432,13 +1458,27 @@ async function generateLocalBatches(system, jobText, total, onProgress) {
         throw e;
       }
       if (!meta) meta = norm;
-      collected.push(...norm.fragen);
+      // Nur inhaltlich neue Fragen uebernehmen; bereits gestellte verwerfen.
+      let neu = 0;
+      for (const q of norm.fragen) {
+        const key = fragenKey(q.frage);
+        if (!key || seenFragen.has(key)) continue;
+        seenFragen.add(key);
+        collected.push(q);
+        neu++;
+      }
       cost += out.cost || 0;
       input += out.tokens?.input || 0;
       output += out.tokens?.output || 0;
       onProgress(collected.length);
       // Ab jetzt gibt es fertige Fragen -> Abbrechen darf etwas uebernehmen.
       if (collected.length) enableAbortButton();
+      // Kam diesmal nichts Neues, nicht endlos weiterprobieren.
+      if (neu === 0) {
+        if (++leerlauf >= 2) break;
+      } else {
+        leerlauf = 0;
+      }
     }
   } finally {
     hideAbortButton();
