@@ -2516,7 +2516,12 @@ function renderResultGami(job, opts) {
   // Echter Stufenaufstieg: eskalierende Feier als Overlay. Nur bei frischer
   // Auswertung (opts.leveledUp) - die Review-Ansicht ruft renderResultGami ohne
   // opts auf und loest deshalb nie eine Feier (oder Kosten) aus.
-  if (opts.leveledUp) playLevelUp(progress.level);
+  // Es gibt nur zehn benannte Stufen (LEVEL_TITLES, "Legende" = 10). XP zaehlt
+  // darueber hinaus weiter, also feiern wir nur bis einschliesslich Stufe 10 -
+  // sonst zeigte jeder Aufstieg ab Stufe 11 erneut eine "Stufe 10"-Feier
+  // (geklemmt), obwohl der Fortschritt schon Level 11+ anzeigt. Der textliche
+  // Hinweis oben nennt weiterhin die echte Stufe.
+  if (opts.leveledUp && progress.level <= 10) playLevelUp(progress.level);
 }
 
 /* ---------- Stufenaufstieg-Feier (Overlay) ----------
@@ -2547,6 +2552,13 @@ function levelUpTier(l) {
 let levelUpToken = 0;
 let levelUpReturnFocus = null;
 
+// Einziger Zugriff auf die Buehnen-Elemente ueber ihr data-role - playLevelUp
+// und closeLevelUp teilen sich diesen Selektor, statt ihn mehrfach auszuschreiben.
+function luRole(name) {
+  const stage = $("levelup-stage");
+  return stage && stage.querySelector('[data-role="' + name + '"]');
+}
+
 function playLevelUp(level) {
   const overlay = $("levelup-overlay");
   const stage = $("levelup-stage");
@@ -2554,7 +2566,7 @@ function playLevelUp(level) {
   const l = Math.max(1, Math.min(10, Math.round(level) || 1));
   const token = ++levelUpToken;
   const alive = () => levelUpToken === token;
-  const q = (s) => stage.querySelector('[data-role="' + s + '"]');
+  const q = luRole;
   const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const t = levelUpTier(l);
 
@@ -2584,6 +2596,9 @@ function playLevelUp(level) {
   shimmer.style.opacity = "0";
 
   levelUpReturnFocus = document.activeElement;
+  // Sichtbar starten (entfernt einen evtl. haengengebliebenen Pausenzustand aus
+  // einer frueheren, im Hintergrund geschlossenen Feier).
+  stage.classList.toggle("lu-paused", !!document.hidden);
   overlay.classList.remove("hidden");
   const closeBtn = $("levelup-close");
   if (closeBtn) closeBtn.focus();
@@ -2699,17 +2714,34 @@ function closeLevelUp() {
   overlay.classList.add("hidden");
   const stage = $("levelup-stage");
   if (stage) {
-    ["confetti", "sparkle"].forEach((r) => {
-      const el = stage.querySelector('[data-role="' + r + '"]');
-      if (el) el.innerHTML = "";
-    });
-    ["rays", "glow", "shimmer"].forEach((r) => {
-      const el = stage.querySelector('[data-role="' + r + '"]');
-      if (el) el.style.animation = "none";
-    });
+    stage.classList.remove("lu-paused");
+    ["confetti", "sparkle"].forEach((r) => { const el = luRole(r); if (el) el.innerHTML = ""; });
+    ["rays", "glow", "shimmer"].forEach((r) => { const el = luRole(r); if (el) el.style.animation = "none"; });
   }
-  if (levelUpReturnFocus && typeof levelUpReturnFocus.focus === "function") levelUpReturnFocus.focus();
+  restoreLevelUpFocus();
+}
+
+// Fokus nach dem Schliessen zurueckgeben. Das vor der Feier fokussierte Element
+// kann inzwischen ausgeblendet sein: playLevelUp laeuft noch in der Quiz-Ansicht,
+// danach blendet die Auswertung diese aus (display:none). focus() auf ein
+// unsichtbares Element schlaegt still fehl und der Fokus faellt auf <body>.
+// Darum nur zuruecksetzen, wenn das Element noch sichtbar ist, sonst auf die
+// jetzt sichtbare Ansicht ausweichen.
+function restoreLevelUpFocus() {
+  const prev = levelUpReturnFocus;
   levelUpReturnFocus = null;
+  if (prev && prev.isConnected && prev.offsetParent !== null && typeof prev.focus === "function") {
+    prev.focus();
+    return;
+  }
+  // Ausweich-Ziel: die jetzt sichtbare Ansicht selbst fokussierbar machen und
+  // den Fokus dorthin holen. tabindex=-1 haelt sie aus der Tab-Reihenfolge
+  // heraus (nur per Skript fokussierbar) und bleibt unsichtbar (kein Fokus-
+  // Rahmen auf der Karte) - ein etabliertes Muster fuer Ansichtswechsel.
+  const view = $(currentView());
+  if (!view) return;
+  view.setAttribute("tabindex", "-1");
+  view.focus();
 }
 
 /* ---------- Historie (localStorage, pro Stelle gruppiert) ---------- */
@@ -4036,19 +4068,29 @@ $("levelup-close").addEventListener("click", closeLevelUp);
 $("levelup-overlay").addEventListener("click", (e) => {
   if (e.target === $("levelup-overlay")) closeLevelUp();
 });
+// Geht der Tab in den Hintergrund (App weggewischt, Tab gewechselt), waehrend
+// die Feier noch offen ist, die Endlos-Animationen (Strahlenkranz, Funkeln,
+// Schimmer, Glow) pausieren - sonst komponiert der Browser sie je nach Plattform
+// weiter und kostet Akku. Beim Zurueckkehren laufen sie nahtlos weiter.
+document.addEventListener("visibilitychange", () => {
+  const overlay = $("levelup-overlay"), stage = $("levelup-stage");
+  if (!overlay || !stage || overlay.classList.contains("hidden")) return;
+  stage.classList.toggle("lu-paused", document.hidden);
+});
 
+// Escape schliesst das oberste offene Overlay. Reihenfolge = Prioritaet, falls
+// je zwei gleichzeitig offen waeren; ein neues Overlay braucht nur einen Eintrag.
+const ESCAPE_CLOSERS = [
+  ["changelog-modal", closeChangelog],
+  ["confirm-eval-modal", cancelConfirmEval],
+  ["badge-modal", closeBadgeModal],
+  ["confirm-delete-modal", closeConfirmDelete],
+  ["levelup-overlay", closeLevelUp],
+];
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !$("changelog-modal").classList.contains("hidden")) {
-    closeChangelog();
-  } else if (e.key === "Escape" && !$("confirm-eval-modal").classList.contains("hidden")) {
-    cancelConfirmEval();
-  } else if (e.key === "Escape" && !$("badge-modal").classList.contains("hidden")) {
-    closeBadgeModal();
-  } else if (e.key === "Escape" && !$("confirm-delete-modal").classList.contains("hidden")) {
-    closeConfirmDelete();
-  } else if (e.key === "Escape" && !$("levelup-overlay").classList.contains("hidden")) {
-    closeLevelUp();
-  }
+  if (e.key !== "Escape") return;
+  const open = ESCAPE_CLOSERS.find(([id]) => !$(id).classList.contains("hidden"));
+  if (open) open[1]();
 });
 
 // Zuletzt geladenen Eingabe-Stand wiederherstellen, damit URL und Anzeige ein

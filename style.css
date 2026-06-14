@@ -1748,6 +1748,14 @@ button.danger:hover { background: var(--red-soft); border-color: var(--red); }
 @keyframes lu-twinkle { 0%, 100% { transform: scale(0.2); opacity: 0; } 45% { transform: scale(1); opacity: 1; } }
 @keyframes lu-glow { 0%, 100% { opacity: 0.45; } 50% { opacity: 0.85; } }
 
+/* Im Hintergrund (Tab gewechselt/App weggewischt) die Endlos-Animationen
+   anhalten, damit sie keinen Akku kosten; !important schlaegt die per Inline-
+   Style gesetzten animation-Kurzschreibweisen (running). */
+.levelup-stage.lu-paused,
+.levelup-stage.lu-paused *,
+.levelup-stage.lu-paused *::before,
+.levelup-stage.lu-paused *::after { animation-play-state: paused !important; }
+
 @media (max-width: 600px) {
   .lu-title { font-size: 30px; }
   .lu-num { font-size: 56px; }
