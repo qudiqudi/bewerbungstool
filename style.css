@@ -328,6 +328,44 @@ input:focus, select:focus, textarea:focus {
 .field-inline label { margin: 0; }
 .field-inline select { width: auto; }
 
+/* Fragen-Stepper (ersetzt das frühere <select id="num-questions">) */
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--card);
+  overflow: hidden;
+}
+.stepper-btn {
+  width: 46px;
+  min-height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--accent-text);
+  font-size: 1.4rem;
+  line-height: 1;
+  font-weight: 600;
+}
+.stepper-btn:hover:not(:disabled) { background: var(--primary-soft); border-color: transparent; }
+.stepper-btn:active:not(:disabled) { transform: none; }
+.stepper-btn:disabled { color: var(--border-strong); opacity: 0.75; cursor: default; }
+.stepper-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.stepper-value {
+  min-width: 2.6ch;
+  padding: 0 0.45rem;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  text-align: center;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
 button {
   padding: 0.65rem 1.15rem;
   border-radius: var(--radius);

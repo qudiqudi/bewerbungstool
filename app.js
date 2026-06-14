@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.30";
+const APP_VERSION = "1.0.31";
 
 const CHANGELOG = [
+  {
+    version: "1.0.31",
+    date: "14.06.2026",
+    items: [
+      "Die Fragenanzahl wählst du jetzt über einen kompakten Stepper (− Wert +) statt über ein Dropdown – sowohl im Eingabe-Bildschirm als auch auf der Stellenseite. Standard bleibt 10, frei justierbar von 4 bis 30. Gleiche Optik wie die Schwierigkeit-Auswahl, größere Touch-Flächen fürs Handy.",
+    ],
+  },
   {
     version: "1.0.30",
     date: "14.06.2026",
@@ -3233,18 +3240,17 @@ function renderHome() {
   jobs.slice(0, HOME_MAX).forEach((job) => list.appendChild(buildHomeCard(job)));
 }
 
-// Auswaehlbare Fragenzahlen - identisch zum Auswahlfeld im Eingabe-Bildschirm
+// Gueltiger Fragenzahl-Bereich - identisch zum Stepper im Eingabe-Bildschirm
 // (#num-questions). Eine Stelle.
-const NUM_OPTIONS = [6, 8, 10, 12, 15, 20, 25, 30];
+const NUM_MIN = 4, NUM_MAX = 30;
 
 // Test-Einstellungen defensiv lesen: aeltere Stellen haben kein lastTestConfig,
 // dann Standard (Lernmodus, mittel, 10 Fragen). Die gespeicherte Fragenzahl ist
 // die tatsaechlich erzeugte (quiz.fragen.length) und kann daneben liegen, wenn
-// ein Modell mehr/weniger Fragen liefert - auf den naechsten waehlbaren Wert
-// rasten, damit Dropdown, Label und das Eingabe-Auswahlfeld nicht auseinander
-// laufen.
-function snapNum(n) {
-  return NUM_OPTIONS.reduce((best, o) => (Math.abs(o - n) < Math.abs(best - n) ? o : best), NUM_OPTIONS[0]);
+// ein Modell mehr/weniger Fragen liefert - auf den gueltigen Bereich (4-30)
+// klemmen, damit Stepper und Eingabe-Bildschirm nicht auseinander laufen.
+function clampNum(n) {
+  return Math.min(NUM_MAX, Math.max(NUM_MIN, Math.round(n)));
 }
 
 function normalizeTestConfig(c) {
@@ -3252,7 +3258,48 @@ function normalizeTestConfig(c) {
   const c2 = c && typeof c === "object" ? c : {};
   let num = Number(c2.num);
   if (!Number.isFinite(num) || num < 1) num = 10;
-  return { mode: c2.mode === "pruefung" ? "pruefung" : "lernen", difficulty: valid(c2.difficulty), num: snapNum(num) };
+  return { mode: c2.mode === "pruefung" ? "pruefung" : "lernen", difficulty: valid(c2.difficulty), num: clampNum(num) };
+}
+
+// Fragen-Stepper fuer dynamisch erzeugte Panels (Subpage). Gleiche Optik und
+// gleiches Verhalten (Bereich 4-30) wie der statische Stepper im Eingabe-
+// Bildschirm; onChange meldet jeden gueltigen Wert zurueck.
+function buildNumStepper(initial, onChange) {
+  let value = clampNum(Number(initial) || 10);
+  const wrap = document.createElement("div");
+  wrap.className = "stepper";
+  wrap.setAttribute("role", "group");
+  wrap.setAttribute("aria-label", "Anzahl Fragen");
+  const dec = document.createElement("button");
+  dec.type = "button";
+  dec.className = "stepper-btn";
+  dec.setAttribute("aria-label", "Eine Frage weniger");
+  dec.innerHTML = "&minus;";
+  const disp = document.createElement("span");
+  disp.className = "stepper-value";
+  disp.setAttribute("aria-live", "polite");
+  const inc = document.createElement("button");
+  inc.type = "button";
+  inc.className = "stepper-btn";
+  inc.setAttribute("aria-label", "Eine Frage mehr");
+  inc.textContent = "+";
+  const render = () => {
+    disp.textContent = String(value);
+    dec.disabled = value <= NUM_MIN;
+    inc.disabled = value >= NUM_MAX;
+  };
+  const step = (d) => {
+    value = clampNum(value + d);
+    render();
+    if (onChange) onChange(value);
+  };
+  dec.addEventListener("click", () => step(-1));
+  inc.addEventListener("click", () => step(1));
+  wrap.appendChild(dec);
+  wrap.appendChild(disp);
+  wrap.appendChild(inc);
+  render();
+  return wrap;
 }
 
 // Start-Panel der Subpage: Schwierigkeit und Fragenzahl stehen direkt sichtbar
@@ -3291,23 +3338,18 @@ function buildStartPanel(job) {
   diffWrap.appendChild(diffBtns);
   controls.appendChild(diffWrap);
 
-  // Anzahl Fragen
+  // Anzahl Fragen (Stepper 4-30, ersetzt das frühere Dropdown)
   const numWrap = document.createElement("div");
   numWrap.className = "start-opt-row";
   const numLabel = document.createElement("span");
   numLabel.className = "start-opt-label";
+  numLabel.id = "start-num-label";
   numLabel.textContent = "Fragen";
   numWrap.appendChild(numLabel);
-  const numSel = document.createElement("select");
-  NUM_OPTIONS.forEach((n) => {
-    const o = document.createElement("option");
-    o.value = String(n);
-    o.textContent = String(n);
-    if (n === state.num) o.selected = true;
-    numSel.appendChild(o);
-  });
-  numSel.addEventListener("change", () => { state.num = Number(numSel.value); });
-  numWrap.appendChild(numSel);
+  const numStepper = buildNumStepper(state.num, (n) => { state.num = n; });
+  numStepper.setAttribute("aria-labelledby", "start-num-label");
+  numStepper.removeAttribute("aria-label");
+  numWrap.appendChild(numStepper);
   controls.appendChild(numWrap);
 
   panel.appendChild(controls);
@@ -3371,8 +3413,13 @@ function startTestForJob(job, testMode, cfg) {
   if (mEl) mEl.checked = true;
   const dEl = document.querySelector(`input[name="difficulty"][value="${cfg.difficulty}"]`);
   if (dEl) dEl.checked = true;
-  const numSel = $("num-questions");
-  if ([...numSel.options].some((o) => o.value === String(cfg.num))) numSel.value = String(cfg.num);
+  const numInput = $("num-questions");
+  // Stepper setzt den Wert geklemmt (4-30) und zieht Anzeige/Buttons mit; aeltere
+  // Eintraege mit abweichendem cfg.num werden so defensiv in den Bereich gebracht.
+  if (Number.isFinite(cfg.num)) {
+    if (numInput.setValue) numInput.setValue(cfg.num);
+    else numInput.value = String(cfg.num);
+  }
   saveDraft();
   generateQuiz();
 }
@@ -3860,6 +3907,40 @@ function setSourceTab(which) {
 
 $("tab-url").addEventListener("click", () => { setSourceTab("url"); saveDraft(); });
 $("tab-text").addEventListener("click", () => { setSourceTab("text"); saveDraft(); });
+
+// Fragen-Stepper: loest das fruehere <select id="num-questions"> ab. Gleiche id
+// und gleiche .value-Schnittstelle (Zahl als String), nur +/- statt Dropdown.
+// Keine Persistenz - wie zuvor ist der Standard bei jedem Laden 10. Der Bereich
+// 4-30 erhaelt die bisherige Obergrenze (vorheriger Dropdown ging bis 30).
+function initNumStepper() {
+  const NUM_DEFAULT = 10;
+  const input = $("num-questions");
+  const display = $("num-display");
+  const dec = $("num-dec");
+  const inc = $("num-inc");
+  if (!input || !display || !dec || !inc) return;
+
+  const clamp = (n) => Math.min(NUM_MAX, Math.max(NUM_MIN, n));
+  const render = () => {
+    const n = clamp(Number(input.value) || NUM_DEFAULT);
+    input.value = String(n);
+    display.textContent = String(n);
+    dec.disabled = n <= NUM_MIN;
+    inc.disabled = n >= NUM_MAX;
+  };
+  const step = (delta) => {
+    input.value = String(clamp((Number(input.value) || NUM_DEFAULT) + delta));
+    render();
+  };
+  // Erlaubt es anderen Stellen (z. B. "Weiter ueben"), den Wert programmatisch
+  // zu setzen und die Anzeige/Buttons mitzuziehen.
+  input.setValue = (n) => { input.value = String(n); render(); };
+
+  dec.addEventListener("click", () => step(-1));
+  inc.addEventListener("click", () => step(1));
+  render();
+}
+initNumStepper();
 
 // Eingaben in URL- und Textfeld in den Entwurf uebernehmen, damit sie ein
 // Reload/Update ueberleben (verzoegert, nicht bei jedem Tastendruck)
