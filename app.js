@@ -12,6 +12,7 @@ const CHANGELOG = [
     date: "14.06.2026",
     items: [
       "Lokales Modell: Die Fragen werden jetzt in einem Aufruf erzeugt statt blockweise. Das frühere Nachfragen in 3er-Blöcken war die eigentliche Ursache für wiederholte Fragen – kleine Modelle ignorierten die Bitte „stelle etwas anderes“ und erzeugten den ersten Block immer wieder neu. In einem Aufruf sieht das Modell seine bisherigen Fragen und variiert von selbst. Zusätzlich ein klarer Hinweis im Prompt, jede Frage einem anderen Aspekt zu widmen.",
+      "Lokales Modell: Die Fragenerstellung lässt sich jetzt jederzeit mit „Abbrechen“ stoppen, auch während des ersten Aufrufs. Sobald schon Fragen fertig sind, heißt der Knopf „Stoppen & verwenden“ und übernimmt sie.",
     ],
   },
   {
@@ -619,14 +620,16 @@ function hideLoading() {
   $("loading").classList.add("hidden");
 }
 
-// Abbruch-Knopf im Lade-Overlay (nur bei der lokalen Batch-Generierung sichtbar).
-// Startet deaktiviert: Abbrechen ergibt erst Sinn, wenn mindestens ein Block
-// fertig ist - vorher gibt es nichts zu uebernehmen (der laufende Block wird
-// verworfen). enableAbortButton() schaltet ihn frei, sobald Fragen vorliegen.
+// Abbruch-Knopf im Lade-Overlay (nur bei der lokalen Generierung sichtbar).
+// Von Anfang an klickbar als "Abbrechen": der Normalfall ist ein einzelner
+// Aufruf, den der Nutzer auch ohne fertige Fragen stoppen koennen muss (er
+// wird dann verworfen). Sobald fertige Fragen vorliegen (mehrere Runden bei
+// vielen Fragen), zeigt markAbortKeepsResults(), dass ein Stopp die bereits
+// erzeugten Fragen uebernimmt.
 function showAbortButton(onAbort) {
   const btn = $("loading-abort");
-  btn.textContent = "Stoppen & verwenden";
-  btn.disabled = true;
+  btn.textContent = "Abbrechen";
+  btn.disabled = false;
   btn.classList.remove("hidden");
   btn.onclick = () => {
     btn.disabled = true;
@@ -635,9 +638,14 @@ function showAbortButton(onAbort) {
   };
 }
 
-function enableAbortButton() {
+// Wechselt die Beschriftung, sobald es fertige Fragen gibt - dann uebernimmt
+// ein Stopp diese statt alles zu verwerfen. Nicht anfassen, wenn der Nutzer
+// gerade schon gestoppt hat (Knopf deaktiviert, zeigt "Wird gestoppt...").
+function markAbortKeepsResults() {
   const btn = $("loading-abort");
-  if (btn && !btn.classList.contains("hidden")) btn.disabled = false;
+  if (btn && !btn.classList.contains("hidden") && !btn.disabled) {
+    btn.textContent = "Stoppen & verwenden";
+  }
 }
 
 function hideAbortButton() {
@@ -646,7 +654,7 @@ function hideAbortButton() {
   btn.classList.add("hidden");
   btn.onclick = null;
   btn.disabled = false;
-  btn.textContent = "Stoppen & verwenden";
+  btn.textContent = "Abbrechen";
 }
 
 function showError(msg) {
@@ -1499,8 +1507,8 @@ async function generateLocalBatches(system, jobText, total, onProgress) {
       input += out.tokens?.input || 0;
       output += out.tokens?.output || 0;
       onProgress(collected.length);
-      // Ab jetzt gibt es fertige Fragen -> Abbrechen darf etwas uebernehmen.
-      if (collected.length) enableAbortButton();
+      // Ab jetzt gibt es fertige Fragen -> Stopp uebernimmt sie statt zu verwerfen.
+      if (collected.length) markAbortKeepsResults();
       // Kam diesmal nichts Neues, nicht endlos weiterprobieren.
       if (neu === 0) {
         if (++leerlauf >= 2) break;
