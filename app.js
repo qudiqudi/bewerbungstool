@@ -1383,16 +1383,23 @@ function restoreDraft() {
 const LOCAL_JOBTEXT_CAP = 8000;
 const LOCAL_BATCH_SIZE = 3;
 
-// Vergleichsschluessel zum Erkennen doppelter Fragen: Kleinschreibung,
-// zusammengefasste Leerzeichen, ohne Satzzeichen. Kleine lokale Modelle
+// Vergleichsschluessel zum Erkennen doppelter Fragen. Kleine lokale Modelle
 // ignorieren die Bitte "keine Wiederholungen" mitunter und liefern dieselbe
 // Frage in einem spaeteren Block erneut - die fangen wir hier im Code ab.
-function fragenKey(frage) {
-  return String(frage || "")
+// Der Schluessel umfasst bewusst auch Optionen und Musterantwort: zwei
+// Multiple-Choice-Fragen mit gleichem Stamm ("Welche Aussage ist korrekt?"),
+// aber unterschiedlichen Antworten sind verschiedene Fragen und sollen nicht
+// faelschlich als Dublette verworfen werden.
+function normText(t) {
+  return String(t || "")
     .toLowerCase()
     .replace(/[^\wäöüß ]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+function fragenKey(q) {
+  const optionen = Array.isArray(q.optionen) ? q.optionen : [];
+  return [q.frage, q.korrekte_antwort, ...optionen].map(normText).join(" | ");
 }
 
 // Lokale Generierung in kleinen Bloecken. Vorteile gegenueber einem einzigen
@@ -1461,8 +1468,10 @@ async function generateLocalBatches(system, jobText, total, onProgress) {
       // Nur inhaltlich neue Fragen uebernehmen; bereits gestellte verwerfen.
       let neu = 0;
       for (const q of norm.fragen) {
-        const key = fragenKey(q.frage);
-        if (!key || seenFragen.has(key)) continue;
+        // Fragen ohne Fragetext sind unbrauchbar und werden uebersprungen.
+        if (!normText(q.frage)) continue;
+        const key = fragenKey(q);
+        if (seenFragen.has(key)) continue;
         seenFragen.add(key);
         collected.push(q);
         neu++;
