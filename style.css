@@ -1232,6 +1232,17 @@ button.danger:hover { background: var(--red-soft); border-color: var(--red); }
 }
 .site-footer a:hover { color: var(--primary-dark); }
 
+/* Hinweisleiste im Fragebogen (z. B. lokales Modell lieferte weniger Fragen) */
+.quiz-notice {
+  background: var(--orange-soft);
+  border: 1px solid var(--orange);
+  color: var(--orange);
+  padding: 0.6rem 0.8rem;
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  margin: 0.2rem 0 0.6rem;
+}
+
 /* Update-Hinweis */
 .update-banner {
   position: fixed;

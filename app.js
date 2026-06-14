@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.32";
+const APP_VERSION = "1.0.33";
 
 const CHANGELOG = [
+  {
+    version: "1.0.33",
+    date: "14.06.2026",
+    items: [
+      "Lokales Modell: Liefert ein kleines Modell pro Aufruf nur wenige Fragen, wird jetzt so lange nachgefordert, bis die gewünschte Zahl erreicht ist, statt nach einer festen Rundenzahl mit einem unvollständigen Fragebogen aufzuhören. Erreicht das Modell die Zahl trotzdem nicht, steht das jetzt offen als Hinweis über dem Fragebogen, statt stillschweigend weniger Fragen auszugeben.",
+    ],
+  },
   {
     version: "1.0.32",
     date: "14.06.2026",
@@ -660,6 +667,20 @@ function hideAbortButton() {
 function showError(msg) {
   $("error-text").textContent = msg;
   $("error-box").classList.remove("hidden");
+}
+
+// Hinweisleiste oben im Fragebogen (z. B. wenn ein lokales Modell weniger
+// Fragen geliefert hat als gewuenscht). Leerer Text blendet sie aus.
+function setQuizNotice(msg) {
+  const el = $("quiz-notice");
+  if (!el) return;
+  if (msg) {
+    el.textContent = msg;
+    el.classList.remove("hidden");
+  } else {
+    el.textContent = "";
+    el.classList.add("hidden");
+  }
 }
 
 /* ---------- JSON-Schemata ---------- */
@@ -1451,17 +1472,28 @@ async function generateLocalBatches(system, jobText, total, onProgress) {
   showAbortButton(() => { aborted = true; controller.abort(); });
 
   try {
-    // Obergrenze gegen Endlosschleifen, falls ein Modell wiederholt zu wenige
-    // (oder keine) Fragen liefert. Etwas grosszuegiger als noetig, weil das
-    // Verwerfen von Dubletten zusaetzliche Runden kosten kann.
-    const maxRounds = Math.ceil(total / LOCAL_BATCH_SIZE) + 4;
+    // Es wird so lange nachgefordert, wie das Modell noch neue Fragen liefert -
+    // nicht bis zu einer festen, aus der Wunschzahl abgeleiteten Rundenzahl.
+    // Sonst kappt ein langsam, aber stetig lieferndes Modell den Katalog
+    // vorzeitig: Bei z. B. 30 angeforderten Fragen und nur wenigen neuen Fragen
+    // pro Antwort waere frueher nach der festen Rundenzahl stillschweigend ein
+    // unvollstaendiger Fragebogen herausgekommen. Abgebrochen wird jetzt nur,
+    // wenn genug Fragen da sind, der Nutzer stoppt, oder das Modell zwei Runden
+    // in Folge gar nichts Neues mehr liefert (Stillstand). maxRounds bleibt nur
+    // als harter Notnagel gegen Endlosschleifen, falls ein Modell unbegrenzt je
+    // eine neue Frage nachschiebt.
+    const maxRounds = total + 4;
     let round = 0;
-    // Liefert eine Runde nur Dubletten (oder nichts), zaehlen wir das mit und
-    // brechen nach zwei solchen Runden ab, statt sinnlos weiterzuprobieren.
+    // Zwei Runden in Folge ohne neue Frage -> aufgeben (nur noch Dubletten).
     let leerlauf = 0;
+    // Hat das Modell schon einmal weniger geliefert als angefordert, fordern wir
+    // von da an kleinere Bloecke an - darauf antworten kleine Modelle oft
+    // zuverlaessiger als auf einen grossen Block.
+    let unterliefert = false;
     while (collected.length < total && round < maxRounds && !aborted) {
       round++;
-      const n = Math.min(LOCAL_BATCH_SIZE, total - collected.length);
+      const cap = unterliefert ? Math.max(3, Math.ceil(LOCAL_BATCH_SIZE / 2)) : LOCAL_BATCH_SIZE;
+      const n = Math.min(cap, total - collected.length);
       const asked = collected.map((q) => "- " + q.frage).join("\n");
       const user =
         `Erstelle genau ${n} Fragen eines Einstellungstests zu dieser Stellenausschreibung:\n\n` +
@@ -1509,7 +1541,10 @@ async function generateLocalBatches(system, jobText, total, onProgress) {
       onProgress(collected.length);
       // Ab jetzt gibt es fertige Fragen -> Stopp uebernimmt sie statt zu verwerfen.
       if (collected.length) markAbortKeepsResults();
-      // Kam diesmal nichts Neues, nicht endlos weiterprobieren.
+      // Hat das Modell weniger als angefordert geliefert, kuenftig kleinere
+      // Bloecke anfordern.
+      if (neu < n) unterliefert = true;
+      // Kam diesmal gar nichts Neues, nicht endlos weiterprobieren.
       if (neu === 0) {
         if (++leerlauf >= 2) break;
       } else {
@@ -1545,6 +1580,9 @@ async function generateLocalBatches(system, jobText, total, onProgress) {
     },
     cost,
     tokens: { input, output },
+    // true, wenn der Nutzer selbst gestoppt hat - dann ist eine kleinere
+    // Fragenzahl gewollt und kein Hinweis auf Unterlieferung noetig.
+    aborted,
   };
 }
 
@@ -1670,14 +1708,14 @@ async function generateQuiz() {
       ? `Frage ${Math.min(done, total)} von ${total} wird erstellt...`
       : "Fragenkatalog wird erstellt...");
 
-    let result, genCost, genTokens;
+    let result, genCost, genTokens, localAborted = false;
     if (isLocal) {
       // Lokal: in kleinen Bloecken erzeugen (abbrechbar). Zustand der
       // Nach-dem-Aufloesen-Anreicherung fuer den neuen Fragebogen zuruecksetzen.
       enrichTried = new Set();
       enrichingIdx = -1;
       const out = await generateLocalBatches(system, jobText.slice(0, LOCAL_JOBTEXT_CAP), total, progress);
-      result = out.data; genCost = out.cost; genTokens = out.tokens;
+      result = out.data; genCost = out.cost; genTokens = out.tokens; localAborted = out.aborted;
     } else {
       const user =
         `Erstelle einen Einstellungstest mit genau ${numQuestions} Fragen zu dieser Stellenausschreibung:\n\n` +
@@ -1731,6 +1769,13 @@ async function generateQuiz() {
       $("quiz-timer").classList.add("hidden");
     }
 
+    // Lokale Modelle liefern manchmal weniger Fragen als angefordert (kleine
+    // Modelle erschoepfen sich oder wiederholen sich nur noch). Das nicht
+    // stillschweigend hinnehmen, sondern offen anzeigen - ausser der Nutzer hat
+    // selbst gestoppt, dann ist die kleinere Zahl gewollt.
+    setQuizNotice(isLocal && !localAborted && quiz.fragen.length < total
+      ? `Das lokale Modell konnte nur ${quiz.fragen.length} von ${total} gewünschten Fragen erzeugen. Für mehr Fragen ein größeres Modell verwenden oder erneut starten.`
+      : "");
     renderQuestion();
     showView("view-quiz");
   } catch (e) {
@@ -4024,6 +4069,7 @@ $("btn-review-questions").addEventListener("click", () => {
   reviewing = true;
   stopTimer();
   $("quiz-timer").classList.add("hidden");
+  setQuizNotice("");
   current = 0;
   renderQuestion();
   showView("view-quiz");
