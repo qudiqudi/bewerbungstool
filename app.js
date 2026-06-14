@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.27";
+const APP_VERSION = "1.0.28";
 
 const CHANGELOG = [
+  {
+    version: "1.0.28",
+    date: "14.06.2026",
+    items: [
+      "Stellen lassen sich jetzt löschen: In der Historie und auf der Stellenseite gibt es einen „Löschen“-Knopf, der die Stelle mit allen Versuchen nach einer Sicherheitsabfrage entfernt. Praktisch zum Aufräumen alter oder versehentlich angelegter Einträge.",
+    ],
+  },
   {
     version: "1.0.27",
     date: "14.06.2026",
@@ -2734,6 +2741,35 @@ function jobSubtitle(job) {
   return parts.join(" · ");
 }
 
+// Eine Stelle samt aller Versuche aus der Historie entfernen. Identifikation
+// ueber den stabilen key (Hash des Stellentexts, liegt auf jedem gespeicherten
+// Eintrag), zusaetzlich der urlKey als Rueckfall. Eine Referenzgleichheit
+// hilft nicht: loadHistory parst frisch, das uebergebene job-Objekt ist nie
+// dasselbe wie ein geladenes. Destruktiv und unwiderruflich.
+function deleteJob(job) {
+  const h = loadHistory();
+  h.jobs = h.jobs.filter((j) =>
+    !(job.key && j.key === job.key) &&
+    !(job.urlKey && j.urlKey === job.urlKey));
+  saveHistory(h);
+  // Verweist activeJob noch auf die geloeschte Stelle, Bezug aufloesen, damit
+  // Zurueck-Navigation nicht auf einen verwaisten Eintrag springt.
+  if (activeJob && activeJob.key === job.key) activeJob = null;
+}
+
+// Loesch-Knopf mit Sicherheitsabfrage (eigenes Modal statt blockierendem
+// nativen confirm(), wie beim Auswerten). afterDelete rendert die gerade
+// sichtbare Ansicht neu (Historie bzw. zurueck zur Startseite, wenn die offene
+// Stelle selbst geloescht wurde).
+function buildDeleteButton(job, afterDelete) {
+  const btn = document.createElement("button");
+  btn.className = "danger";
+  btn.textContent = "Löschen";
+  btn.title = "Diese Stelle mit allen Versuchen aus der Historie entfernen";
+  btn.addEventListener("click", () => openConfirmDelete(job, afterDelete));
+  return btn;
+}
+
 // Detaillierter Block einer Stelle: Kopf (Titel, Arbeitgeber/Ort, Statistik),
 // Trend, Spielfortschritt und Versuchsliste. Wird in der Vollansicht (Historie)
 // und auf der Stellen-Subpage genutzt. Auf der Subpage entfaellt der Oeffnen-
@@ -2764,13 +2800,19 @@ function renderJobBlock(job, opts) {
   sub.textContent = `${job.attempts.length} Versuch${job.attempts.length === 1 ? "" : "e"} · Bester: ${best} % · Letzter: ${last} %`;
   title.appendChild(sub);
   head.appendChild(title);
+  const actions = document.createElement("div");
+  actions.className = "job-head-actions";
   if (!subpage) {
     const openBtn = document.createElement("button");
     openBtn.textContent = "Öffnen";
     openBtn.title = "Stelle öffnen: Tests starten und Fortschritt ansehen";
     openBtn.addEventListener("click", () => openJob(job));
-    head.appendChild(openBtn);
+    actions.appendChild(openBtn);
   }
+  // Auf der Subpage zurueck zur Startseite (die offene Stelle verschwindet),
+  // in der Historie nur die Liste neu aufbauen.
+  actions.appendChild(buildDeleteButton(job, subpage ? goHome : renderHistory));
+  head.appendChild(actions);
   block.appendChild(head);
 
   // Verlauf als Balken (chronologisch, max. die letzten 12)
@@ -3671,6 +3713,61 @@ $("btn-confirm-eval").addEventListener("click", () => {
 });
 $("btn-confirm-eval-cancel").addEventListener("click", cancelConfirmEval);
 
+// Rueckfrage vor dem Loeschen einer Stelle (ersetzt das blockierende native
+// confirm()). Merkt sich die betroffene Stelle und was nach dem Loeschen
+// neu gerendert wird; Fokus wird gesetzt und nach dem Schliessen zurueckgegeben.
+let confirmDeleteJob = null;
+let confirmDeleteAfter = null;
+let confirmDeleteReturnFocus = null;
+function openConfirmDelete(job, afterDelete) {
+  confirmDeleteJob = job;
+  confirmDeleteAfter = afterDelete;
+  const n = job.attempts.length;
+  $("confirm-delete-text").textContent =
+    `„${job.titel}“ mit ${n} Versuch${n === 1 ? "" : "en"} endgültig aus der Historie löschen? Das lässt sich nicht rückgängig machen.`;
+  confirmDeleteReturnFocus = document.activeElement;
+  $("confirm-delete-modal").classList.remove("hidden");
+  $("btn-confirm-delete-cancel").focus();
+}
+function closeConfirmDelete() {
+  $("confirm-delete-modal").classList.add("hidden");
+  confirmDeleteJob = null;
+  confirmDeleteAfter = null;
+  if (confirmDeleteReturnFocus && typeof confirmDeleteReturnFocus.focus === "function") {
+    confirmDeleteReturnFocus.focus();
+  }
+  confirmDeleteReturnFocus = null;
+}
+$("btn-confirm-delete").addEventListener("click", () => {
+  const job = confirmDeleteJob;
+  const after = confirmDeleteAfter;
+  // Beim Loeschen wird der ausloesende Knopf gleich aus dem DOM entfernt
+  // (afterDelete baut die Ansicht neu auf). Den Fokus daher nicht dorthin
+  // zuruecklegen - sonst landet er nach dem Neuaufbau am <body>. Stattdessen
+  // unten gezielt auf die Ueberschrift der nun sichtbaren Ansicht setzen.
+  confirmDeleteReturnFocus = null;
+  closeConfirmDelete();
+  if (job) {
+    deleteJob(job);
+    if (typeof after === "function") after();
+    focusVisibleViewHeading();
+  }
+});
+
+// Fokus nach einem Ansichtswechsel ohne stabilen Rueckkehrpunkt auf die
+// Ueberschrift der gerade sichtbaren Ansicht legen (gaengiges Muster fuer
+// Single-Page-Ansichten). tabindex -1 macht die Ueberschrift einmalig
+// fokussierbar, ohne sie in die Tab-Reihenfolge aufzunehmen.
+function focusVisibleViewHeading() {
+  const visible = views.map((id) => $(id)).find((el) => el && !el.classList.contains("hidden"));
+  const heading = visible && visible.querySelector("h2");
+  if (heading) {
+    heading.setAttribute("tabindex", "-1");
+    heading.focus();
+  }
+}
+$("btn-confirm-delete-cancel").addEventListener("click", closeConfirmDelete);
+
 // Versionsanzeige im Footer und Changelog-Fenster
 function renderChangelog() {
   const list = $("changelog-list");
@@ -3736,6 +3833,8 @@ document.addEventListener("keydown", (e) => {
     cancelConfirmEval();
   } else if (e.key === "Escape" && !$("badge-modal").classList.contains("hidden")) {
     closeBadgeModal();
+  } else if (e.key === "Escape" && !$("confirm-delete-modal").classList.contains("hidden")) {
+    closeConfirmDelete();
   }
 });
 
