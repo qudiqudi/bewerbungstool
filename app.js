@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.28";
+const APP_VERSION = "1.0.29";
 
 const CHANGELOG = [
+  {
+    version: "1.0.29",
+    date: "14.06.2026",
+    items: [
+      "Stufenaufstieg wird jetzt gefeiert: Steigst du nach einem Test in eine neue Stufe auf, erscheint eine kurze Animation mit Medaille, Titel und Konfetti. Sie wird mit jeder Stufe aufwendiger – ab Stufe 4 ein Strahlenkranz, ab 6 Funkeln und ein Lichtschimmer, ab 8 ein Aufleuchten, ab 9 eine Krone und „Legende“ (Stufe 10) in Gold. Antippen oder „Weiter“ schließt sie; reduzierte Bewegung wird respektiert.",
+    ],
+  },
   {
     version: "1.0.28",
     date: "14.06.2026",
@@ -2505,6 +2512,236 @@ function renderResultGami(job, opts) {
       "mit Zeitlimit und ohne Auflösen. Die Leistungsabzeichen gibt es nur dort.";
     container.appendChild(tip);
   }
+
+  // Echter Stufenaufstieg: eskalierende Feier als Overlay. Nur bei frischer
+  // Auswertung (opts.leveledUp) - die Review-Ansicht ruft renderResultGami ohne
+  // opts auf und loest deshalb nie eine Feier (oder Kosten) aus.
+  // Es gibt nur zehn benannte Stufen (LEVEL_TITLES, "Legende" = 10). XP zaehlt
+  // darueber hinaus weiter, also feiern wir nur bis einschliesslich Stufe 10 -
+  // sonst zeigte jeder Aufstieg ab Stufe 11 erneut eine "Stufe 10"-Feier
+  // (geklemmt), obwohl der Fortschritt schon Level 11+ anzeigt. Der textliche
+  // Hinweis oben nennt weiterhin die echte Stufe.
+  if (opts.leveledUp && progress.level <= 10) playLevelUp(progress.level);
+}
+
+/* ---------- Stufenaufstieg-Feier (Overlay) ----------
+   Eskalierende Level-Up-Animation aus dem jobreif-Design "Level-Up". Rein
+   visuell: kein API-Aufruf, kein gespeicherter Zustand. Wird nur bei einem
+   echten Aufstieg getriggert (after.level > before.level). Respektiert
+   prefers-reduced-motion (zeigt dann nur den Endzustand, ohne Bewegung). */
+
+// Eskalationsstufen je Level (1-10). Identisch zur Design-Vorlage.
+function levelUpTier(l) {
+  return {
+    over: 1.05 + l * 0.013,
+    rays: l >= 4,
+    rayOpacity: Math.min(0.55, 0.2 + l * 0.04),
+    glow: l >= 4,
+    shimmer: l >= 6,
+    spark: l >= 5,
+    sparkCount: Math.max(0, l - 4) * 4,
+    flash: l >= 8,
+    crown: l >= 9,
+    gold: l === 10,
+    count: Math.round(8 + l * 7),
+  };
+}
+
+// Token entwertet ausstehende Timeouts (verzoegerte Sweeps/Spawns), wenn die
+// Feier vorher geschlossen oder erneut gestartet wird.
+let levelUpToken = 0;
+let levelUpReturnFocus = null;
+
+// Einziger Zugriff auf die Buehnen-Elemente ueber ihr data-role - playLevelUp
+// und closeLevelUp teilen sich diesen Selektor, statt ihn mehrfach auszuschreiben.
+function luRole(name) {
+  const stage = $("levelup-stage");
+  return stage && stage.querySelector('[data-role="' + name + '"]');
+}
+
+function playLevelUp(level) {
+  const overlay = $("levelup-overlay");
+  const stage = $("levelup-stage");
+  if (!overlay || !stage) return;
+  const l = Math.max(1, Math.min(10, Math.round(level) || 1));
+  const token = ++levelUpToken;
+  const alive = () => levelUpToken === token;
+  const q = luRole;
+  const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const t = levelUpTier(l);
+
+  const disc = q("disc"), rays = q("rays"), glow = q("glow"), crown = q("crown"),
+    shimmer = q("shimmer"), num = q("num"), title = q("title"), sub = q("sub"),
+    xp = q("xp"), flash = q("flash"), conf = q("confetti"), spark = q("sparkle");
+
+  num.textContent = String(l);
+  title.textContent = levelTitle(l);
+  sub.textContent = "Stufe " + l + " erreicht";
+
+  const GOLD = "radial-gradient(circle at 38% 28%, oklch(0.88 0.13 84), oklch(0.74 0.15 62) 55%, oklch(0.60 0.16 46))";
+  const CORAL = "radial-gradient(circle at 38% 30%, oklch(0.74 0.15 42), oklch(0.56 0.17 35) 62%, oklch(0.47 0.17 33))";
+
+  disc.style.background = t.gold ? GOLD : CORAL;
+  disc.style.boxShadow = "inset 0 3px 8px oklch(1 0 0 / 0.4), inset 0 -8px 16px oklch(0.40 0.12 30 / 0.5), inset 0 0 0 6px oklch(1 0 0 / 0.16), 0 16px 30px -14px oklch(0.55 0.17 35 / 0.6)" +
+    (t.gold ? ", 0 0 34px oklch(0.80 0.14 70 / 0.7)" : (l >= 7 ? ", 0 0 26px oklch(0.65 0.16 40 / 0.5)" : ""));
+  crown.style.background = t.gold ? "linear-gradient(180deg, oklch(0.90 0.13 86), oklch(0.76 0.15 62))" : "linear-gradient(180deg, oklch(0.86 0.12 60), oklch(0.66 0.16 44))";
+
+  // Laufende Animationen zuruecksetzen (Partikel werden weiter unten ueberblendet)
+  rays.style.animation = "none"; shimmer.style.animation = "none"; glow.style.animation = "none";
+  if (rays.getAnimations) rays.getAnimations().forEach((a) => a.cancel());
+
+  rays.style.opacity = t.rays ? String(t.rayOpacity) : "0";
+  glow.style.opacity = t.glow ? "1" : "0";
+  crown.style.opacity = t.crown ? "1" : "0";
+  shimmer.style.opacity = "0";
+
+  levelUpReturnFocus = document.activeElement;
+  // Sichtbar starten (entfernt einen evtl. haengengebliebenen Pausenzustand aus
+  // einer frueheren, im Hintergrund geschlossenen Feier).
+  stage.classList.toggle("lu-paused", !!document.hidden);
+  overlay.classList.remove("hidden");
+  const closeBtn = $("levelup-close");
+  if (closeBtn) closeBtn.focus();
+
+  if (reduce) {
+    disc.style.transform = "none";
+    title.style.opacity = "1"; title.style.transform = "none";
+    sub.style.opacity = "1"; xp.style.transform = "scaleX(1)";
+    if (t.rays) rays.style.transform = "translate(-50%,-50%) scale(1)";
+    if (t.glow) glow.style.opacity = "0.6";
+    conf.innerHTML = ""; spark.innerHTML = "";
+    return;
+  }
+
+  disc.animate(
+    [{ transform: "scale(0.2) rotate(-16deg)" },
+     { transform: "scale(" + t.over + ") rotate(7deg)", offset: 0.58 },
+     { transform: "scale(0.97) rotate(-2deg)", offset: 0.78 },
+     { transform: "scale(1) rotate(0)" }],
+    { duration: 760, easing: "cubic-bezier(.2,.8,.2,1)" });
+
+  if (t.glow) {
+    glow.style.animation = "lu-glow " + (2.6 - l * 0.08) + "s ease-in-out 0.6s infinite";
+  }
+  if (t.rays) {
+    rays.animate([{ transform: "translate(-50%,-50%) scale(0.4) rotate(-40deg)" },
+                  { transform: "translate(-50%,-50%) scale(1) rotate(0)" }],
+      { duration: 780, easing: "cubic-bezier(.2,.8,.2,1)" });
+    setTimeout(() => { if (alive()) rays.style.animation = "lu-raySpin " + (52 - l * 2.5) + "s linear infinite"; }, 800);
+  }
+  if (t.crown) {
+    crown.animate([{ transform: "translateX(-50%) translateY(-22px) scale(0.4)" },
+                   { transform: "translateX(-50%) translateY(4px) scale(1.08)", offset: 0.7 },
+                   { transform: "translateX(-50%) translateY(0) scale(1)" }],
+      { duration: 640, delay: 340, easing: "cubic-bezier(.2,1.5,.4,1)" });
+  }
+  if (t.shimmer) {
+    // Unsichtbar halten bis der Sweep wirklich startet, sonst klebt ein
+    // statischer Lichtstreifen am Disc-Rand. Start erst nach dem Medaillen-Pop.
+    shimmer.style.willChange = "transform";
+    shimmer.style.opacity = "0";
+    shimmer.style.animation = "none";
+    setTimeout(() => {
+      if (!alive()) return;
+      void shimmer.offsetWidth;
+      shimmer.style.opacity = "1";
+      shimmer.style.animation = "lu-shimmer 3s cubic-bezier(.45,0,.2,1) 0s infinite";
+    }, 950);
+  }
+
+  title.animate([{ transform: "translateY(16px)", opacity: 0 }, { transform: "none", opacity: 1 }],
+    { duration: 520, delay: 130, easing: "cubic-bezier(.2,.8,.2,1)", fill: "both" });
+  xp.animate([{ transform: "scaleX(0)" }, { transform: "scaleX(1)" }],
+    { duration: 950, delay: 280, easing: "cubic-bezier(.3,.9,.2,1)" });
+
+  if (t.flash) {
+    flash.animate([{ opacity: 0 }, { opacity: t.gold ? 0.75 : 0.5, offset: 0.12 }, { opacity: 0 }],
+      { duration: 620, easing: "ease-out" });
+  }
+
+  // Partikel sanft ueberblenden: altes Konfetti/Funkeln ausfaden, dann neu spawnen.
+  const hadOld = conf.children.length > 0 || spark.children.length > 0;
+  conf.style.transition = "opacity .22s ease"; spark.style.transition = "opacity .22s ease";
+  conf.style.opacity = "0"; spark.style.opacity = "0";
+  const spawn = () => {
+    if (!alive()) return;
+    conf.innerHTML = ""; spark.innerHTML = "";
+    conf.style.opacity = "1"; spark.style.opacity = "1";
+    levelUpConfetti(conf, t);
+    if (t.spark) levelUpSparkles(spark, t.sparkCount);
+  };
+  setTimeout(spawn, hadOld ? 220 : 0);
+}
+
+function levelUpConfetti(container, t) {
+  const H = container.clientHeight || 540;
+  const cols = ["oklch(0.62 0.17 37)", "oklch(0.55 0.17 35)", "oklch(0.72 0.15 41)", "oklch(0.92 0.04 60)"];
+  if (t.flash || t.gold) cols.push("oklch(0.82 0.13 78)", "oklch(0.88 0.12 84)");
+  for (let i = 0; i < t.count; i++) {
+    const p = document.createElement("div");
+    const sz = 6 + Math.random() * 7;
+    const round = Math.random() > 0.55;
+    p.style.cssText = "position:absolute;top:-16px;left:" + (Math.random() * 100) + "%;width:" + sz + "px;height:" + (round ? sz : sz * 1.6) + "px;background:" + cols[(Math.random() * cols.length) | 0] + ";border-radius:" + (round ? "50%" : "2px") + ";opacity:0;will-change:transform;";
+    container.appendChild(p);
+    const driftX = (Math.random() * 2 - 1) * 90;
+    const rot = (Math.random() * 2 - 1) * 540;
+    const dur = 1400 + Math.random() * 1300;
+    const delay = Math.random() * 260;
+    p.animate(
+      [{ transform: "translate(0,0) rotate(0)", opacity: 1 },
+       { transform: "translate(" + driftX + "px," + (H + 40) + "px) rotate(" + rot + "deg)", opacity: 1, offset: 0.85 },
+       { transform: "translate(" + (driftX * 1.1) + "px," + (H + 80) + "px) rotate(" + rot + "deg)", opacity: 0 }],
+      { duration: dur, delay: delay, easing: "cubic-bezier(.25,.6,.5,1)", fill: "both" });
+  }
+}
+
+function levelUpSparkles(container, n) {
+  for (let i = 0; i < n; i++) {
+    const s = document.createElement("div");
+    const sz = 5 + Math.random() * 8;
+    const x = 12 + Math.random() * 76, y = 8 + Math.random() * 52;
+    s.style.cssText = "position:absolute;left:" + x + "%;top:" + y + "%;width:" + sz + "px;height:" + sz + "px;background:oklch(0.84 0.13 80);opacity:0;clip-path:polygon(50% 0,61% 39%,100% 50%,61% 61%,50% 100%,39% 61%,0 50%,39% 39%);box-shadow:0 0 7px oklch(0.88 0.12 78 / 0.9);animation:lu-twinkle " + (1 + Math.random() * 0.8) + "s ease-in-out " + (0.4 + Math.random() * 1.1) + "s infinite;";
+    container.appendChild(s);
+  }
+}
+
+// Feier schliessen: laufende Endlos-Animationen und Partikel stoppen, damit im
+// Hintergrund keine CPU mehr verbraucht wird; Token entwertet offene Timeouts.
+function closeLevelUp() {
+  const overlay = $("levelup-overlay");
+  if (!overlay || overlay.classList.contains("hidden")) return;
+  levelUpToken++;
+  overlay.classList.add("hidden");
+  const stage = $("levelup-stage");
+  if (stage) {
+    stage.classList.remove("lu-paused");
+    ["confetti", "sparkle"].forEach((r) => { const el = luRole(r); if (el) el.innerHTML = ""; });
+    ["rays", "glow", "shimmer"].forEach((r) => { const el = luRole(r); if (el) el.style.animation = "none"; });
+  }
+  restoreLevelUpFocus();
+}
+
+// Fokus nach dem Schliessen zurueckgeben. Das vor der Feier fokussierte Element
+// kann inzwischen ausgeblendet sein: playLevelUp laeuft noch in der Quiz-Ansicht,
+// danach blendet die Auswertung diese aus (display:none). focus() auf ein
+// unsichtbares Element schlaegt still fehl und der Fokus faellt auf <body>.
+// Darum nur zuruecksetzen, wenn das Element noch sichtbar ist, sonst auf die
+// jetzt sichtbare Ansicht ausweichen.
+function restoreLevelUpFocus() {
+  const prev = levelUpReturnFocus;
+  levelUpReturnFocus = null;
+  if (prev && prev.isConnected && prev.offsetParent !== null && typeof prev.focus === "function") {
+    prev.focus();
+    return;
+  }
+  // Ausweich-Ziel: die jetzt sichtbare Ansicht selbst fokussierbar machen und
+  // den Fokus dorthin holen. tabindex=-1 haelt sie aus der Tab-Reihenfolge
+  // heraus (nur per Skript fokussierbar) und bleibt unsichtbar (kein Fokus-
+  // Rahmen auf der Karte) - ein etabliertes Muster fuer Ansichtswechsel.
+  const view = $(currentView());
+  if (!view) return;
+  view.setAttribute("tabindex", "-1");
+  view.focus();
 }
 
 /* ---------- Historie (localStorage, pro Stelle gruppiert) ---------- */
@@ -3826,16 +4063,34 @@ $("badge-modal").addEventListener("click", (e) => {
   if (e.target === $("badge-modal")) closeBadgeModal();
 });
 
+$("levelup-close").addEventListener("click", closeLevelUp);
+// Klick auf den abgedunkelten Hintergrund (nicht auf die Feier-Buehne) schliesst
+$("levelup-overlay").addEventListener("click", (e) => {
+  if (e.target === $("levelup-overlay")) closeLevelUp();
+});
+// Geht der Tab in den Hintergrund (App weggewischt, Tab gewechselt), waehrend
+// die Feier noch offen ist, die Endlos-Animationen (Strahlenkranz, Funkeln,
+// Schimmer, Glow) pausieren - sonst komponiert der Browser sie je nach Plattform
+// weiter und kostet Akku. Beim Zurueckkehren laufen sie nahtlos weiter.
+document.addEventListener("visibilitychange", () => {
+  const overlay = $("levelup-overlay"), stage = $("levelup-stage");
+  if (!overlay || !stage || overlay.classList.contains("hidden")) return;
+  stage.classList.toggle("lu-paused", document.hidden);
+});
+
+// Escape schliesst das oberste offene Overlay. Reihenfolge = Prioritaet, falls
+// je zwei gleichzeitig offen waeren; ein neues Overlay braucht nur einen Eintrag.
+const ESCAPE_CLOSERS = [
+  ["changelog-modal", closeChangelog],
+  ["confirm-eval-modal", cancelConfirmEval],
+  ["badge-modal", closeBadgeModal],
+  ["confirm-delete-modal", closeConfirmDelete],
+  ["levelup-overlay", closeLevelUp],
+];
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !$("changelog-modal").classList.contains("hidden")) {
-    closeChangelog();
-  } else if (e.key === "Escape" && !$("confirm-eval-modal").classList.contains("hidden")) {
-    cancelConfirmEval();
-  } else if (e.key === "Escape" && !$("badge-modal").classList.contains("hidden")) {
-    closeBadgeModal();
-  } else if (e.key === "Escape" && !$("confirm-delete-modal").classList.contains("hidden")) {
-    closeConfirmDelete();
-  }
+  if (e.key !== "Escape") return;
+  const open = ESCAPE_CLOSERS.find(([id]) => !$(id).classList.contains("hidden"));
+  if (open) open[1]();
 });
 
 // Zuletzt geladenen Eingabe-Stand wiederherstellen, damit URL und Anzeige ein

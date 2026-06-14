@@ -1530,6 +1530,237 @@ button.danger:hover { background: var(--red-soft); border-color: var(--red); }
   line-height: 1.4;
 }
 
+/* ---------- Stufenaufstieg-Feier (Overlay) ----------
+   Eskalierende Level-Up-Animation aus dem jobreif-Design "Level-Up".
+   Die Bühne ist eine in sich geschlossene, warme Feier-Karte mit festen
+   Farben (kein Theme-Token), damit sie auf dem abgedunkelten Overlay in
+   hellem wie dunklem Modus gleich aussieht. */
+#levelup-overlay { z-index: 30; }
+
+.levelup-stage {
+  position: relative;
+  width: min(360px, 92vw);
+  height: min(540px, 88vh);
+  flex: none;
+  border-radius: 30px;
+  overflow: hidden;
+  background: radial-gradient(120% 80% at 50% -10%, oklch(0.96 0.03 35), oklch(0.99 0.006 60) 55%);
+  border: 1px solid oklch(0.90 0.02 50);
+  box-shadow: 0 30px 70px -34px oklch(0.45 0.08 40 / 0.5);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--display), "Sora", system-ui, sans-serif;
+  color: oklch(0.30 0.015 50);
+}
+
+.lu-medallion {
+  position: relative;
+  z-index: 2;
+  width: 150px;
+  height: 150px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 46px;
+}
+
+.lu-rays {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 430px;
+  height: 430px;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  transition: opacity 0.45s ease;
+  background: repeating-conic-gradient(from 0deg, oklch(0.80 0.12 48 / 0.55) 0 5deg, transparent 5deg 15deg);
+  -webkit-mask: radial-gradient(circle, #000 18%, transparent 62%);
+  mask: radial-gradient(circle, #000 18%, transparent 62%);
+}
+
+.lu-glow {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 240px;
+  height: 240px;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  transition: opacity 0.45s ease;
+  border-radius: 50%;
+  background: radial-gradient(circle, oklch(0.70 0.16 40 / 0.55), transparent 68%);
+}
+
+.lu-crown {
+  position: absolute;
+  top: -38px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 54px;
+  height: 36px;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  z-index: 3;
+  background: linear-gradient(180deg, oklch(0.88 0.13 82), oklch(0.72 0.15 58));
+  clip-path: polygon(0% 100%, 0% 38%, 25% 62%, 50% 8%, 75% 62%, 100% 38%, 100% 100%);
+  filter: drop-shadow(0 4px 6px oklch(0.5 0.1 50 / 0.4));
+}
+
+.lu-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: repeating-conic-gradient(oklch(0.62 0.17 36) 0 9deg, oklch(0.50 0.17 33) 9deg 18deg);
+  -webkit-mask: radial-gradient(circle, transparent 58px, #000 59px);
+  mask: radial-gradient(circle, transparent 58px, #000 59px);
+}
+
+.lu-disc {
+  position: relative;
+  width: 124px;
+  height: 124px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 30%, oklch(0.74 0.15 42), oklch(0.56 0.17 35) 62%, oklch(0.47 0.17 33));
+  box-shadow: inset 0 3px 8px oklch(1 0 0 / 0.4), inset 0 -8px 16px oklch(0.40 0.12 30 / 0.5), inset 0 0 0 6px oklch(1 0 0 / 0.14), 0 16px 30px -14px oklch(0.55 0.17 35 / 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.lu-shimmer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 46px;
+  height: 100%;
+  opacity: 0;
+  background: linear-gradient(90deg, transparent, oklch(1 0 0 / 0.55), transparent);
+}
+
+.lu-num {
+  position: relative;
+  font-weight: 800;
+  font-size: 62px;
+  line-height: 1;
+  color: #fff;
+  letter-spacing: -0.03em;
+  text-shadow: 0 2px 6px oklch(0.40 0.12 30 / 0.45);
+}
+
+.lu-kicker {
+  position: relative;
+  z-index: 2;
+  margin-top: 26px;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.26em;
+  color: oklch(0.54 0.17 35);
+}
+
+.lu-title {
+  position: relative;
+  z-index: 2;
+  margin-top: 6px;
+  font-weight: 800;
+  font-size: 34px;
+  letter-spacing: -0.02em;
+  color: oklch(0.24 0.015 50);
+}
+
+.lu-sub {
+  position: relative;
+  z-index: 2;
+  margin-top: 4px;
+  font-size: 14px;
+  color: oklch(0.50 0.02 50);
+}
+
+.lu-xpwrap {
+  position: relative;
+  z-index: 2;
+  margin-top: 24px;
+  width: 212px;
+}
+
+.lu-xptrack {
+  height: 10px;
+  border-radius: 99px;
+  background: oklch(0.92 0.015 50);
+  overflow: hidden;
+}
+
+.lu-xpfill {
+  height: 100%;
+  width: 100%;
+  border-radius: 99px;
+  transform-origin: left;
+  background: linear-gradient(90deg, oklch(0.66 0.17 38), oklch(0.55 0.17 34));
+}
+
+.lu-xplabel {
+  margin-top: 8px;
+  text-align: center;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: oklch(0.56 0.02 50);
+  letter-spacing: 0.04em;
+}
+
+.lu-confetti { position: absolute; inset: 0; z-index: 4; pointer-events: none; overflow: hidden; }
+.lu-sparkle  { position: absolute; inset: 0; z-index: 3; pointer-events: none; overflow: hidden; }
+.lu-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(circle at 50% 34%, oklch(1 0 0 / 0.9), oklch(0.95 0.05 50 / 0.4) 45%, transparent 70%);
+}
+
+.lu-close {
+  position: absolute;
+  z-index: 6;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  cursor: pointer;
+  background: oklch(0.57 0.17 35);
+  color: #fff;
+  font-family: var(--display), "Sora", sans-serif;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 12px 30px;
+  border-radius: 13px;
+  box-shadow: 0 10px 22px -12px oklch(0.55 0.17 35 / 0.7);
+}
+.lu-close:hover { filter: brightness(1.04); }
+.lu-close:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+@keyframes lu-raySpin { from { transform: translate(-50%, -50%) rotate(0deg); } to { transform: translate(-50%, -50%) rotate(360deg); } }
+@keyframes lu-shimmer { 0% { transform: translate3d(-150%, 0, 0) skewX(-18deg); } 32% { transform: translate3d(330%, 0, 0) skewX(-18deg); } 100% { transform: translate3d(330%, 0, 0) skewX(-18deg); } }
+@keyframes lu-twinkle { 0%, 100% { transform: scale(0.2); opacity: 0; } 45% { transform: scale(1); opacity: 1; } }
+@keyframes lu-glow { 0%, 100% { opacity: 0.45; } 50% { opacity: 0.85; } }
+
+/* Im Hintergrund (Tab gewechselt/App weggewischt) die Endlos-Animationen
+   anhalten, damit sie keinen Akku kosten; !important schlaegt die per Inline-
+   Style gesetzten animation-Kurzschreibweisen (running). */
+.levelup-stage.lu-paused,
+.levelup-stage.lu-paused *,
+.levelup-stage.lu-paused *::before,
+.levelup-stage.lu-paused *::after { animation-play-state: paused !important; }
+
+@media (max-width: 600px) {
+  .lu-title { font-size: 30px; }
+  .lu-num { font-size: 56px; }
+}
+
 /* Reduzierte Bewegung respektieren */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
