@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.37";
+const APP_VERSION = "1.0.38";
 
 const CHANGELOG = [
+  {
+    version: "1.0.38",
+    date: "14.06.2026",
+    items: [
+      "Fehler behoben: Nach einem Vertiefungsbogen änderte sich der Titel der Stelle in der Übersicht (z. B. „… – Vertiefungsbogen Sicherheit & Service“). Ein Vertiefungsbogen überschreibt den Stellentitel jetzt nicht mehr. Ein bereits verfälschter Titel stellt sich beim nächsten normalen Lern- oder Prüfungstest von selbst wieder richtig.",
+    ],
+  },
   {
     version: "1.0.37",
     date: "14.06.2026",
@@ -3285,13 +3292,22 @@ function saveAttempt(result, durationMs, evalCost, evalTokens) {
     job.urlKey = uKey;
     if (quiz.jobUrl) job.url = quiz.jobUrl;
   }
-  job.titel = quiz.titel;
-  // Arbeitgeber und Arbeitsort auffrischen, sobald erkannt - sie machen zwei
-  // gleichnamige Stellen (z. B. "Fachinformatiker") in der Liste unterscheidbar.
-  // Additiv: aeltere Stellen ohne diese Felder bleiben gueltig, Anzeige faellt
-  // dann auf den Titel allein zurueck. Leere Werte ueberschreiben nichts.
-  if (typeof quiz.arbeitgeber === "string" && quiz.arbeitgeber.trim()) job.arbeitgeber = quiz.arbeitgeber.trim();
-  if (typeof quiz.arbeitsort === "string" && quiz.arbeitsort.trim()) job.arbeitsort = quiz.arbeitsort.trim();
+  // Stellen-Identitaet (Titel, Arbeitgeber, Arbeitsort) nur aus normalen Tests
+  // uebernehmen. Ein Vertiefungsbogen ist ein abgeleiteter Uebungstest ueber
+  // Teilthemen; sein quiz.titel traegt die Themenfelder (z. B. "Busfahrer:in -
+  // Vertiefungsbogen Sicherheit & Service") und darf den Stellentitel nicht
+  // ueberschreiben. Normale Tests leiten den Titel weiterhin sauber neu ab und
+  // heilen so einen zuvor verschmutzten Titel von selbst.
+  const istVertiefung = Array.isArray(quiz.vertiefungFelder) && quiz.vertiefungFelder.length;
+  if (!istVertiefung) {
+    job.titel = quiz.titel;
+    // Arbeitgeber und Arbeitsort auffrischen, sobald erkannt - sie machen zwei
+    // gleichnamige Stellen (z. B. "Fachinformatiker") in der Liste unterscheidbar.
+    // Additiv: aeltere Stellen ohne diese Felder bleiben gueltig, Anzeige faellt
+    // dann auf den Titel allein zurueck. Leere Werte ueberschreiben nichts.
+    if (typeof quiz.arbeitgeber === "string" && quiz.arbeitgeber.trim()) job.arbeitgeber = quiz.arbeitgeber.trim();
+    if (typeof quiz.arbeitsort === "string" && quiz.arbeitsort.trim()) job.arbeitsort = quiz.arbeitsort.trim();
+  }
   // identityKey aus den aktuellen Feldern der Stelle ableiten (nicht aus dem
   // einzelnen Versuch), damit er zur Stelle passt und ältere, vor diesem Feld
   // angelegte Stellen ihn beim nächsten Versuch nachtragen. Null (Arbeitgeber
