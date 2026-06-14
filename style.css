@@ -967,6 +967,13 @@ button.ghost {
 
 .job-head strong { font-family: var(--display); font-weight: 700; color: var(--text-strong); }
 .job-head .hint { margin: 0.15rem 0 0; }
+.job-head-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
+
+button.danger {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 45%, transparent);
+}
+button.danger:hover { background: var(--red-soft); border-color: var(--red); }
 
 .trend {
   display: flex;
@@ -1152,7 +1159,8 @@ button.ghost {
   .quiz-header { flex-wrap: wrap; gap: 0.3rem; }
 
   .job-head { flex-direction: column; }
-  .job-head button { align-self: stretch; }
+  .job-head-actions { align-self: stretch; }
+  .job-head-actions button { flex: 1; }
   .attempt-list li { flex-wrap: wrap; }
 
   .home-head { flex-wrap: wrap; }
