@@ -218,17 +218,14 @@
 
       <div class="row space-between">
         <div class="field-inline">
-          <label for="num-questions">Fragen</label>
-          <select id="num-questions">
-            <option value="6">6</option>
-            <option value="8">8</option>
-            <option value="10" selected>10</option>
-            <option value="12">12</option>
-            <option value="15">15</option>
-            <option value="20">20</option>
-            <option value="25">25</option>
-            <option value="30">30</option>
-          </select>
+          <label id="num-questions-label">Fragen</label>
+          <div class="stepper" role="group" aria-labelledby="num-questions-label">
+            <button type="button" class="stepper-btn" id="num-dec" aria-label="Eine Frage weniger">&minus;</button>
+            <span class="stepper-value" id="num-display" aria-live="polite">10</span>
+            <button type="button" class="stepper-btn" id="num-inc" aria-label="Eine Frage mehr">+</button>
+          </div>
+          <!-- Wert-Schnittstelle wie das frühere <select>: gleiche id, gleiche .value -->
+          <input type="hidden" id="num-questions" value="10">
         </div>
         <button id="btn-generate" class="primary">Test erstellen</button>
       </div>
