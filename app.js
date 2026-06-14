@@ -3790,10 +3790,10 @@ function buildVertiefungPicker(job) {
   btnRow.className = "start-buttons";
   const lernBtn = document.createElement("button");
   lernBtn.className = "primary";
-  lernBtn.textContent = "Lernmodus starten";
+  lernBtn.textContent = "Vertiefung · Lernmodus starten";
   const pruefBtn = document.createElement("button");
   pruefBtn.className = "primary";
-  pruefBtn.textContent = "Prüfungsmodus starten";
+  pruefBtn.textContent = "Vertiefung · Prüfungsmodus starten";
   btnRow.appendChild(lernBtn);
   btnRow.appendChild(pruefBtn);
   box.appendChild(btnRow);
