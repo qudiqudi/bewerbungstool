@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.34";
+const APP_VERSION = "1.0.35";
 
 const CHANGELOG = [
+  {
+    version: "1.0.35",
+    date: "14.06.2026",
+    items: [
+      "Lokales Modell: Fragen, die inhaltlich dasselbe abfragen wie eine bereits erzeugte – nur leicht umformuliert –, werden jetzt aussortiert. Bisher fielen nur wortgleiche Wiederholungen weg; schwache Modelle stellten dieselbe Frage mitunter zweimal in anderer Formulierung. Die Erkennung greift bewusst nur bei inhaltsreichen Fragen, damit verschiedene Fragen mit ähnlichem Wortlaut erhalten bleiben.",
+    ],
+  },
   {
     version: "1.0.34",
     date: "14.06.2026",
@@ -1458,6 +1465,46 @@ function fragenKey(q) {
   return [q.frage, q.korrekte_antwort, ...optionen].map(normText).join(" | ");
 }
 
+// Der exakte Schluessel oben faengt nur wortgleiche Wiederholungen. Schwache
+// Modelle stellen aber auch dieselbe Frage leicht umformuliert ("zum
+// Tagesgeschaeft gehoert..." vs. "primaer im Tagesgeschaeft enthalten...").
+// Solche Fast-Dubletten erkennen wir ueber die Aehnlichkeit der Inhaltswoerter.
+
+// Deutsche Stoppwoerter und Frage-Floskeln, die fuer den Vergleich nichts
+// beitragen. Bewusst knapp: es geht nur darum, das Frame ("Welche der
+// folgenden ...") herauszufiltern, damit die Inhaltswoerter vergleichbar werden.
+const STOPWORDS = new Set((
+  "der die das des dem den ein eine einer eines einem einen und oder aber " +
+  "ist sind war waren wird werden kann koennen soll sollte sollen muss muessen " +
+  "im in an auf zu zur zum von vom bei mit nach aus fuer ueber unter durch um " +
+  "welche welcher welches welchen welchem wie was warum wann wo wer wen wem " +
+  "folgende folgenden folgender man sich nicht auch nur als wenn dass ihre ihren"
+).split(" "));
+
+// Inhaltswoerter einer Frage als Menge: klein, ohne Satzzeichen, ohne
+// Stoppwoerter, mindestens drei Zeichen.
+function contentWords(frage) {
+  return new Set(
+    normText(frage).split(" ").filter((w) => w.length > 2 && !STOPWORDS.has(w))
+  );
+}
+
+// Jaccard-Aehnlichkeit zweier Wortmengen (Schnitt / Vereinigung).
+function jaccard(a, b) {
+  if (!a.size || !b.size) return 0;
+  let inter = 0;
+  for (const w of a) if (b.has(w)) inter++;
+  return inter / (a.size + b.size - inter);
+}
+
+// Ab dieser Aehnlichkeit gelten zwei inhaltsreiche Fragen als inhaltlich gleich.
+const FRAGE_AEHNLICH_SCHWELLE = 0.5;
+// Erst ab so vielen Inhaltswoertern wird unscharf verglichen. Kurze, generische
+// Staemme ("Welche Aussage ist korrekt?") haben zu wenige Inhaltswoerter; sie
+// unscharf zu vergleichen wuerde verschiedene Fragen mit gleichem Stamm, aber
+// anderen Antworten faelschlich verwerfen - die deckt nur fragenKey() ab.
+const FRAGE_MIN_INHALTSWOERTER = 4;
+
 // Lokale Generierung. Im Normalfall (bis LOCAL_BATCH_SIZE Fragen) ist das ein
 // einziger Aufruf - das vermeidet die Dubletten, die beim blockweisen
 // Nachfragen entstanden. Liefert ein Modell bei sehr vielen Fragen zu wenige,
@@ -1469,6 +1516,9 @@ async function generateLocalBatches(system, jobText, total, onProgress) {
   // Schon vergebene Fragen-Schluessel, um Dubletten ueber Bloecke hinweg zu
   // verwerfen.
   const seenFragen = new Set();
+  // Inhaltswort-Mengen der schon uebernommenen Fragen, fuer die unscharfe
+  // Dublettenpruefung (gleiches Thema, nur anders formuliert).
+  const acceptedWords = [];
   let meta = null;
   let cost = 0, input = 0, output = 0;
   let aborted = false;
@@ -1538,8 +1588,20 @@ async function generateLocalBatches(system, jobText, total, onProgress) {
         if (!normText(q.frage)) continue;
         const key = fragenKey(q);
         if (seenFragen.has(key)) continue;
+        // Unscharfe Dublette: inhaltsreiche Frage, die einer schon vorhandenen
+        // sehr aehnlich ist (gleiches Thema, nur umformuliert) -> verwerfen.
+        const words = contentWords(q.frage);
+        if (
+          words.size >= FRAGE_MIN_INHALTSWOERTER &&
+          acceptedWords.some(
+            (w) => w.size >= FRAGE_MIN_INHALTSWOERTER && jaccard(words, w) >= FRAGE_AEHNLICH_SCHWELLE
+          )
+        ) {
+          continue;
+        }
         seenFragen.add(key);
         collected.push(q);
+        acceptedWords.push(words);
         neu++;
       }
       cost += out.cost || 0;
