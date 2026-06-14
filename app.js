@@ -4,9 +4,17 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.35";
+const APP_VERSION = "1.0.36";
 
 const CHANGELOG = [
+  {
+    version: "1.0.36",
+    date: "14.06.2026",
+    items: [
+      "Vertiefungen sind da: Ab Stufe 3 kannst du zu einer Stelle thematisch fokussierte Fragebögen erstellen. Das Tool leitet beim ersten Mal passende Themenfelder aus der Anzeige ab – mit Schwerpunkt auf den Themen, in denen du bisher schwächer warst. Du wählst bis zu 3 Felder aus; die Mindest-Fragenzahl passt sich an (1 Feld ab 4, 2 ab 8, 3 ab 10 Fragen). Vertiefungen sind bewusst immer „schwer“. Nur mit Cloud-Anbieter, nicht mit lokalen Modellen.",
+      "Die abgeleiteten Themenfelder werden gespeichert. Sind sie nach weiteren Stufen veraltet, kannst du sie mit einem Klick neu ableiten – nie automatisch, damit kein ungewollter Aufruf entsteht.",
+    ],
+  },
   {
     version: "1.0.35",
     date: "14.06.2026",
@@ -1711,8 +1719,109 @@ function maybeEnrichRevealed(idx) {
     });
 }
 
-async function generateQuiz() {
+// Schema fuer die Themenfeld-Ableitung der Vertiefungen. Bewusst klein und
+// fokussiert: nur Label, ein Beschreibungssatz und ein Schwerpunkt-Flag. Die
+// stabile id vergeben wir im Code (index-basiert), nicht das Modell.
+const THEMENFELDER_SCHEMA = {
+  type: "object",
+  properties: {
+    themenfelder: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          label: { type: "string", description: "Kurzer, praegnanter Name des Themenfelds" },
+          kurzbeschreibung: { type: "string", description: "Ein Satz, was dieses Feld umfasst" },
+          schwerpunkt: { type: "boolean", description: "true, wenn der Bewerber laut Schwachstellen-Liste hier bisher schwach war" },
+        },
+        required: ["label", "kurzbeschreibung", "schwerpunkt"],
+        additionalProperties: false,
+      },
+      description: "4 bis 6 trennscharfe, stellenspezifische Themenfelder",
+    },
+  },
+  required: ["themenfelder"],
+  additionalProperties: false,
+};
+
+// Kompakte Schwachstellen-Liste aus den bisherigen Versuchen: je bewerteter
+// Frage die erreichten Punkte (0-10), schwaechste zuerst. Defensiv gegen alte
+// Versuche ohne ergebnisse/quiz. Dient als Input fuer die Themenfeld-Ableitung,
+// damit das Modell Schwerpunkte dort setzt, wo der Bewerber schlecht war.
+function buildSchwaechenSummary(job) {
+  const rows = [];
+  (job && Array.isArray(job.attempts) ? job.attempts : []).filter(Boolean).forEach((att) => {
+    const fragen = att.quiz && Array.isArray(att.quiz.fragen) ? att.quiz.fragen : [];
+    const erg = att.result && Array.isArray(att.result.ergebnisse) ? att.result.ergebnisse : [];
+    fragen.forEach((f, i) => {
+      const e = erg[i] || erg.find((x) => x && x.id === f.id);
+      const p = e && Number.isFinite(Number(e.punkte)) ? Number(e.punkte) : null;
+      if (p !== null) rows.push({ kategorie: f.kategorie || "", frage: f.frage || "", punkte: p });
+    });
+  });
+  rows.sort((a, b) => a.punkte - b.punkte);
+  const worst = rows.slice(0, 12);
+  if (!worst.length) return "Keine bewerteten Einzelfragen vorhanden.";
+  return worst.map((r) => `- [${r.punkte}/10] ${r.kategorie ? r.kategorie + ": " : ""}${r.frage}`).join("\n");
+}
+
+// Leitet aus Stellentext + Schwachstellen 4-6 Themenfelder ab. Ein Cloud-Aufruf,
+// nur per ausdruecklichem Klick (Kostenregel). Gibt Felder samt Kosten/Token
+// zurueck; das Persistieren uebernimmt saveThemenfelder.
+async function deriveThemenfelder(job) {
+  const system =
+    "Du bist ein erfahrener Recruiter und Fachexperte. Leite aus einer Stellenausschreibung " +
+    "4 bis 6 trennscharfe, stellenspezifische Themenfelder ab, in denen sich ein Bewerber gezielt " +
+    "vertiefen kann. Die Felder muessen sich klar voneinander abgrenzen und konkret zur Stelle passen " +
+    "- keine generischen Floskeln. Markiere ein Feld als Schwerpunkt (schwerpunkt=true), wenn der " +
+    "Bewerber laut der Schwachstellen-Liste dort bisher schwach war. Antworte auf Deutsch.";
+  const user =
+    `Stellenausschreibung:\n\n${(job.jobText || "").slice(0, 30000)}\n\n` +
+    `Bisherige Schwachstellen des Bewerbers (Punkte je Frage, 0-10, schwaechste zuerst):\n${buildSchwaechenSummary(job)}`;
+  const { data, cost, tokens } = await callLLM(system, user, THEMENFELDER_SCHEMA);
+  const fields = (data && Array.isArray(data.themenfelder) ? data.themenfelder : [])
+    .filter((f) => f && typeof f.label === "string" && f.label.trim())
+    .slice(0, 6)
+    .map((f, i) => ({
+      id: "tf" + (i + 1),
+      label: f.label.trim(),
+      kurzbeschreibung: typeof f.kurzbeschreibung === "string" ? f.kurzbeschreibung.trim() : "",
+      schwerpunkt: !!f.schwerpunkt,
+    }));
+  if (!fields.length) throw new Error("Es konnten keine Themenfelder abgeleitet werden. Bitte erneut versuchen.");
+  return { fields, cost, tokens };
+}
+
+// Themenfelder am Job speichern - race-arm wie jeder History-Write der App:
+// frisch lesen, Ziel-Job ueber stabile Keys finden, NUR dieses Feld setzen,
+// sofort schreiben. Zwischen loadHistory und saveHistory steht bewusst kein
+// await (synchron = atomar je Tab). Nicht ueberschreiben, falls inzwischen ein
+// neuerer Stand da ist. Aktualisiert zusaetzlich das in-memory job-Objekt.
+function saveThemenfelder(job, derived, level) {
+  const themenfelder = {
+    v: 1,
+    generatedAt: Date.now(),
+    generatedAtLevel: level,
+    fields: derived.fields,
+    cost: derived.cost,
+    tokens: derived.tokens,
+  };
+  const h = loadHistory();
+  const target =
+    (job.urlKey && h.jobs.find((j) => j.urlKey === job.urlKey)) ||
+    (job.key && h.jobs.find((j) => j.key === job.key)) ||
+    (job.identityKey && h.jobs.find((j) => j.identityKey === job.identityKey));
+  if (target && !(target.themenfelder && target.themenfelder.generatedAt > themenfelder.generatedAt)) {
+    target.themenfelder = themenfelder;
+    saveHistory(h);
+  }
+  job.themenfelder = themenfelder;
+  return themenfelder;
+}
+
+async function generateQuiz(opts = {}) {
   if (actionRunning) return;
+  const vertiefung = opts && opts.vertiefung ? opts.vertiefung : null;
   const jobText = $("job-text").value.trim();
   if (jobText.length < 50) {
     showError("Bitte zuerst eine Stellenanzeige per URL laden oder den Text unter „Text einfügen“ einfügen.");
@@ -1720,7 +1829,17 @@ async function generateQuiz() {
   }
   const numQuestions = $("num-questions").value;
   mode = document.querySelector('input[name="mode"]:checked').value;
-  const difficulty = document.querySelector('input[name="difficulty"]:checked').value;
+  let difficulty = document.querySelector('input[name="difficulty"]:checked').value;
+
+  // Vertiefungsbogen: ohne Themenfeld kein Aufruf (Schutz auch hier im Einstieg,
+  // nicht nur im UI). Schwierigkeit wird bewusst auf "schwer" erzwungen.
+  if (vertiefung) {
+    if (!vertiefung.felder || !vertiefung.felder.length) {
+      showError("Bitte mindestens ein Themenfeld auswählen.");
+      return;
+    }
+    difficulty = "schwer";
+  }
 
   // "schwer" sind die Fragen, die im echten Auswahlverfahren am
   // wahrscheinlichsten drankommen; die Stufe steuert deren Anteil
@@ -1786,7 +1905,14 @@ async function generateQuiz() {
       const out = await generateLocalBatches(system, jobText.slice(0, LOCAL_JOBTEXT_CAP), total, progress);
       result = out.data; genCost = out.cost; genTokens = out.tokens; localAborted = out.aborted;
     } else {
+      const vertiefungHinweis = vertiefung
+        ? `Dies ist ein Vertiefungsbogen. Stelle ALLE Fragen ausschliesslich zu diesen Themenfeldern: ` +
+          `${vertiefung.felder.map((f) => f.label).join("; ")}. Verteile die ${numQuestions} Fragen ` +
+          `moeglichst gleichmaessig auf die ${vertiefung.felder.length} Felder und decke jedes Feld mehrfach ab. ` +
+          `Stelle keine Fragen ausserhalb dieser Felder.\n\n`
+        : "";
       const user =
+        vertiefungHinweis +
         `Erstelle einen Einstellungstest mit genau ${numQuestions} Fragen zu dieser Stellenausschreibung:\n\n` +
         jobText.slice(0, 30000);
       const out = await callLLM(system, user, QUESTIONS_SCHEMA, (acc) => {
@@ -1812,6 +1938,11 @@ async function generateQuiz() {
       }
     }
     quiz.schwierigkeitsgrad = difficulty;
+    // Vertiefungs-Felder am Quiz mitfuehren - saveAttempt schreibt sie als
+    // attempt.vertiefung raus. Nur id/label, kompakt.
+    if (vertiefung) {
+      quiz.vertiefungFelder = vertiefung.felder.map((f) => ({ id: f.id, label: f.label }));
+    }
     // Kosten der Fragenerstellung (inkl. Verarbeitung der Stellenanzeige) bis
     // zur Auswertung am Quiz mitfuehren, damit der Gesamtpreis je Fragebogen
     // gespeichert werden kann
@@ -2280,6 +2411,9 @@ function renderResult(result, durationMs) {
   }
   if (mode === "lernen" && quiz.schwierigkeitsgrad) {
     meta += ` · Schwierigkeitsgrad ${difficultyLabel(quiz.schwierigkeitsgrad)}`;
+  }
+  if (Array.isArray(quiz.vertiefungFelder) && quiz.vertiefungFelder.length) {
+    meta += ` · Vertiefung: ${quiz.vertiefungFelder.map((f) => f.label).join(", ")}`;
   }
   $("result-meta").textContent = meta;
 
@@ -3134,8 +3268,29 @@ function saveAttempt(result, durationMs, evalCost, evalTokens) {
     num: quiz.fragen.length,
   };
 
-  const cost = buildCost(quiz.genCost, evalCost);
-  const tokens = buildTokens(quiz.genTokens, evalTokens);
+  // Vertiefung: die Themenfeld-Ableitung war ein eigener bezahlter Aufruf. Ihre
+  // Kosten/Tokens genau EINMAL in den ersten Vertiefungs-Versuch einrechnen, der
+  // die Felder tatsaechlich nutzt (costCounted-Flag) - sonst fielen sie aus der
+  // Kostenanzeige der Historie heraus oder wuerden bei jedem Versuch erneut
+  // gezaehlt. Bleibt undefiniert/aus, wenn keine Ableitung im Spiel war.
+  let genCost = quiz.genCost;
+  let genTokens = quiz.genTokens;
+  if (Array.isArray(quiz.vertiefungFelder) && quiz.vertiefungFelder.length &&
+      job.themenfelder && !job.themenfelder.costCounted) {
+    const dc = job.themenfelder.cost;
+    if (typeof dc === "number") genCost = (typeof genCost === "number" ? genCost : 0) + dc;
+    const dt = job.themenfelder.tokens;
+    if (dt && typeof dt === "object") {
+      genTokens = {
+        input: ((genTokens && genTokens.input) || 0) + (dt.input || 0),
+        output: ((genTokens && genTokens.output) || 0) + (dt.output || 0),
+      };
+    }
+    job.themenfelder.costCounted = true;
+  }
+
+  const cost = buildCost(genCost, evalCost);
+  const tokens = buildTokens(genTokens, evalTokens);
 
   const quizCopy = JSON.parse(JSON.stringify(quiz));
   delete quizCopy.jobText; // liegt schon auf dem Job, spart Speicher
@@ -3143,8 +3298,9 @@ function saveAttempt(result, durationMs, evalCost, evalTokens) {
   delete quizCopy.genTokens; // liegt als tokens am Versuch, nicht doppelt sichern
   delete quizCopy.urlKey;  // liegt am Job
   delete quizCopy.jobUrl;  // liegt am Job
+  delete quizCopy.vertiefungFelder; // liegt als attempt.vertiefung am Versuch
 
-  job.attempts.push({
+  const attempt = {
     date: Date.now(),
     mode,
     schwierigkeitsgrad: quiz.schwierigkeitsgrad || "",
@@ -3158,7 +3314,13 @@ function saveAttempt(result, durationMs, evalCost, evalTokens) {
     answers: answers.slice(),
     revealed: revealed.slice(),
     result,
-  });
+  };
+  // Vertiefungs-Versuche tragen die genutzten Felder; normale Versuche haben das
+  // Feld nicht (Anzeige liest defensiv).
+  if (Array.isArray(quiz.vertiefungFelder) && quiz.vertiefungFelder.length) {
+    attempt.vertiefung = { felder: quiz.vertiefungFelder };
+  }
+  job.attempts.push(attempt);
 
   if (job.attempts.length > HISTORY_MAX_ATTEMPTS) job.attempts = job.attempts.slice(-HISTORY_MAX_ATTEMPTS);
   if (h.jobs.length > HISTORY_MAX_JOBS) h.jobs.length = HISTORY_MAX_JOBS;
@@ -3284,6 +3446,11 @@ function renderJobBlock(job, opts) {
     info.textContent = `${formatDate(att.date)} · ${att.mode === "pruefung" ? "Prüfung" : "Lernen"}` +
       (att.schwierigkeitsgrad ? ` · ${difficultyLabel(att.schwierigkeitsgrad)}` : "") +
       ` · ${att.quiz.fragen.length} Fragen` +
+      // Vertiefungs-Versuche kennzeichnen; aeltere/normale Versuche haben kein
+      // vertiefung-Feld (defensiv).
+      (att.vertiefung && Array.isArray(att.vertiefung.felder) && att.vertiefung.felder.length
+        ? ` · Vertiefung: ${att.vertiefung.felder.map((f) => f.label).join(", ")}`
+        : "") +
       // Kosten zeigen, wenn fuer diesen Versuch erfasst (Cloud-Anbieter mit
       // Preis); sonst bei lokalen Modellen ersatzweise den Token-Verbrauch.
       // Aeltere Versuche haben keins von beidem - dann bleibt der Slot leer.
@@ -3413,11 +3580,23 @@ function normalizeTestConfig(c) {
   return { mode: c2.mode === "pruefung" ? "pruefung" : "lernen", difficulty: valid(c2.difficulty), num: clampNum(num) };
 }
 
+// Wie viele Themenfelder eine Vertiefung mit so vielen Fragen sinnvoll abdecken
+// kann - bzw. umgekehrt das Stepper-Minimum bei so vielen gewaehlten Feldern:
+// 3 Felder ab 10 Fragen, 2 ab 8, 1 (oder 0) ab 4. Sorgt fuer genug Fragen je Feld.
+function vertiefungMinFragen(count) {
+  return count >= 3 ? 10 : count === 2 ? 8 : NUM_MIN;
+}
+
 // Fragen-Stepper fuer dynamisch erzeugte Panels (Subpage). Gleiche Optik und
 // gleiches Verhalten (Bereich 4-30) wie der statische Stepper im Eingabe-
-// Bildschirm; onChange meldet jeden gueltigen Wert zurueck.
-function buildNumStepper(initial, onChange) {
-  let value = clampNum(Number(initial) || 10);
+// Bildschirm; onChange meldet jeden gueltigen Wert zurueck. opts.min hebt die
+// Untergrenze an (fuer die Vertiefung, deren Minimum mit der Feldauswahl
+// floatet); ohne opts bleibt es bei NUM_MIN. setMin(n) verschiebt die Grenze
+// live und zieht den Wert bei Bedarf hoch; getValue() liefert den Stand.
+function buildNumStepper(initial, onChange, opts = {}) {
+  const clampMin = (m) => Math.min(NUM_MAX, Math.max(NUM_MIN, Math.round(Number(m) || NUM_MIN)));
+  let min = clampMin(opts.min);
+  let value = Math.max(min, clampNum(Number(initial) || 10));
   const wrap = document.createElement("div");
   wrap.className = "stepper";
   wrap.setAttribute("role", "group");
@@ -3437,20 +3616,27 @@ function buildNumStepper(initial, onChange) {
   inc.textContent = "+";
   const render = () => {
     disp.textContent = String(value);
-    dec.disabled = value <= NUM_MIN;
+    dec.disabled = value <= min;
     inc.disabled = value >= NUM_MAX;
   };
-  const step = (d) => {
-    value = clampNum(value + d);
+  const setValue = (n, notify) => {
+    value = Math.min(NUM_MAX, Math.max(min, clampNum(n)));
     render();
-    if (onChange) onChange(value);
+    if (notify && onChange) onChange(value);
   };
+  const step = (d) => setValue(value + d, true);
   dec.addEventListener("click", () => step(-1));
   inc.addEventListener("click", () => step(1));
   wrap.appendChild(dec);
   wrap.appendChild(disp);
   wrap.appendChild(inc);
   render();
+  wrap.setMin = (m) => {
+    min = clampMin(m);
+    if (value < min) setValue(min, true);
+    else render();
+  };
+  wrap.getValue = () => value;
   return wrap;
 }
 
@@ -3520,38 +3706,224 @@ function buildStartPanel(job) {
   btnRow.appendChild(pruefBtn);
   panel.appendChild(btnRow);
 
-  // Vertiefungen-Teaser: macht das ab Stufe 3 freischaltbare Feature schon
-  // vorher sichtbar, damit das Hocharbeiten ein Ziel bekommt. Hier zunaechst nur
-  // der gesperrte Hinweis - die eigentliche Vertiefung folgt separat. Fuer lokale
-  // Modelle nicht beworben, weil sie dort nicht angeboten wird (treffsichere
-  // Themenfelder sind nichts fuer kleine, halluzinierende Modelle).
-  const provider = settings.provider || "anthropic";
-  if (provider !== "local") {
-    const prog = computeJobProgress(job);
-    if (prog.level < VERTIEFUNG_MIN_LEVEL) {
-      const need = Math.max(0, xpThresholdForLevel(VERTIEFUNG_MIN_LEVEL) - prog.totalXp);
-      const teaser = document.createElement("div");
-      teaser.className = "vertiefung-teaser locked";
-      const icon = document.createElement("span");
-      icon.className = "vertiefung-teaser-icon";
-      icon.innerHTML = BADGE_ICON_LOCKED;
-      const txt = document.createElement("div");
-      txt.className = "vertiefung-teaser-text";
-      const title = document.createElement("span");
-      title.className = "vertiefung-teaser-title";
-      title.textContent = "Vertiefungen";
-      const sub = document.createElement("span");
-      sub.className = "vertiefung-teaser-sub";
-      sub.textContent = `ab Stufe ${VERTIEFUNG_MIN_LEVEL} · noch ${need} XP`;
-      txt.appendChild(title);
-      txt.appendChild(sub);
-      teaser.appendChild(icon);
-      teaser.appendChild(txt);
-      panel.appendChild(teaser);
-    }
-  }
+  // Vertiefungen: gesperrter Teaser (Stufe < 3 bzw. lokaler Anbieter) oder die
+  // Auswahl, sobald freigeschaltet. Eigene Funktion, damit das Panel kompakt
+  // bleibt.
+  panel.appendChild(buildVertiefungSection(job));
 
   return panel;
+}
+
+// Gesperrter Vertiefungen-Hinweis (Schloss + zwei Textzeilen). Wiederverwendet
+// fuer "ab Stufe 3" und "nur mit Cloud-Anbieter".
+function buildVertiefungTeaser(title, sub) {
+  const teaser = document.createElement("div");
+  teaser.className = "vertiefung-teaser locked";
+  const icon = document.createElement("span");
+  icon.className = "vertiefung-teaser-icon";
+  icon.innerHTML = BADGE_ICON_LOCKED;
+  const txt = document.createElement("div");
+  txt.className = "vertiefung-teaser-text";
+  const t = document.createElement("span");
+  t.className = "vertiefung-teaser-title";
+  t.textContent = title;
+  const s = document.createElement("span");
+  s.className = "vertiefung-teaser-sub";
+  s.textContent = sub;
+  txt.appendChild(t);
+  txt.appendChild(s);
+  teaser.appendChild(icon);
+  teaser.appendChild(txt);
+  return teaser;
+}
+
+// Vertiefungen-Bereich einer Stelle: gesperrt (lokaler Anbieter oder Stufe noch
+// nicht erreicht) zeigt nur den Teaser; freigeschaltet einen Knopf, der die
+// Themenfeld-Auswahl oeffnet. Die Erst-Ableitung der Themenfelder passiert erst
+// beim Klick (ein Cloud-Aufruf, ausdruecklich ausgeloest).
+function buildVertiefungSection(job) {
+  const wrap = document.createElement("div");
+  wrap.className = "vertiefung-section";
+  const provider = settings.provider || "anthropic";
+  const prog = computeJobProgress(job);
+
+  if (provider === "local") {
+    wrap.appendChild(buildVertiefungTeaser("Vertiefungen", "nur mit Cloud-Anbieter verfügbar"));
+    return wrap;
+  }
+  if (prog.level < VERTIEFUNG_MIN_LEVEL) {
+    const need = Math.max(0, xpThresholdForLevel(VERTIEFUNG_MIN_LEVEL) - prog.totalXp);
+    wrap.appendChild(buildVertiefungTeaser("Vertiefungen", `ab Stufe ${VERTIEFUNG_MIN_LEVEL} · noch ${need} XP`));
+    return wrap;
+  }
+
+  const unlockBtn = document.createElement("button");
+  unlockBtn.type = "button";
+  unlockBtn.className = "vertiefung-unlock";
+  unlockBtn.textContent = "Vertiefung starten";
+  unlockBtn.addEventListener("click", async () => {
+    if (actionRunning) return;
+    const hasFields = job.themenfelder && Array.isArray(job.themenfelder.fields) && job.themenfelder.fields.length;
+    if (!hasFields) {
+      actionRunning = true;
+      unlockBtn.disabled = true;
+      showLoading("Themenfelder werden abgeleitet...");
+      try {
+        const derived = await deriveThemenfelder(job);
+        saveThemenfelder(job, derived, prog.level);
+      } catch (e) {
+        showError(e.message);
+        actionRunning = false;
+        hideLoading();
+        unlockBtn.disabled = false;
+        return;
+      }
+      actionRunning = false;
+      hideLoading();
+    }
+    wrap.replaceChild(buildVertiefungPicker(job), unlockBtn);
+  });
+  wrap.appendChild(unlockBtn);
+  return wrap;
+}
+
+// Themenfeld-Auswahl: Chips (1-3), Stepper mit mitfloatendem Minimum, zwei
+// Startknoepfe (ohne Schwierigkeit - Vertiefung ist immer "schwer"). Ist der
+// Themenfeld-Stand veraltet (>= +2 Stufen), oben ein expliziter Neu-Ableiten-
+// Knopf (kostet einen Aufruf).
+function buildVertiefungPicker(job) {
+  const box = document.createElement("div");
+  box.className = "vertiefung-picker";
+  const tf = job.themenfelder || { fields: [] };
+  const prog = computeJobProgress(job);
+
+  if (tf && Number.isFinite(tf.generatedAtLevel) && prog.level >= tf.generatedAtLevel + 2) {
+    const stale = document.createElement("div");
+    stale.className = "vertiefung-stale";
+    const note = document.createElement("span");
+    note.textContent = "Deine Themenfelder sind älter. ";
+    const refresh = document.createElement("button");
+    refresh.type = "button";
+    refresh.className = "vertiefung-refresh";
+    refresh.textContent = "Neu ableiten (kostet einen Aufruf)";
+    refresh.addEventListener("click", async () => {
+      if (actionRunning) return;
+      actionRunning = true;
+      refresh.disabled = true;
+      showLoading("Themenfelder werden neu abgeleitet...");
+      try {
+        const derived = await deriveThemenfelder(job);
+        saveThemenfelder(job, derived, prog.level);
+      } catch (e) {
+        showError(e.message);
+        actionRunning = false;
+        hideLoading();
+        refresh.disabled = false;
+        return;
+      }
+      actionRunning = false;
+      hideLoading();
+      box.replaceWith(buildVertiefungPicker(job));
+    });
+    stale.appendChild(note);
+    stale.appendChild(refresh);
+    box.appendChild(stale);
+  }
+
+  const selected = new Set();
+  const chipsRow = document.createElement("div");
+  chipsRow.className = "vertiefung-chips";
+  const chipEls = [];
+  (tf.fields || []).forEach((f) => {
+    const c = document.createElement("button");
+    c.type = "button";
+    c.className = "chip vertiefung-chip" + (f.schwerpunkt ? " schwerpunkt" : "");
+    c.textContent = f.label;
+    c.title = (f.kurzbeschreibung || "") + (f.schwerpunkt ? " (Schwerpunkt: hier warst du bisher schwächer)" : "");
+    c.addEventListener("click", () => {
+      if (selected.has(f.id)) {
+        selected.delete(f.id);
+        c.classList.remove("active");
+      } else {
+        if (selected.size >= 3) return;
+        selected.add(f.id);
+        c.classList.add("active");
+      }
+      updateState();
+    });
+    chipEls.push({ f, el: c });
+    chipsRow.appendChild(c);
+  });
+  box.appendChild(chipsRow);
+
+  const numRow = document.createElement("div");
+  numRow.className = "start-opt-row";
+  const numLabel = document.createElement("span");
+  numLabel.className = "start-opt-label";
+  numLabel.id = "vert-num-label";
+  numLabel.textContent = "Fragen";
+  numRow.appendChild(numLabel);
+  const stepper = buildNumStepper(10, null, { min: vertiefungMinFragen(0) });
+  stepper.setAttribute("aria-labelledby", "vert-num-label");
+  stepper.removeAttribute("aria-label");
+  numRow.appendChild(stepper);
+  box.appendChild(numRow);
+
+  const btnRow = document.createElement("div");
+  btnRow.className = "start-buttons";
+  const lernBtn = document.createElement("button");
+  lernBtn.className = "primary";
+  lernBtn.textContent = "Vertiefung · Lernmodus starten";
+  const pruefBtn = document.createElement("button");
+  pruefBtn.className = "primary";
+  pruefBtn.textContent = "Vertiefung · Prüfungsmodus starten";
+  btnRow.appendChild(lernBtn);
+  btnRow.appendChild(pruefBtn);
+  box.appendChild(btnRow);
+
+  function updateState() {
+    const n = selected.size;
+    stepper.setMin(vertiefungMinFragen(n));
+    chipEls.forEach(({ f, el }) => { el.disabled = n >= 3 && !selected.has(f.id); });
+    lernBtn.disabled = pruefBtn.disabled = n === 0;
+  }
+  updateState();
+
+  const start = (testMode) => {
+    const felder = (tf.fields || []).filter((f) => selected.has(f.id)).map((f) => ({ id: f.id, label: f.label }));
+    if (!felder.length) return;
+    startVertiefungForJob(job, testMode, stepper.getValue(), felder);
+  };
+  lernBtn.addEventListener("click", () => start("lernen"));
+  pruefBtn.addEventListener("click", () => start("pruefung"));
+
+  return box;
+}
+
+// Vertiefung starten: wie startTestForJob die Eingabe-Steuerelemente fuellen,
+// die generateQuiz liest, Schwierigkeit auf "schwer" (in generateQuiz ohnehin
+// erzwungen) und die gewaehlten Felder als expliziten Parameter uebergeben.
+function startVertiefungForJob(job, testMode, num, felder) {
+  if (actionRunning) return;
+  $("job-text").value = job.jobText;
+  if (job.url) {
+    $("job-url").value = job.url;
+    lastFetch = { url: job.url, text: job.jobText };
+  } else {
+    lastFetch = { url: "", text: "" };
+  }
+  setSourceTab("text");
+  const mEl = document.querySelector(`input[name="mode"][value="${testMode}"]`);
+  if (mEl) mEl.checked = true;
+  const dEl = document.querySelector('input[name="difficulty"][value="schwer"]');
+  if (dEl) dEl.checked = true;
+  const numInput = $("num-questions");
+  if (Number.isFinite(num)) {
+    if (numInput.setValue) numInput.setValue(num);
+    else numInput.value = String(num);
+  }
+  saveDraft();
+  generateQuiz({ vertiefung: { felder } });
 }
 
 let activeJob = null;
@@ -3614,6 +3986,9 @@ function openAttempt(job, att) {
   enrichTried = new Set();
   enrichingIdx = -1;
   quiz.jobText = job.jobText;
+  // Vertiefungs-Felder liegen am Versuch (nicht im gespeicherten Quiz) - fuer die
+  // Auswertungs-Meta zuruecklegen. Fehlt bei normalen Versuchen.
+  if (att.vertiefung && Array.isArray(att.vertiefung.felder)) quiz.vertiefungFelder = att.vertiefung.felder;
   // urlKey/Quelle aus der Stelle übernehmen, damit ein erneutes Auswerten aus
   // der Review heraus wieder zur selben Stelle gespeichert wird
   if (job.urlKey) quiz.urlKey = job.urlKey;
@@ -4027,6 +4402,17 @@ function importData(text) {
       if (impJob.arbeitgeber && !existing.arbeitgeber) existing.arbeitgeber = impJob.arbeitgeber;
       if (impJob.arbeitsort && !existing.arbeitsort) existing.arbeitsort = impJob.arbeitsort;
       if (impIKey && !existing.identityKey) existing.identityKey = impIKey;
+      // Vertiefungs-Themenfelder aus dem Import uebernehmen: fehlt lokal eins
+      // oder ist das importierte neuer (generatedAt), das importierte behalten -
+      // sonst geht eine schon bezahlte Ableitung beim Restore/Sync verloren.
+      // Defensiv: nur eine plausible Form (fields-Array) akzeptieren.
+      const impTf = impJob.themenfelder;
+      if (impTf && typeof impTf === "object" && Array.isArray(impTf.fields) && impTf.fields.length) {
+        const curTf = existing.themenfelder;
+        if (!curTf || !(Number(curTf.generatedAt) >= Number(impTf.generatedAt))) {
+          existing.themenfelder = impTf;
+        }
+      }
       const seen = new Set(existing.attempts.map((a) => a.date));
       incoming.forEach((a) => {
         if (!seen.has(a.date)) {

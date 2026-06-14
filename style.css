@@ -1176,6 +1176,48 @@ button.danger:hover { background: var(--red-soft); border-color: var(--red); }
 .vertiefung-teaser-title { font-weight: 600; font-size: 0.9rem; color: var(--text); }
 .vertiefung-teaser-sub { font-size: 0.8rem; color: var(--muted); }
 
+/* Vertiefungen freigeschaltet: Aufklapp-Knopf und Auswahl. */
+.vertiefung-section { margin-top: 0.6rem; }
+.vertiefung-unlock {
+  width: 100%;
+  border: 1px solid var(--primary);
+  color: var(--primary);
+  background: transparent;
+  border-radius: 12px;
+  padding: 0.7rem 1rem;
+  font-weight: 600;
+}
+.vertiefung-unlock:hover:not(:disabled) { background: var(--primary-soft); }
+.vertiefung-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card-2);
+}
+.vertiefung-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.vertiefung-chip.schwerpunkt { border-color: var(--primary); }
+.vertiefung-chip:disabled { opacity: 0.45; cursor: default; }
+.vertiefung-stale {
+  font-size: 0.85rem;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+.vertiefung-refresh {
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text);
+  border-radius: 999px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
+}
+.vertiefung-refresh:hover:not(:disabled) { background: var(--primary-soft); border-color: transparent; }
+
 /* Mobil (Smartphones) */
 @media (max-width: 600px) {
   header { padding: 0.8rem 1rem; padding-top: calc(0.8rem + env(safe-area-inset-top)); }
