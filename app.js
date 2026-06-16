@@ -1236,7 +1236,8 @@ async function fetchJobFromUrl(url) {
   // r.jina.ai liefert beliebige Webseiten als Markdown-Text mit offenen CORS-Headern
   let isLinkedIn = false;
   try {
-    isLinkedIn = new URL(url).hostname.endsWith("linkedin.com");
+    const host = new URL(url).hostname;
+    isLinkedIn = host === "linkedin.com" || host.endsWith(".linkedin.com");
   } catch {
     // ungültige URL: keine Sonderbehandlung
   }
