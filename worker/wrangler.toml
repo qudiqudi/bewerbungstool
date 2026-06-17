@@ -12,6 +12,14 @@ name = "jobreif-hosted"
 main = "src/index.js"
 compatibility_date = "2026-05-01"
 
+# Custom Domain api.jobreif.de für den Worker. Greift erst, wenn die Zone jobreif.de
+# auf Cloudflare AKTIV ist (NS-Umzug durch). Dann legt `wrangler deploy` den
+# Custom-Domain-Eintrag automatisch an. Läuft man `wrangler deploy` VOR der Aktivierung,
+# schlägt nur diese Route fehl — dann diese drei Zeilen kurz auskommentieren.
+[[routes]]
+pattern = "api.jobreif.de"
+custom_domain = true
+
 [vars]
 ALLOWED_ORIGINS = "https://jobreif.de"
 DAY_BUDGET_USD = "5"          # harte Tagesgrenze (USD), bewusst niedrig starten
