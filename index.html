@@ -395,10 +395,40 @@
         <p>Dein Verlauf (erstellte Tests, Ergebnisse) und deine Einstellungen werden ausschließlich lokal in deinem Browser gespeichert und nicht an uns übertragen. Du kannst sie jederzeit über die Einstellungen exportieren oder löschen.</p>
 
         <h3>Verantwortlicher</h3>
-        <p>[Name und Anschrift des Betreibers eintragen] · Kontakt: [E-Mail-Adresse eintragen]</p>
+        <p>Sebastian Chudoba<br>
+        c/o Block Services<br>
+        Stuttgarter Str. 106<br>
+        70736 Fellbach<br>
+        Kontakt: <a href="mailto:datenschutz@jobreif.de">datenschutz@jobreif.de</a></p>
 
         <div class="row">
           <button id="btn-datenschutz-close" class="primary">Schließen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Impressum -->
+    <div id="impressum-modal" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="impressum-title">
+      <div class="modal card changelog-modal">
+        <h2 id="impressum-title">Impressum</h2>
+
+        <h3>Angaben gemäß § 5 DDG</h3>
+        <p>Sebastian Chudoba<br>
+        c/o Block Services<br>
+        Stuttgarter Str. 106<br>
+        70736 Fellbach</p>
+
+        <h3>Kontakt</h3>
+        <p>E-Mail: <a href="mailto:info@jobreif.de">info@jobreif.de</a></p>
+
+        <h3>Verantwortlich für den Inhalt nach § 18 Abs. 2 MStV</h3>
+        <p>Sebastian Chudoba (Anschrift wie oben)</p>
+
+        <p class="hint">jobreif.de ist ein privates Projekt. Bei Fragen zum Datenschutz siehe den
+        Datenschutzhinweis.</p>
+
+        <div class="row">
+          <button id="btn-impressum-close" class="primary">Schließen</button>
         </div>
       </div>
     </div>
@@ -474,6 +504,8 @@
       <a href="https://github.com/qudiqudi/bewerbungstool/blob/main/LICENSE" target="_blank" rel="noopener">Lizenz (AGPL-3.0)</a>
       <span class="footer-sep">&middot;</span>
       <a href="https://github.com/qudiqudi/bewerbungstool/issues" target="_blank" rel="noopener">Fehler melden</a>
+      <span class="footer-sep">&middot;</span>
+      <a href="#" id="link-impressum">Impressum</a>
       <span class="footer-sep">&middot;</span>
       <a href="#" id="link-datenschutz">Datenschutz</a>
       <span class="footer-sep">&middot;</span>

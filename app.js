@@ -4945,6 +4945,23 @@ $("datenschutz-modal").addEventListener("click", (e) => {
   if (e.target === $("datenschutz-modal")) closeDatenschutz();
 });
 
+/* ---------- Impressum ---------- */
+function openImpressum(e) {
+  if (e) e.preventDefault();
+  $("impressum-modal").classList.remove("hidden");
+  const panel = $("impressum-modal").querySelector(".modal");
+  if (panel) panel.scrollTop = 0;
+  $("btn-impressum-close").focus({ preventScroll: true });
+}
+function closeImpressum() {
+  $("impressum-modal").classList.add("hidden");
+}
+$("link-impressum").addEventListener("click", openImpressum);
+$("btn-impressum-close").addEventListener("click", closeImpressum);
+$("impressum-modal").addEventListener("click", (e) => {
+  if (e.target === $("impressum-modal")) closeImpressum();
+});
+
 $("btn-badge-close").addEventListener("click", closeBadgeModal);
 // Klick auf den abgedunkelten Hintergrund (nicht auf die Karte) schliesst
 $("badge-modal").addEventListener("click", (e) => {
@@ -4971,6 +4988,7 @@ document.addEventListener("visibilitychange", () => {
 const ESCAPE_CLOSERS = [
   ["changelog-modal", closeChangelog],
   ["datenschutz-modal", closeDatenschutz],
+  ["impressum-modal", closeImpressum],
   ["confirm-eval-modal", cancelConfirmEval],
   ["badge-modal", closeBadgeModal],
   ["confirm-delete-modal", closeConfirmDelete],
