@@ -1035,18 +1035,15 @@ function normalizeKernpunkte(k, jobText) {
   // dass ein triviales Schnipsel ("und", "m/w/d") als Beleg durchgeht.
   const verified = (item) => {
     if (!item || typeof item !== "object") return "";
-    const text = typeof item.text === "string" ? item.text.trim() : "";
     const beleg = typeof item.beleg === "string" ? item.beleg.trim() : "";
-    // 1) Der Beleg muss ein hinreichend langes, im Anzeigentext WOERTLICH
-    //    auffindbares Zitat sein (Mindestlaenge gegen triviale Schnipsel).
+    // Der Beleg muss ein hinreichend langes, im Anzeigentext WOERTLICH auffindbares
+    // Zitat sein (Mindestlaenge gegen triviale Schnipsel). Angezeigt wird IMMER das
+    // verifizierte Zitat selbst (gekuerzt), NIE die kondensierte Modell-Formulierung
+    // (`text`): ein Teilstring des Zitats koennte die Bedeutung kippen - etwa
+    // "Homeoffice" aus dem Beleg "Kein Homeoffice vorgesehen". Das Zitat bewahrt den
+    // Sinn (inkl. Verneinungen) und ist nachweislich aus der Anzeige.
     const nb = norm(beleg);
     if (nb.length < 8 || !hay.includes(nb)) return "";
-    // 2) Der ANGEZEIGTE Wert muss durch genau diesen Beleg gedeckt sein - sonst
-    //    koennte das Modell ein echtes Zitat mit einer erfundenen Aussage paaren
-    //    (z. B. text "100% remote, 80k" + beleg "Vollzeitstelle"). Bevorzugt der
-    //    knappe text, ABER nur wenn er woertlich im Beleg steckt; andernfalls der
-    //    (gekuerzte) Beleg selbst. Nie die ungedeckte Modell-Formulierung.
-    if (text && nb.includes(norm(text))) return text;
     return beleg.length > 200 ? beleg.slice(0, 200).trim() + "…" : beleg;
   };
   const verArr = (v) =>
@@ -5059,7 +5056,13 @@ function saveAttempt(result, durationMs, evalCost, evalTokens) {
     // Kernpunkte NICHT loeschen - der Guard laesst sie unberuehrt. Versionswrapper
     // wie bei themenfelder, erleichtert spaetere Migrationen.
     if (quiz.kernpunkte && typeof quiz.kernpunkte === "object") {
-      job.kernpunkte = { v: 1, generatedAt: Date.now(), data: quiz.kernpunkte };
+      // Kernpunkte an ihre Quelle binden: srcKey = Textschluessel der Anzeige, aus
+      // der sie extrahiert wurden. Beim Merge per identityKey kann der Job einen
+      // ANDEREN (alten) jobText tragen als das aktuelle Quiz - dann zeigt das Panel
+      // sie nicht an (Guard in buildKernpunktePanel), statt fremde Fakten zu mischen.
+      let srcKey = null;
+      try { srcKey = jobKey(quiz.jobText); } catch { /* egal */ }
+      job.kernpunkte = { v: 1, generatedAt: Date.now(), srcKey, data: quiz.kernpunkte };
     }
   }
   // identityKey aus den aktuellen Feldern der Stelle ableiten (nicht aus dem
@@ -5480,7 +5483,17 @@ function buildNumStepper(initial, onChange, opts = {}) {
 // wird ausschliesslich ueber textContent gesetzt (kein innerHTML).
 const KERNPUNKTE_LIST_MAX = 8; // sehr lange Listen kappen (geschwaetzige Modelle)
 function buildKernpunktePanel(job) {
-  const kp = job && job.kernpunkte && job.kernpunkte.data ? job.kernpunkte.data : null;
+  // Nur anzeigen, wenn die Kernpunkte zur AKTUELL gespeicherten Anzeige der Stelle
+  // gehoeren: srcKey (Textschluessel der Quell-Anzeige) muss zum jobText des Jobs
+  // passen. Sonst stammen sie aus einer anderen/aelteren Anzeige (Merge per
+  // identityKey, geaenderte Anzeige) und duerften nicht als Fakten dieser Stelle
+  // gezeigt werden. Fehlt srcKey (sehr alte Daten), nicht anzeigen (sicher).
+  let kp = job && job.kernpunkte && job.kernpunkte.data ? job.kernpunkte.data : null;
+  if (kp) {
+    let curKey = null;
+    try { curKey = job.jobText ? jobKey(job.jobText) : null; } catch { /* egal */ }
+    if (!job.kernpunkte.srcKey || job.kernpunkte.srcKey !== curKey) kp = null;
+  }
   if (!kp) return null;
   const sections = [
     { key: "aufgaben", label: "Aufgaben", type: "list" },
