@@ -51,11 +51,12 @@ APP_ORIGIN = "https://jobreif.de"   # Ziel der Magic-Link-/OAuth-Redirects
 MAGIC_TTL_S = "900"          # Gültigkeit eines Magic-Link-Tokens (15 min, einmalig)
 SESSION_TTL_S = "2592000"    # Session-Lebensdauer (30 Tage)
 MAGIC_FROM = "login@mail.jobreif.de"  # Resend-Absender (Subdomain mail.jobreif.de verifiziert)
-# Phase B – Schritt 2 (Cutover, Codex-Review R9): Server-Durchsetzung der Anmeldepflicht.
-# "0" = anonyme Hosted-Calls bleiben erlaubt (Cutover-Fenster, schuetzt gecachte Alt-Clients);
-# der neue Client gated clientseitig ohnehin. Erst NACH dem Auslaufen alter App-Shells auf
-# "1" schalten (harte Pflicht). Rollback = zurueck auf "0".
-REQUIRE_AUTH = "0"
+# Phase B – Schritt 2: Server-Durchsetzung der Anmeldepflicht. Default FAIL-CLOSED ("1",
+# Codex-Review R10): anonyme Hosted-Calls → 401. Das Cutover-Fenster aus R9 (anonym kurz
+# erlauben, um gecachte Alt-Clients zu schonen) ist NUR ein bewusster, temporaerer Override:
+# vor dem Merge im Dashboard/per `wrangler secret`/Var auf "0" setzen, nach dem Auslaufen
+# alter App-Shells zurueck auf "1". Der Release-Default bleibt "1".
+REQUIRE_AUTH = "1"
 # Dev-Flags (in Produktion NICHT setzen): MOCK_UPSTREAM, SKIP_TURNSTILE, MOCK_COST
 # Auth-Secrets via `wrangler secret put` (NIE hier): RESEND_KEY, GOOGLE_CLIENT_ID,
 # GOOGLE_CLIENT_SECRET. Ohne RESEND_KEY loggt der Worker den Magic-Link nur (Dev).

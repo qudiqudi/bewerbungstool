@@ -206,6 +206,15 @@ async function magicVerify(req, env, origin) {
 
 async function googleStart(req, env, origin) {
   if (!env.GOOGLE_CLIENT_ID) return json({ error: "oauth-unconfigured" }, 503, env, origin);
+  // Anti-Bot wie bei magic-link (Codex-Review R10): /auth/google/start schreibt unauth in
+  // oauth_states; ohne Bot-Schutz koennte ein Flood die Tabelle/D1-Writes belasten und den
+  // Google-Login (kritischer Pfad) degradieren. Turnstile an die Aktion gebunden; Dev-Bypass.
+  if (env.SKIP_TURNSTILE !== "1") {
+    const ip = req.headers.get("CF-Connecting-IP") || "0.0.0.0";
+    const token = req.headers.get("CF-Turnstile-Token") || "";
+    const tv = await verifyTurnstile(token, { action: "google-start", secret: env.TURNSTILE_SECRET, ip });
+    if (!tv.ok) return json({ error: "turnstile", reason: tv.reason }, 403, env, origin);
+  }
   // PKCE-artige Browser-Bindung: der Client haelt einen Verifier in sessionStorage und
   // schickt hier nur dessen Hash. Der spaetere /auth/exchange verlangt den Verifier zurueck;
   // so kann ein per Login-CSRF untergeschobener Callback von einem fremden Browser nicht

@@ -1262,17 +1262,18 @@ async function consumeAuthRedirect() {
   const err = params.get("auth_error");
   if (!code && !magic && !sess && !err) return false;
   cleanAuthParamsFromUrl(params); // IMMER zuerst scrubben, egal welcher Pfad
-  if (err) { _authRedirectMsg = "Die Anmeldung wurde abgebrochen."; return true; }
+  // Den OAuth-Verifier-Marker auf JEDEM terminalen Pfad raeumen (auch Abbruch), damit kein
+  // Marker zurueckbleibt, der spaeter einen untergeschobenen Link legitimieren koennte (R10).
+  const clearOAuthVerifier = () => { try { sessionStorage.removeItem(OAUTH_VERIFIER_KEY); } catch { /* egal */ } };
+  if (err) { clearOAuthVerifier(); _authRedirectMsg = "Die Anmeldung wurde abgebrochen."; return true; }
   if (sess && !code && !magic) {
-    // ?session=<bearer> vom Alt-Worker (Deploy-Skew, Codex-Review R9): NUR akzeptieren,
-    // wenn DIESER Tab den Google-Login gestartet hat (Verifier in sessionStorage). Das
-    // bindet es an den initiierenden Browser und verhindert Session-Fixation (R6): ein
-    // untergeschobener ?session-Link hat keinen passenden Verifier → wird nur gescrubbt.
-    let startedHere = "";
-    try { startedHere = sessionStorage.getItem(OAUTH_VERIFIER_KEY) || ""; } catch { /* egal */ }
-    try { sessionStorage.removeItem(OAUTH_VERIFIER_KEY); } catch { /* egal */ }
-    if (startedHere) { setAuthToken(sess); _authRedirectMsg = "Erfolgreich angemeldet."; }
-    else { _authRedirectMsg = "Bitte melde dich erneut an."; }
+    // ?session=<bearer> wird NIE als Token uebernommen (Session-Fixation, Codex-Review R10):
+    // ein roher Bearer in der URL ist nicht an diese Session gebunden und ein zurueck-
+    // gebliebener Verifier-Marker wuerde eine "verifier vorhanden"-Pruefung aushebeln. Der
+    // neue Worker stellt ?session ohnehin nicht mehr aus (nur den server-getauschten ?code).
+    // Hier nur scrubben + Marker raeumen.
+    clearOAuthVerifier();
+    _authRedirectMsg = "Bitte melde dich erneut an.";
     return true;
   }
   if (code) {
@@ -5850,7 +5851,11 @@ $("btn-login-google").addEventListener("click", async () => {
     const verifier = randomVerifier();
     try { sessionStorage.setItem(OAUTH_VERIFIER_KEY, verifier); } catch { /* egal */ }
     const vh = await sha256hex(verifier);
-    const r = await fetch(hostedBase() + "/auth/google/start?vh=" + encodeURIComponent(vh), { headers: { Accept: "application/json" } });
+    // Turnstile (Anti-Bot) wie bei Magic-Link/Generierung – an die Aktion gebunden.
+    const tkn = await getTurnstileToken("google-start");
+    const headers = { Accept: "application/json" };
+    if (tkn) headers["CF-Turnstile-Token"] = tkn;
+    const r = await fetch(hostedBase() + "/auth/google/start?vh=" + encodeURIComponent(vh), { headers });
     if (r.ok) {
       const d = await r.json();
       if (d.url) { window.location.href = d.url; return; }
