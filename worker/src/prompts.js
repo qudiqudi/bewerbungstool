@@ -222,7 +222,10 @@ export function buildQuizMessages({ jobText, numQuestions, difficulty, vertiefun
     "jeden Punkt knapp; Gehalt möglichst wortgetreu. Zu JEDEM Kernpunkt gehört ein beleg = ein WÖRTLICHES, exakt " +
     "aus dem Anzeigentext kopiertes Zitat (kein paraphrasiertes), das die Aussage stützt. Nimm einen Kernpunkt NUR " +
     "auf, wenn es ein solches wörtliches Zitat im Text gibt; sonst lass die Kategorie leer. Gehalt, Benefits und " +
-    "Anforderungen nur bei wörtlicher Deckung. ";
+    "Anforderungen nur bei wörtlicher Deckung. Beziehe dich AUSSCHLIESSLICH auf DIESE eine ausgeschriebene Stelle: " +
+    "verwende KEINE Angaben aus Navigation, Cookie-/Footer-Hinweisen, Werbeblöcken oder Teasern für ANDERE bzw. " +
+    "ähnliche Stellen, die im Seitentext mitkopiert sein können - auch wenn dort etwa ein Gehalt oder Benefit steht. " +
+    "Im Zweifel die Kategorie leer lassen. ";
 
   // Hosted nutzt starke Cloud-Modelle -> Reihenfolge-Aufgaben werden hier (anders
   // als im App-local-Pfad) NICHT unterdrueckt.

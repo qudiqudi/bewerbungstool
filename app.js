@@ -2713,7 +2713,10 @@ async function generateQuiz(opts = {}) {
         "jeden Punkt knapp; Gehalt möglichst wortgetreu. Zu JEDEM Kernpunkt gehört ein beleg = ein WÖRTLICHES, exakt " +
         "aus dem Anzeigentext kopiertes Zitat (kein paraphrasiertes), das die Aussage stützt. Nimm einen Kernpunkt NUR " +
         "auf, wenn es ein solches wörtliches Zitat im Text gibt; sonst lass die Kategorie leer. Gehalt, Benefits und " +
-        "Anforderungen nur bei wörtlicher Deckung. ";
+        "Anforderungen nur bei wörtlicher Deckung. Beziehe dich AUSSCHLIESSLICH auf DIESE eine ausgeschriebene Stelle: " +
+        "verwende KEINE Angaben aus Navigation, Cookie-/Footer-Hinweisen, Werbeblöcken oder Teasern für ANDERE bzw. " +
+        "ähnliche Stellen, die im Seitentext mitkopiert sein können - auch wenn dort etwa ein Gehalt oder Benefit steht. " +
+        "Im Zweifel die Kategorie leer lassen. ";
 
     // Vertiefungen tragen Tiefe ueber offene Fragen besser als ueber MC, und die
     // Distraktoren muessen anspruchsvoll sein. Normale Tests behalten exakt die
@@ -5069,7 +5072,15 @@ function saveAttempt(result, durationMs, evalCost, evalTokens) {
       // Kernpunkte, statt sie wegen eines veralteten Textes dauerhaft zu
       // verbergen. Der Merge laeuft ueber die stabilen Anker (urlKey/identityKey),
       // daher ist die jobText-Auffrischung unkritisch fuer die Wiederfindung.
-      if (typeof quiz.jobText === "string" && quiz.jobText.trim()) job.jobText = quiz.jobText;
+      if (typeof quiz.jobText === "string" && quiz.jobText.trim()) {
+        job.jobText = quiz.jobText;
+        // Invariante wahren: job.key ist der Hash des gespeicherten jobText. Wird
+        // jobText aufgefrischt, MUSS key mitziehen - sonst brechen der Post-Save-
+        // Lookup per jobKey(quiz.jobText) (Abzeichen/Fortschritt) und die Text-key-
+        // Rueckfaelle bei Import/Loeschen. Die Stelle bleibt ueber urlKey/identityKey
+        // auffindbar; key ist nur der schwaechste Rueckfall.
+        try { job.key = jobKey(job.jobText); } catch { /* egal */ }
+      }
       let srcKey = null;
       try { srcKey = jobKey(job.jobText); } catch { /* egal */ }
       job.kernpunkte = { v: 1, generatedAt: Date.now(), srcKey, data: quiz.kernpunkte };
