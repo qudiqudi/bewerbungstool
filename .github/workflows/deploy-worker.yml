@@ -46,6 +46,19 @@ jobs:
         working-directory: worker
         run: npm ci
 
+      # D1-Migrationen VOR dem Deploy anwenden (Codex-Review R11): der neue Worker-Code setzt
+      # Schema (oauth_states.verifier_hash, handoff_codes, magic_tokens-Indizes) voraus. Ohne
+      # diesen Schritt liefe der Auto-Deploy gegen ein altes Schema → Auth-Outage beim Login.
+      # Schlaegt die Migration fehl (z. B. Token ohne D1-Recht), bricht der Job ab und der
+      # neue Worker wird NICHT veroeffentlicht (fail-closed Deploy). Voraussetzung: der
+      # CLOUDFLARE_API_TOKEN braucht D1-Edit-Recht (Token-Vorlage um "D1 Edit" erweitern).
+      - name: D1-Migrationen anwenden
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          workingDirectory: worker
+          command: d1 migrations apply jobreif-auth --remote
+
       # Bei einem Account-scoped Token (Cloudflare-Vorlage "Edit Cloudflare
       # Workers") leitet Wrangler den Account selbst ab. Umfasst der Token mehrere
       # Accounts und der Deploy bricht mit "more than one account" ab: Secret

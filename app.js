@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.7.1";
+const APP_VERSION = "1.8.0";
 
 const CHANGELOG = [
+  {
+    version: "1.8.0",
+    date: "18.06.2026",
+    items: [
+      "Der kostenlose gehostete Modus erfordert jetzt eine Anmeldung – per Anmeldelink an deine E-Mail oder über Google. So können wir den Dienst fair und zuverlässig für alle bereitstellen. Wer lieber ohne Konto arbeitet, kann in den Einstellungen weiterhin einen eigenen API-Schlüssel hinterlegen oder ein lokales Modell nutzen – dafür ist keine Anmeldung nötig.",
+    ],
+  },
   {
     version: "1.7.1",
     date: "18.06.2026",
@@ -557,7 +564,7 @@ const timer = { intervalId: null, deadline: 0, overtime: false, limitMin: 0 };
 
 const $ = (id) => document.getElementById(id);
 
-const views = ["view-onboarding", "view-settings", "view-home", "view-input", "view-job", "view-quiz", "view-result", "view-history"];
+const views = ["view-login", "view-onboarding", "view-settings", "view-home", "view-input", "view-job", "view-quiz", "view-result", "view-history"];
 
 function showView(id) {
   views.forEach((v) => $(v).classList.toggle("hidden", v !== id));
@@ -695,9 +702,25 @@ function hideAbortButton() {
   btn.textContent = "Abbrechen";
 }
 
+// Marker: wird statt einer Fehlermeldung geworfen, wenn ein Hosted-Call abbricht, weil
+// zur Anmeldung umgeleitet wurde. showError unterdrueckt ihn (keine doppelte Box).
+const LOGIN_REDIRECT = "__login_redirect__";
+
 function showError(msg) {
+  if (msg === LOGIN_REDIRECT) return;
   $("error-text").textContent = msg;
   $("error-box").classList.remove("hidden");
+}
+
+// Hosted-Call ohne Anmeldung: zum Login fuehren und den Aufruf sauber abbrechen.
+function requireHostedLoginOrThrow() {
+  if (hostedNeedsLogin()) { promptHostedLogin(); throw new Error(LOGIN_REDIRECT); }
+}
+
+// Antwort 401 vom Worker: (abgelaufenes) Token verwerfen und zur Anmeldung fuehren.
+function handleHostedUnauthorized() {
+  clearAuthToken();
+  promptHostedLogin("Deine Sitzung ist abgelaufen. Bitte melde dich erneut an.");
 }
 
 // Hinweisleiste oben im Fragebogen (z. B. wenn ein lokales Modell weniger
@@ -1179,6 +1202,11 @@ function authHeaders() {
   return settings.authToken ? { Authorization: "Bearer " + settings.authToken } : {};
 }
 
+// Gehosteter Modus erfordert seit Phase B eine Anmeldung. BYOK/lokal sind ausgenommen.
+function hostedNeedsLogin() {
+  return (settings.provider || "hosted") === "hosted" && !settings.authToken;
+}
+
 function setAuthToken(token) {
   settings = { ...settings, authToken: token };
   saveSettings(settings);
@@ -1195,27 +1223,75 @@ function clearAuthToken() {
 // im Konto-Bereich angezeigt wird.
 let _authRedirectMsg = "";
 
-// Entfernt die Auth-Parameter aus der URL (Token nicht im Verlauf/teilen lassen).
+// Entfernt ALLE Auth-Parameter aus der URL (kein Token/Code im Verlauf/teilbar).
+// code = Google-Handoff (neu), session = Alt-Worker-Bearer (Kompatibilitaetsfenster),
+// auth = Magic-Token, auth_error = Abbruch.
 function cleanAuthParamsFromUrl(params) {
-  params.delete("session"); params.delete("auth"); params.delete("auth_error");
+  params.delete("code"); params.delete("session"); params.delete("auth"); params.delete("auth_error");
   const qs = params.toString();
   const url = location.pathname + (qs ? "?" + qs : "") + location.hash;
   try { history.replaceState(null, "", url); } catch { /* egal */ }
 }
 
-// Nimmt nach Magic-Link/Google-Redirect das Token entgegen: ?session=<tok> direkt,
-// ?auth=<magic> via /auth/magic/verify; ?auth_error=1 als abgebrochene Anmeldung.
+// sessionStorage-Schluessel fuer den OAuth-Verifier (PKCE-artige Browser-Bindung).
+const OAUTH_VERIFIER_KEY = "bewerbungstool.oauthVerifier";
+
+// SHA-256 als Hex (fuer den Verifier-Hash). crypto.subtle ist auf https/localhost da.
+async function sha256hex(str) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function randomVerifier() {
+  const a = new Uint8Array(32);
+  crypto.getRandomValues(a);
+  return btoa(String.fromCharCode(...a)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// Nimmt nach Magic-Link/Google-Redirect das Token entgegen: ?code=<handoff> (Google) wird
+// per /auth/exchange MIT dem in sessionStorage gehaltenen Verifier gegen die Session
+// getauscht (kein durables Token in der URL, Browser-gebunden); ?auth=<magic> via
+// /auth/magic/verify; ?auth_error=1 als abgebrochene Anmeldung.
 // Gibt true zurueck, wenn ein Anmeldeversuch verarbeitet wurde.
 async function consumeAuthRedirect() {
   let params;
   try { params = new URLSearchParams(location.search); } catch { return false; }
-  const sess = params.get("session");
+  const code = params.get("code");
   const magic = params.get("auth");
+  const sess = params.get("session"); // nur Kompatibilitaetsfenster (Alt-Worker)
   const err = params.get("auth_error");
-  if (!sess && !magic && !err) return false;
-  cleanAuthParamsFromUrl(params);
-  if (err) { _authRedirectMsg = "Die Anmeldung wurde abgebrochen."; return true; }
-  if (sess) { setAuthToken(sess); _authRedirectMsg = "Erfolgreich angemeldet."; return true; }
+  if (!code && !magic && !sess && !err) return false;
+  cleanAuthParamsFromUrl(params); // IMMER zuerst scrubben, egal welcher Pfad
+  // Den OAuth-Verifier-Marker auf JEDEM terminalen Pfad raeumen (auch Abbruch), damit kein
+  // Marker zurueckbleibt, der spaeter einen untergeschobenen Link legitimieren koennte (R10).
+  const clearOAuthVerifier = () => { try { sessionStorage.removeItem(OAUTH_VERIFIER_KEY); } catch { /* egal */ } };
+  if (err) { clearOAuthVerifier(); _authRedirectMsg = "Die Anmeldung wurde abgebrochen."; return true; }
+  if (sess && !code && !magic) {
+    // ?session=<bearer> wird NIE als Token uebernommen (Session-Fixation, Codex-Review R10):
+    // ein roher Bearer in der URL ist nicht an diese Session gebunden und ein zurueck-
+    // gebliebener Verifier-Marker wuerde eine "verifier vorhanden"-Pruefung aushebeln. Der
+    // neue Worker stellt ?session ohnehin nicht mehr aus (nur den server-getauschten ?code).
+    // Hier nur scrubben + Marker raeumen.
+    clearOAuthVerifier();
+    _authRedirectMsg = "Bitte melde dich erneut an.";
+    return true;
+  }
+  if (code) {
+    let verifier = "";
+    try { verifier = sessionStorage.getItem(OAUTH_VERIFIER_KEY) || ""; } catch { /* egal */ }
+    try { sessionStorage.removeItem(OAUTH_VERIFIER_KEY); } catch { /* egal */ }
+    if (!verifier) { _authRedirectMsg = "Anmeldung in diesem Browser nicht erkannt. Bitte erneut anmelden."; return true; }
+    try {
+      const r = await fetch(hostedBase() + "/auth/exchange", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, verifier }),
+      });
+      if (r.ok) { const d = await r.json(); setAuthToken(d.token); _authRedirectMsg = "Erfolgreich angemeldet."; }
+      else _authRedirectMsg = "Die Anmeldung ist fehlgeschlagen oder abgelaufen. Bitte erneut versuchen.";
+    } catch { _authRedirectMsg = "Anmeldung fehlgeschlagen. Bitte erneut versuchen."; }
+    return true;
+  }
   try {
     const r = await fetch(hostedBase() + "/auth/magic/verify", {
       method: "POST",
@@ -1351,6 +1427,7 @@ async function callHosted(hosted, onProgress, opts = {}) {
   if (!hosted || !hosted.action) {
     throw new Error("Interner Fehler: Hosted-Aufruf ohne Aktion.");
   }
+  requireHostedLoginOrThrow(); // Backstop: Anmeldung Pflicht
   const tier = settings.tier || "standard";
   const body = JSON.stringify({ ...hosted.payload, tier });
   const headers = { "Content-Type": "application/json", ...authHeaders() };
@@ -1370,6 +1447,7 @@ async function callHosted(hosted, onProgress, opts = {}) {
     throw new Error("Keine Verbindung zum Dienst. Bitte Internetverbindung prüfen und erneut versuchen.");
   }
 
+  if (res.status === 401) { handleHostedUnauthorized(); throw new Error(LOGIN_REDIRECT); }
   if (!res.ok) throw new Error(hostedErrorMessage(res.status));
 
   let finishReason = null;
@@ -2633,6 +2711,7 @@ function scheduleJobPoll(delayMs) {
 // sofort zurueck; die Erstellung laeuft im Hintergrund (Worker-DO), tab-unabhaengig.
 async function startHostedGeneration(ctx) {
   if (actionRunning) return;
+  if (hostedNeedsLogin()) { promptHostedLogin(); return; } // Backstop: Anmeldung Pflicht
   // Nur EIN Test in Erstellung zugleich (deckt sich mit dem serverseitigen
   // exclusive-Gate). Ein bereits fertiger Job ("ready") blockiert nicht — er wird
   // durch den neuen Start ersetzt (saveActiveJob ueberschreibt ihn).
@@ -2658,6 +2737,7 @@ async function startHostedGeneration(ctx) {
         tier: settings.tier || "standard",
       }),
     });
+    if (res.status === 401) { handleHostedUnauthorized(); throw new Error(LOGIN_REDIRECT); }
     if (!res.ok) throw new Error(hostedErrorMessage(res.status));
     const data = await res.json();
     if (!data.jobId) throw new Error("Der Test konnte nicht gestartet werden. Bitte erneut versuchen.");
@@ -2704,6 +2784,20 @@ async function pollActiveJob() {
     r = await fetch(hostedBase() + "/api/jobs/" + encodeURIComponent(job.jobId), { headers: authHeaders() });
   } catch {
     scheduleJobPoll(5000); // Netzfehler/Offline: spaeter erneut versuchen, Job behalten
+    return;
+  }
+  if (r.status === 401) {
+    // Sitzung waehrend der Erstellung abgelaufen: Job NICHT verwerfen (laeuft serverseitig
+    // weiter), zur Anmeldung fuehren, Poll pausieren. Nach erneutem Login laedt die Seite
+    // neu und resumeActiveJob nimmt das Pollen wieder auf.
+    handleHostedUnauthorized();
+    return;
+  }
+  if (r.status === 403) {
+    // Der gemerkte Job gehoert einem anderen Konto (z. B. Kontowechsel auf diesem Geraet):
+    // lokalen Zeiger verwerfen, nicht weiter pollen (Job-Isolation, Codex-Review).
+    clearActiveJob();
+    renderActiveJobCard(null);
     return;
   }
   if (r.status === 404) {
@@ -5671,24 +5765,23 @@ function initSettingsForm() {
   } else if ($("provider").value !== "hosted") {
     populateModelSelect($("provider").value, settings.model);
   }
-  $("account-email").value = "";
-  $("account-msg").textContent = _authRedirectMsg || "";
-  _authRedirectMsg = "";
+  $("account-msg").textContent = "";
   renderAccountSection();
 }
 
-// Spiegelt den Anmeldezustand in den Einstellungen. Mit Token wird best-effort
+// Spiegelt den Anmeldezustand im Settings-Konto-Bereich (nur Status + Abmelden/Anmelden;
+// die eigentlichen Login-Controls leben im view-login). Mit Token wird best-effort
 // /auth/me abgefragt; ein 401 verwirft das (abgelaufene) Token still.
 async function renderAccountSection() {
   const status = $("account-status");
   const showLoggedIn = (email) => {
-    $("account-login").classList.add("hidden");
+    $("account-loggedout").classList.add("hidden");
     $("account-loggedin").classList.remove("hidden");
     status.textContent = email ? `Angemeldet als ${email}.` : "Angemeldet.";
   };
   const showLoggedOut = () => {
-    $("account-login").classList.remove("hidden");
     $("account-loggedin").classList.add("hidden");
+    $("account-loggedout").classList.remove("hidden");
     status.textContent = "Nicht angemeldet.";
   };
   if (!settings.authToken) { showLoggedOut(); return; }
@@ -5700,57 +5793,103 @@ async function renderAccountSection() {
   } catch { /* offline: optimistischer Zustand bleibt */ }
 }
 
-$("account-magic-form").addEventListener("submit", async (e) => {
+// --- Login-Screen (view-login) -------------------------------------------
+
+// Fuehrt zum Anmelde-Screen und zeigt optional eine Meldung (z. B. "erneut anmelden").
+function promptHostedLogin(msg) {
+  rememberReturnView();
+  $("login-email").value = "";
+  $("login-msg").textContent = msg || "";
+  showView("view-login");
+}
+
+$("login-magic-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const input = $("account-email");
-  // Native Constraint-Validierung (type=email + required) nutzen; bei Verstoss
-  // zeigt der Browser seine eigene, lokalisierte Meldung am Feld.
+  const input = $("login-email");
+  // Native Constraint-Validierung (type=email + required) → lokalisierte Browser-Meldung.
   if (!input.checkValidity()) { input.reportValidity(); return; }
-  // Sanitisierung: trimmen + klein normalisieren (der Worker normalisiert ebenfalls).
-  const email = input.value.trim().toLowerCase();
-  const btn = $("btn-account-magic");
+  const email = input.value.trim().toLowerCase(); // Sanitisierung (Worker normalisiert ebenfalls)
+  const btn = $("btn-login-magic");
   btn.disabled = true;
-  $("account-msg").textContent = "Anmeldelink wird gesendet...";
+  $("login-msg").textContent = "Anmeldelink wird gesendet...";
   try {
-    await fetch(hostedBase() + "/auth/magic/start", {
+    // Turnstile (Anti-Bot) wie bei der Generierung – an die Aktion gebunden.
+    const tkn = await getTurnstileToken("magic-link");
+    const headers = { "Content-Type": "application/json" };
+    if (tkn) headers["CF-Turnstile-Token"] = tkn;
+    const res = await fetch(hostedBase() + "/auth/magic/start", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({ email }),
     });
-    // Bewusst neutrale Meldung (keine Auskunft, ob die Adresse existiert).
-    $("account-msg").textContent = "Wenn alles passt, haben wir dir einen Anmeldelink geschickt. Bitte dein Postfach prüfen (auch Spam).";
+    // Auf den Status verzweigen (Codex-Review R6): nur 202 ist „gesendet". Sonst klare
+    // Rueckmeldung, statt den Nutzer auf eine nie gesendete Mail warten zu lassen.
+    if (res.status === 202) {
+      // Bewusst neutrale Meldung (keine Auskunft, ob die Adresse existiert).
+      $("login-msg").textContent = "Wenn alles passt, haben wir dir einen Anmeldelink geschickt. Bitte dein Postfach prüfen (auch Spam).";
+    } else if (res.status === 403) {
+      $("login-msg").textContent = "Sicherheitsprüfung fehlgeschlagen. Bitte die Seite neu laden und erneut versuchen.";
+    } else if (res.status === 400) {
+      $("login-msg").textContent = "Bitte eine gültige E-Mail-Adresse eingeben.";
+    } else {
+      $("login-msg").textContent = "Der Dienst ist momentan nicht erreichbar. Bitte später erneut versuchen.";
+    }
   } catch {
-    $("account-msg").textContent = "Senden fehlgeschlagen. Bitte Internetverbindung prüfen und erneut versuchen.";
+    $("login-msg").textContent = "Senden fehlgeschlagen. Bitte Internetverbindung prüfen und erneut versuchen.";
   } finally {
     btn.disabled = false;
   }
 });
 
-$("btn-account-google").addEventListener("click", async () => {
-  const btn = $("btn-account-google");
+$("btn-login-google").addEventListener("click", async () => {
+  const btn = $("btn-login-google");
   btn.disabled = true;
-  $("account-msg").textContent = "Weiterleitung zu Google...";
+  $("login-msg").textContent = "Weiterleitung zu Google...";
   try {
-    const r = await fetch(hostedBase() + "/auth/google/start", { headers: { Accept: "application/json" } });
+    // PKCE-artige Browser-Bindung: Verifier in sessionStorage, nur dessen Hash an den
+    // Server. Nach dem Google-Redirect tauscht /auth/exchange den Code MIT dem Verifier.
+    const verifier = randomVerifier();
+    try { sessionStorage.setItem(OAUTH_VERIFIER_KEY, verifier); } catch { /* egal */ }
+    const vh = await sha256hex(verifier);
+    // Turnstile (Anti-Bot) wie bei Magic-Link/Generierung – an die Aktion gebunden.
+    const tkn = await getTurnstileToken("google-start");
+    const headers = { Accept: "application/json" };
+    if (tkn) headers["CF-Turnstile-Token"] = tkn;
+    const r = await fetch(hostedBase() + "/auth/google/start?vh=" + encodeURIComponent(vh), { headers });
     if (r.ok) {
       const d = await r.json();
       if (d.url) { window.location.href = d.url; return; }
     }
-    $("account-msg").textContent = r.status === 503
+    $("login-msg").textContent = r.status === 503
       ? "Der Google-Login ist noch nicht eingerichtet."
       : "Google-Anmeldung momentan nicht möglich. Bitte später erneut versuchen.";
   } catch {
-    $("account-msg").textContent = "Keine Verbindung. Bitte später erneut versuchen.";
+    $("login-msg").textContent = "Keine Verbindung. Bitte später erneut versuchen.";
   } finally {
     btn.disabled = false;
   }
 });
+
+// Escape-Pfad: ohne Konto weiter mit eigenem Schluessel / lokal.
+$("link-login-settings").addEventListener("click", (e) => {
+  e.preventDefault();
+  initSettingsForm();
+  showView("view-settings");
+});
+
+// Aus den Einstellungen zum Login-Screen.
+$("btn-account-login").addEventListener("click", () => promptHostedLogin());
 
 $("btn-account-logout").addEventListener("click", async () => {
   try {
     await fetch(hostedBase() + "/auth/logout", { method: "POST", headers: authHeaders() });
   } catch { /* egal: lokal abmelden reicht */ }
   clearAuthToken();
+  // Beim Verlassen des Kontos den Hintergrund-Job-Zeiger verwerfen, damit eine fremde
+  // jobId nicht ueber einen spaeteren Login eines anderen Kontos weiterverwendet wird
+  // (Job-Isolation, Codex-Review). Der Job selbst laeuft/raeumt serverseitig.
+  clearActiveJob();
+  renderActiveJobCard(null);
   $("account-msg").textContent = "Abgemeldet.";
   renderAccountSection();
 });
@@ -5826,11 +5965,15 @@ $("btn-cancel-settings").addEventListener("click", goReturn);
 
 // Sichert beide localStorage-Bestaende in eine versionierte JSON-Datei
 function exportData() {
+  // authToken (Live-Session-Bearer) NIE exportieren: er landet sonst im Backup-JSON und
+  // koennte von jedem, der die Datei liest, bis zum Logout/Ablauf als Bearer replayt werden
+  // (Codex-Review R8). Beim Import wird ein fremdes Token ohnehin nicht uebernommen.
+  const { authToken, ...exportedSettings } = loadSettings();
   const data = {
     app: "bewerbungstool",
     version: 1,
     exportedAt: new Date().toISOString(),
-    settings: loadSettings(),
+    settings: exportedSettings,
     history: loadHistory(),
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -6340,7 +6483,7 @@ function openDatenschutz(e) {
 function closeDatenschutz() {
   $("datenschutz-modal").classList.add("hidden");
 }
-["link-datenschutz", "link-datenschutz-footer", "link-datenschutz-tier", "link-datenschutz-account"].forEach((id) => {
+["link-datenschutz", "link-datenschutz-footer", "link-datenschutz-tier", "link-datenschutz-account", "link-datenschutz-login"].forEach((id) => {
   const el = $(id);
   if (el) el.addEventListener("click", openDatenschutz);
 });
@@ -6409,33 +6552,34 @@ document.addEventListener("keydown", (e) => {
 // Update/Reload ueberleben (und die Stelle ueber lastFetch wiedererkannt wird)
 restoreDraft();
 
-// Beim ersten Start zum Onboarding, sonst auf die Startliste der Stellen.
-// Hosted ist der Default und braucht keinen Schluessel → sofort einsatzbereit, kein
-// Onboarding-Wall. Lokaler Anbieter gilt mit gewaehltem Modell als eingerichtet,
-// BYOK-Anbieter mit hinterlegtem Key.
-const provider0 = settings.provider || "hosted";
-const isConfigured = provider0 === "hosted" ? true
-  : provider0 === "local" ? !!settings.model
-  : !!settings.apiKey;
-if (!isConfigured) {
-  renderOnboardingSteps($("ob-provider").value);
-  showView("view-onboarding");
-} else {
-  goHome();
+// Waehlt die Startansicht. Reihenfolge: gehosteter Modus OHNE Anmeldung → Login-Gate
+// (Phase B, harte Pflicht). Sonst BYOK/lokal nicht eingerichtet → Onboarding. Sonst Home.
+// Lokaler Anbieter gilt mit gewaehltem Modell als eingerichtet, BYOK mit hinterlegtem Key.
+function routeInitialView() {
+  const provider0 = settings.provider || "hosted";
+  if (provider0 === "hosted" && !settings.authToken) {
+    promptHostedLogin(_authRedirectMsg || ""); // _authRedirectMsg: evtl. Fehler aus dem Redirect
+    _authRedirectMsg = "";
+    return;
+  }
+  _authRedirectMsg = "";
+  const isConfigured = provider0 === "local" ? !!settings.model
+    : provider0 === "hosted" ? true
+    : !!settings.apiKey;
+  if (!isConfigured) {
+    renderOnboardingSteps($("ob-provider").value);
+    showView("view-onboarding");
+  } else {
+    goHome();
+  }
 }
 
-// Nach Magic-Link-/Google-Redirect das Token uebernehmen und das Ergebnis im
-// Konto-Bereich der Einstellungen zeigen (nur im Hosted-Modus relevant).
-consumeAuthRedirect().then((didAuth) => {
-  if (didAuth && (settings.provider || "hosted") === "hosted") {
-    rememberReturnView();
-    initSettingsForm();
-    showView("view-settings");
-  }
+// Erst einen evtl. Login-Redirect (?auth/?session) verarbeiten (setzt das Token bei
+// Erfolg), dann die Startansicht waehlen und einen offenen Hintergrund-Job aufnehmen.
+consumeAuthRedirect().then(() => {
+  routeInitialView();
+  resumeActiveJob();
 });
-
-// Offenen/fertigen Hintergrund-Job (Punkt 1) nach App-Start wieder aufnehmen.
-resumeActiveJob();
 
 /* ---------- Service Worker (PWA) ---------- */
 

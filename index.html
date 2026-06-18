@@ -57,6 +57,29 @@
   </header>
 
   <main>
+    <!-- Anmeldung (gehosteter Modus erfordert ein Konto) -->
+    <section id="view-login" class="card hidden">
+      <h2>Kostenlos nutzen – einmal anmelden</h2>
+      <p>jobreif.de macht aus jeder Stellenanzeige einen Übungs-Einstellungstest und gibt dir danach Feedback zu deinen Antworten. Für den kostenlosen gehosteten Modus melde dich einmal an – mit Google oder über einen Anmeldelink an deine E-Mail.</p>
+      <div class="row">
+        <button id="btn-login-google" type="button" class="primary">Mit Google anmelden</button>
+      </div>
+      <p class="login-or"><span>oder per E-Mail</span></p>
+      <form id="login-magic-form">
+        <label for="login-email" class="sr-only">E-Mail-Adresse für den Anmeldelink</label>
+        <input type="email" id="login-email" name="email" placeholder="dein@email.de"
+               autocomplete="email" inputmode="email" autocapitalize="off" autocorrect="off"
+               spellcheck="false" maxlength="254" enterkeyhint="send" required>
+        <div class="row">
+          <button id="btn-login-magic" type="submit" class="primary">Anmeldelink senden</button>
+        </div>
+      </form>
+      <p id="login-msg" class="hint" role="status"></p>
+      <p class="hint">Bei der Anmeldung speichern wir deine E-Mail-Adresse, um dein Konto wiederzuerkennen – Details im <a href="#" id="link-datenschutz-login">Datenschutzhinweis</a>.</p>
+      <hr class="settings-divider">
+      <p class="hint">Lieber ohne Konto? Mit einem eigenen API-Schlüssel oder einem lokalen Modell läuft alles ganz ohne Anmeldung. <a href="#" id="link-login-settings">Zu den Einstellungen</a></p>
+    </section>
+
     <!-- Onboarding (erster Start) -->
     <section id="view-onboarding" class="card hidden">
       <h2>Willkommen</h2>
@@ -123,27 +146,20 @@
       </div>
 
       <div id="row-account" class="hidden">
-        <label>Konto (optional)</label>
+        <label>Konto</label>
         <p id="account-status" class="hint">Nicht angemeldet.</p>
-        <div id="account-login">
-          <form id="account-magic-form">
-            <label for="account-email" class="sr-only">E-Mail-Adresse für den Anmeldelink</label>
-            <input type="email" id="account-email" name="email" placeholder="dein@email.de"
-                   autocomplete="email" inputmode="email" autocapitalize="off" autocorrect="off"
-                   spellcheck="false" maxlength="254" enterkeyhint="send" required>
-            <div class="row wrap">
-              <button id="btn-account-magic" type="submit" class="ghost">Anmeldelink per E-Mail</button>
-              <button id="btn-account-google" type="button" class="ghost">Mit Google anmelden</button>
-            </div>
-          </form>
-        </div>
         <div id="account-loggedin" class="hidden">
           <div class="row wrap">
             <button id="btn-account-logout" type="button" class="ghost">Abmelden</button>
           </div>
         </div>
+        <div id="account-loggedout" class="hidden">
+          <div class="row wrap">
+            <button id="btn-account-login" type="button" class="primary">Zur Anmeldung</button>
+          </div>
+        </div>
         <p id="account-msg" class="hint" role="status"></p>
-        <p class="hint">Ein Konto ist freiwillig und bringt aktuell noch keine Zusatzfunktion – es bereitet kommende Funktionen vor. Ohne Anmeldung funktioniert alles wie bisher. Bei Anmeldung speichern wir deine E-Mail; Details im <a href="#" id="link-datenschutz-account">Datenschutzhinweis</a>.</p>
+        <p class="hint">Für den kostenlosen gehosteten Modus ist eine Anmeldung nötig. Bei der Anmeldung speichern wir deine E-Mail; Details im <a href="#" id="link-datenschutz-account">Datenschutzhinweis</a>. Ohne Konto kannst du stattdessen oben einen eigenen API-Schlüssel oder ein lokales Modell wählen.</p>
       </div>
 
       <div id="row-api-key">
@@ -431,7 +447,7 @@
         <p><strong>Eigener Schlüssel oder lokales Modell:</strong> In den Einstellungen kannst du stattdessen einen eigenen API-Schlüssel hinterlegen oder ein lokales Modell verwenden. Dann läuft nichts über unsere Server – die Daten gehen direkt an den von dir gewählten Anbieter oder bleiben bei einem lokalen Modell vollständig auf deinem Rechner.</p>
 
         <h3>Welche Daten im gehosteten Modus übertragen werden</h3>
-        <p>Nur die für die jeweilige Funktion nötigen Inhalte: der Text der Stellenanzeige, deine eingegebenen Antworten (zur Bewertung) und die gewählte Qualitätsstufe. Ein Nutzerkonto ist freiwillig (siehe „Optionales Konto“) – ohne Anmeldung werden keine Kontodaten erhoben.</p>
+        <p>Nur die für die jeweilige Funktion nötigen Inhalte: der Text der Stellenanzeige, deine eingegebenen Antworten (zur Bewertung) und die gewählte Qualitätsstufe. Für den gehosteten Modus ist eine Anmeldung erforderlich (siehe „Konto im gehosteten Modus“); ohne Anmeldung kannst du stattdessen einen eigenen Schlüssel oder ein lokales Modell nutzen, dann fallen keine Kontodaten an.</p>
         <p>Bitte beachte: Stellenanzeigen und besonders deine Antworten können personenbezogene oder sensible Angaben enthalten. Gib im gehosteten Modus nichts ein, das nicht über fremde Dienste laufen soll – wenn du das vermeiden willst, nutze einen eigenen Schlüssel oder ein lokales Modell.</p>
 
         <h3>Wer die Daten verarbeitet (Empfänger)</h3>
@@ -446,8 +462,8 @@
         <p>Unser Server speichert die Inhalte deiner Anfragen nicht dauerhaft und protokolliert sie nicht; geführt wird nur ein anonymer Zähler für das Tageskontingent (Schutz vor Missbrauch und Kostenausreißern). Wie die genannten Anbieter die Daten behandeln, richtet sich nach deren eigenen Bestimmungen.</p>
         <p>Dein Verlauf (erstellte Tests, Ergebnisse) und deine Einstellungen werden ausschließlich lokal in deinem Browser gespeichert und nicht an uns übertragen. Du kannst sie jederzeit über die Einstellungen exportieren oder löschen.</p>
 
-        <h3>Optionales Konto</h3>
-        <p>Du kannst dich freiwillig per Anmeldelink (E-Mail) oder über Google anmelden. Das ist nicht nötig, um den Dienst zu nutzen, und bereitet derzeit nur kommende Funktionen vor. Meldest du dich an, speichern wir deine E-Mail-Adresse sowie technische Sitzungsdaten in einer Datenbank bei Cloudflare, um dein Konto wiederzuerkennen. Beim Anmeldelink versendet <strong>Resend</strong> die E-Mail in unserem Auftrag; beim Google-Login erhalten wir von Google nur deine E-Mail-Adresse und eine Kennung. Du kannst dich jederzeit in den Einstellungen wieder abmelden. Eine Konto-Löschung auf Anfrage ist über die unten genannte Kontaktadresse möglich.</p>
+        <h3>Konto im gehosteten Modus</h3>
+        <p>Um den gehosteten Modus zu nutzen, meldest du dich per Anmeldelink (E-Mail) oder über Google an. Dabei speichern wir deine E-Mail-Adresse sowie technische Sitzungsdaten in einer Datenbank bei Cloudflare, um dein Konto wiederzuerkennen. Beim Anmeldelink versendet <strong>Resend</strong> die E-Mail in unserem Auftrag; beim Google-Login erhalten wir von Google nur deine E-Mail-Adresse und eine Kennung. Du kannst dich jederzeit in den Einstellungen wieder abmelden. Eine Konto-Löschung auf Anfrage ist über die unten genannte Kontaktadresse möglich. Wenn du dich nicht anmelden möchtest, nutze stattdessen einen eigenen API-Schlüssel oder ein lokales Modell – dann werden keine Kontodaten erhoben.</p>
 
         <h3>Verantwortlicher</h3>
         <p>Sebastian Chudoba<br>
@@ -566,7 +582,7 @@
       <span class="footer-sep">&middot;</span>
       <a href="#" id="link-changelog" title="Was ist neu"></a>
     </p>
-    <p>Kein Konto, keine Anmeldung. Verlauf und Einstellungen bleiben lokal in deinem Browser. Im gehosteten Standardmodus werden deine Eingaben zur Testerstellung an unseren Dienst gesendet; mit eigenem Schlüssel oder lokalem Modell bleibt das aus (<a href="#" id="link-datenschutz-footer">Datenschutz</a>).</p>
+    <p>Verlauf und Einstellungen bleiben lokal in deinem Browser. Der gehostete Modus erfordert eine Anmeldung (E-Mail oder Google) und sendet deine Eingaben zur Testerstellung an unseren Dienst; mit eigenem Schlüssel oder lokalem Modell brauchst du kein Konto und es bleibt alles bei dir (<a href="#" id="link-datenschutz-footer">Datenschutz</a>).</p>
   </footer>
 
   <!-- Turnstile-Host: meist unsichtbar (interaction-only), erscheint nur, wenn eine

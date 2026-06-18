@@ -314,6 +314,22 @@ input:focus, select:focus, textarea:focus {
 .row input { flex: 1; }
 .row.wrap { flex-wrap: wrap; }
 
+/* "oder per E-Mail"-Trenner auf dem Login-Screen */
+.login-or {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 1rem 0 0.6rem;
+}
+.login-or::before, .login-or::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
 .settings-divider {
   border: none;
   border-top: 1px solid var(--border);

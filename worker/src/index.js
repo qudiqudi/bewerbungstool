@@ -11,7 +11,7 @@ import { resolveTier, worstCaseCost } from "./tiers.js";
 import { corsHeaders, preflight } from "./cors.js";
 import { verifyTurnstile } from "./turnstile.js";
 import { validateQuiz, validateEval, validateThemenfelder } from "./validate.js";
-import { handleAuth } from "./auth.js";
+import { handleAuth, getSessionUser, devMintSession } from "./auth.js";
 import {
   QUESTIONS_SCHEMA, EVAL_SCHEMA, THEMENFELDER_SCHEMA,
   buildQuizMessages, buildEvalMessages, buildThemenfelderMessages,
@@ -39,6 +39,13 @@ export default {
       const stats = await stub.fetch("https://do/stats").then((r) => r.json());
       return json(stats, 200, env, origin);
     }
+    // Nur in Dev (MOCK_UPSTREAM): mintet eine Session, damit der Lasttest den Auth-Pflicht-
+    // Pfad echt durchlaeuft. In Produktion NIE erreichbar (MOCK_UPSTREAM ungesetzt).
+    if (path === "/debug/session" && env.MOCK_UPSTREAM === "1") {
+      const token = await devMintSession(env, new URL(req.url).searchParams.get("email"));
+      if (!token) return json({ error: "dev-email-only" }, 403, env, origin); // nur @dev.local
+      return json({ token }, 200, env, origin);
+    }
 
     // Auth-Gerüst (Phase B, Schritt 1): optionale Konten, eigener Zweig vor /api.
     if (path.startsWith("/auth/")) return await handleAuth(req, env, ctx, path, origin);
@@ -46,12 +53,18 @@ export default {
     // Async-Generierung (Hintergrund-Job, Punkt 1): Start + Poll.
     if (path === "/api/jobs" && req.method === "POST") return await startJob(req, env, ctx, origin);
     if (path.startsWith("/api/jobs/") && req.method === "GET") {
-      return await pollJob(path.slice("/api/jobs/".length), env, origin);
+      return await pollJob(path.slice("/api/jobs/".length), req, env, origin);
     }
 
     const route = ROUTES[path];
     if (req.method !== "POST" || !route) return json({ error: "not-found" }, 404, env, origin);
     const ip = req.headers.get("CF-Connecting-IP") || "0.0.0.0";
+
+    // 0) Anmeldung Pflicht (Phase B): jeder gehostete Call haengt an einem Konto.
+    // Zuerst pruefen, damit unauth schnell und ohne Turnstile-Kosten abprallt.
+    const g = await gateUser(req, env, origin);
+    if (g.resp) return g.resp;
+    const user = g.user;
 
     // 1) Turnstile (Dev-Bypass via SKIP_TURNSTILE=1)
     if (env.SKIP_TURNSTILE !== "1") {
@@ -81,7 +94,10 @@ export default {
     // gleichzeitig"-Regel durch Direktaufruf umgehen (Codex-Finding). evaluate/themenfelder
     // bleiben nicht-exklusiv (kurze Aufrufe, kein Generierungs-Slot).
     const exclusive = route.action === "generate-quiz";
-    const gate = await doCall(stub, "reserve", { amount: reserve, subject: ip, ip, exclusive });
+    // Subjekt = Konto, wenn angemeldet (Per-Subjekt-Share + exclusive-Gate pro Nutzer);
+    // im Cutover-Fenster (anonym erlaubt) faellt es auf die IP zurueck. ip bleibt separat
+    // fuer den Tagescap PER_IP_DAY.
+    const gate = await doCall(stub, "reserve", { amount: reserve, subject: user ? user.id : ip, ip, exclusive });
     if (!gate.ok) {
       const status = gate.reason === "budget" ? 503 : 429; // active-job/inflight/subject/ip → 429
       // Gate-Ablehnung in Workers Logs festhalten, damit der Grund im Dashboard/per
@@ -157,6 +173,11 @@ export default {
 async function startJob(req, env, ctx, origin) {
   const ip = req.headers.get("CF-Connecting-IP") || "0.0.0.0";
 
+  // Anmeldung Pflicht (Phase B) – zuerst, vor Turnstile.
+  const g = await gateUser(req, env, origin);
+  if (g.resp) return g.resp;
+  const user = g.user;
+
   if (env.SKIP_TURNSTILE !== "1") {
     const token = req.headers.get("CF-Turnstile-Token") || "";
     const tv = await verifyTurnstile(token, { action: "generate-quiz", secret: env.TURNSTILE_SECRET, ip });
@@ -175,7 +196,10 @@ async function startJob(req, env, ctx, origin) {
 
   const reserve = worstCaseCost(tier, Number(env.HARD_CAP_TOKENS || 24000));
   const stub = budgetStub(env);
-  const gate = await doCall(stub, "reserve", { amount: reserve, subject: ip, ip, exclusive: true });
+  // Subjekt = Konto, wenn angemeldet; im Cutover-Fenster anonym → IP. ip separat fuer Cap.
+  const subject = user ? user.id : ip;
+  const subjectKind = user ? "user" : null; // nur User-Jobs unterliegen der Ownership-Pruefung
+  const gate = await doCall(stub, "reserve", { amount: reserve, subject, ip, exclusive: true });
   if (!gate.ok) {
     const status = gate.reason === "budget" ? 503 : 429; // active-job/inflight/subject/ip → 429
     console.log(JSON.stringify({ ev: "gate-deny", action: "jobs", reason: gate.reason, status }));
@@ -193,7 +217,7 @@ async function startJob(req, env, ctx, origin) {
   try {
     await jobStub.fetch("https://do/start", {
       method: "POST",
-      body: JSON.stringify({ params, tier, subject: ip, reserveId: gate.reserveId, reserveAmount: reserve }),
+      body: JSON.stringify({ params, tier, subject, subjectKind, reserveId: gate.reserveId, reserveAmount: reserve }),
     });
   } catch {
     await doCall(stub, "release", { reserveId: gate.reserveId }); // Slot wieder freigeben
@@ -203,12 +227,22 @@ async function startJob(req, env, ctx, origin) {
 }
 
 // Pollt den Status/Result eines Jobs (jobId ist eine nicht erratbare UUID).
-async function pollJob(jobId, env, origin) {
+// Anmeldung Pflicht; touch:false, damit das haeufige Poll nicht jedes Mal last_seen schreibt.
+async function pollJob(jobId, req, env, origin) {
+  const g = await gateUser(req, env, origin, { touch: false });
+  if (g.resp) return g.resp;
+  const user = g.user;
   if (!jobId || jobId.length > 64) return json({ error: "bad-job" }, 400, env, origin);
   const jobStub = env.GENJOB_DO.get(env.GENJOB_DO.idFromName(jobId));
   let st;
-  try { st = await jobStub.fetch("https://do/status").then((r) => r.json()); }
+  try {
+    // user.id als X-Subject durchreichen → das DO prueft die Job-Ownership (nur fuer
+    // User-Jobs, subjectKind="user"). Im Cutover-Fenster (anonym) ohne X-Subject.
+    const headers = user ? { "X-Subject": user.id } : {};
+    st = await jobStub.fetch("https://do/status", { headers }).then((r) => r.json());
+  }
   catch { return json({ error: "poll-failed" }, 502, env, origin); }
+  if (st.status === "forbidden") return json({ error: "forbidden" }, 403, env, origin);
   if (st.status === "done") return json({ status: "done", quiz: st.result }, 200, env, origin);
   if (st.status === "error") return json({ status: "error", code: st.errorCode || null }, 200, env, origin);
   if (st.status === "unknown") return json({ status: "unknown" }, 404, env, origin);
@@ -219,6 +253,26 @@ async function pollJob(jobId, env, origin) {
 
 function budgetStub(env) {
   return env.BUDGET_DO.get(env.BUDGET_DO.idFromName("global"));
+}
+
+// Auth-Gate mit kontrolliertem Fehlerpfad UND fail-closed-Default (Codex-Review R2/R9/R11):
+// - getSessionUser kann bei Schema-Drift werfen → 503 (auth-unavailable) statt 500-Outage.
+// - FAIL CLOSED IM CODE: kein User → 401. Anonyme Hosted-Calls NUR im expliziten, temporaeren
+//   Cutover-Fenster (env.ALLOW_ANON_CUTOVER === "1"), das beim Auslaufen alter App-Shells
+//   wieder entfernt wird. So bleibt jede fehlende/falsch geschriebene/preview-/rollback-
+//   skew-Var gesperrt — Config-Drift wird KEIN Auth-Bypass. Der offene Zustand wird geloggt.
+async function gateUser(req, env, origin, opts) {
+  let user = null;
+  try { user = await getSessionUser(req, env, opts); }
+  catch { return { resp: json({ error: "auth-unavailable" }, 503, env, origin) }; }
+  if (!user) {
+    if (env.ALLOW_ANON_CUTOVER === "1") {
+      console.log(JSON.stringify({ ev: "anon-allowed" })); // sichtbar, dass das Fenster offen ist
+      return { user: null };
+    }
+    return { resp: json({ error: "auth-required" }, 401, env, origin) };
+  }
+  return { user };
 }
 
 async function doCall(stub, op, payload) {

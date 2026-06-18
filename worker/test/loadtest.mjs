@@ -16,13 +16,24 @@ const body = JSON.stringify({
   tier: "standard",
 });
 
-// Standard: jede Anfrage von einer anderen IP (testet die BUDGET-Decke). SAME_IP=1
-// schickt alles von einer IP (testet die Pro-IP/Pro-Subjekt-Drosselung aus A.7).
+// Standard: jede Anfrage von einer anderen IP UND einem anderen Konto (testet die
+// BUDGET-Decke; das Pro-Konto-exclusive-Gate wuerde sonst gleichkontige Parallel-Calls
+// drosseln). SAME_IP=1 schickt alles von EINER IP und EINEM Konto (testet die Pro-IP/
+// Pro-Subjekt-Drosselung aus A.7, Subjekt ist seit der Login-Pflicht user.id).
 const sameIp = process.env.SAME_IP === "1";
 
-async function oneCall(i) {
+// Seit der Anmeldepflicht (Phase B) braucht jeder Hosted-Call eine gueltige Session, sonst
+// 401 VOR dem Budget-Gate → der Test liefe sonst leer (Codex-Review R5). Im Dev mintet
+// /debug/session echte Sessions (nur bei MOCK_UPSTREAM erreichbar).
+async function mintSession(email) {
+  const r = await fetch(`${BASE}/debug/session?email=${encodeURIComponent(email)}`);
+  if (!r.ok) throw new Error(`/debug/session ${r.status} — laeuft wrangler dev mit MOCK_UPSTREAM=1 und D1-Migrationen?`);
+  return (await r.json()).token;
+}
+
+async function oneCall(i, token) {
   try {
-    const headers = { "Content-Type": "application/json" };
+    const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
     headers["CF-Connecting-IP"] = sameIp ? "203.0.113.1" : `10.0.${(i >> 8) & 255}.${i & 255}`;
     const res = await fetch(`${BASE}/api/generate-quiz`, {
       method: "POST",
@@ -55,7 +66,21 @@ async function stats() {
   }
   console.log("Vorher:", JSON.stringify(before));
 
-  const results = await Promise.all(Array.from({ length: N }, (_, i) => oneCall(i)));
+  // Sessions vorbereiten: SAME_IP → ein Konto fuer alle; sonst ein eigenes Konto je Call.
+  let tokens;
+  try {
+    if (sameIp) {
+      const t = await mintSession("loadtest-shared@dev.local");
+      tokens = Array.from({ length: N }, () => t);
+    } else {
+      tokens = await Promise.all(Array.from({ length: N }, (_, i) => mintSession(`loadtest-${i}@dev.local`)));
+    }
+  } catch (e) {
+    console.error(String(e.message || e));
+    process.exit(1);
+  }
+
+  const results = await Promise.all(Array.from({ length: N }, (_, i) => oneCall(i, tokens[i])));
   const tally = {};
   for (const s of results) tally[s] = (tally[s] || 0) + 1;
 
@@ -75,10 +100,19 @@ async function stats() {
   console.log(`\nAkzeptiert (200): ${accepted}, abgelehnt 503(Budget)/429(Limit): ${(tally["503"] || 0)}/${(tally["429"] || 0)}`);
 
   const overshoot = committed - budget;
-  const ok = committed <= budget + 1e-6;
+  const budgetOk = committed <= budget + 1e-6;
+  // Seit der Login-Pflicht muss der Test den geschuetzten Pfad WIRKLICH durchlaufen:
+  // mit gueltiger Session darf es keine 401 geben, und es muss tatsaechlich akzeptierte
+  // Calls geben — sonst liefe der Test leer und der Budget-PASS waere vacuous (Codex R5).
+  const unexpected401 = tally["401"] || 0;
+  // SAME_IP testet die Drosselung (wenig/kein 200 ist dort erwartet); im Budget-Modus
+  // muss mindestens ein Call akzeptiert worden sein.
+  const acceptedOk = sameIp || accepted > 0;
+  const ok = budgetOk && acceptedOk && unexpected401 === 0;
   console.log(`committed=${committed} vs dayBudget=${budget} → Überschuss ${overshoot.toFixed(6)}`);
-  console.log(ok
-    ? "PASS: Budget wurde unter paralleler Last NICHT überschritten."
-    : "FAIL: Budget überschritten — Gate-Atomarität prüfen.");
+  if (unexpected401 > 0) console.log(`FAIL: ${unexpected401}x 401 trotz gueltiger Session — Auth-Pfad/Session-Mint pruefen.`);
+  if (!acceptedOk) console.log("FAIL: 0 akzeptierte Calls — der Budget-Pfad wurde nicht ausgeuebt (vacuous).");
+  if (!budgetOk) console.log("FAIL: Budget überschritten — Gate-Atomarität prüfen.");
+  if (ok) console.log("PASS: Budget unter paralleler Last NICHT überschritten, Auth-Pfad ausgeuebt.");
   process.exit(ok ? 0 : 1);
 })();

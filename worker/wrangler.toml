@@ -51,6 +51,11 @@ APP_ORIGIN = "https://jobreif.de"   # Ziel der Magic-Link-/OAuth-Redirects
 MAGIC_TTL_S = "900"          # Gültigkeit eines Magic-Link-Tokens (15 min, einmalig)
 SESSION_TTL_S = "2592000"    # Session-Lebensdauer (30 Tage)
 MAGIC_FROM = "login@mail.jobreif.de"  # Resend-Absender (Subdomain mail.jobreif.de verifiziert)
+# Phase B – Schritt 2: Server-Durchsetzung der Anmeldepflicht. Der Code failt CLOSED
+# (kein Token → 401); es gibt hier KEINE Var, die das aufweicht (Codex-Review R11: fehlende/
+# falsche Vars duerfen kein Bypass sein). Falls beim Rollout ein temporaeres Cutover-Fenster
+# noetig ist (gecachte Alt-Clients schonen), NUR bewusst ALLOW_ANON_CUTOVER="1" im Dashboard
+# setzen und nach dem Auslaufen alter App-Shells WIEDER ENTFERNEN. Hier bewusst nicht gesetzt.
 # Dev-Flags (in Produktion NICHT setzen): MOCK_UPSTREAM, SKIP_TURNSTILE, MOCK_COST
 # Auth-Secrets via `wrangler secret put` (NIE hier): RESEND_KEY, GOOGLE_CLIENT_ID,
 # GOOGLE_CLIENT_SECRET. Ohne RESEND_KEY loggt der Worker den Magic-Link nur (Dev).
