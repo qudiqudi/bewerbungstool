@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.1.1";
+const APP_VERSION = "1.1.2";
 
 const CHANGELOG = [
+  {
+    version: "1.1.2",
+    date: "18.06.2026",
+    items: [
+      "Neu: Multiple-Choice-Fragen können jetzt mehrere richtige Antworten haben. Solche Fragen erkennst du an den eckigen Auswahlkästchen und dem Hinweis „Mehrere Antworten möglich“. Du bekommst Teilpunkte für richtig markierte Optionen; falsch Angekreuztes mindert die Punkte, damit blosses Ankreuzen aller Optionen nichts bringt.",
+    ],
+  },
   {
     version: "1.1.1",
     date: "18.06.2026",
@@ -653,7 +660,15 @@ const QUESTIONS_SCHEMA = {
           },
           korrekte_antwort: {
             type: "string",
-            description: "Bei multiple_choice exakt der Wortlaut der besten Option; bei offenen Fragen eine knappe Musterantwort",
+            description: "Bei multiple_choice der Wortlaut EINER richtigen Option (bei Mehrfachauswahl der ersten); siehe korrekte_indizes fuer alle richtigen Optionen. Bei offenen Fragen eine knappe Musterantwort",
+          },
+          korrekte_indizes: {
+            type: "array",
+            items: { type: "integer" },
+            description:
+              "0-basierte Indizes ALLER richtigen Optionen in 'optionen'. " +
+              "Bei multiple_choice genau ein Index => eine richtige Antwort (Standard); " +
+              "mehrere Indizes => Mehrfachauswahl. Bei offenen Fragen leeres Array [].",
           },
           erklaerungen: {
             type: "array",
@@ -678,7 +693,7 @@ const QUESTIONS_SCHEMA = {
             description: "1 bis 3 real existierende Quellen zur Vertiefung",
           },
         },
-        required: ["id", "typ", "kategorie", "schwierigkeit", "frage", "optionen", "korrekte_antwort", "erklaerungen", "lerninfo", "quellen"],
+        required: ["id", "typ", "kategorie", "schwierigkeit", "frage", "optionen", "korrekte_antwort", "korrekte_indizes", "erklaerungen", "lerninfo", "quellen"],
         additionalProperties: false,
       },
     },
@@ -784,6 +799,35 @@ function normalizeQuizData(result) {
     let optionen = Array.isArray(q.optionen) ? q.optionen.filter((o) => typeof o === "string") : [];
     // Multiple-Choice ohne brauchbare Optionen ist nicht bedienbar -> offene Frage
     if (typ === "multiple_choice" && optionen.length < 2) { typ = "offen"; optionen = []; }
+
+    // korrekte_indizes defensiv normalisieren: nur gueltige Optionsindizes,
+    // ohne Duplikate. Additiv - alte Daten ohne das Feld bleiben [].
+    let korrekte_antwort = typeof q.korrekte_antwort === "string" ? q.korrekte_antwort : "";
+    let korrekte_indizes = [];
+    if (typ === "multiple_choice") {
+      korrekte_indizes = Array.isArray(q.korrekte_indizes)
+        ? q.korrekte_indizes
+            .map((n) => Number(n))
+            .filter((n) => Number.isInteger(n) && n >= 0 && n < optionen.length)
+        : [];
+      korrekte_indizes = [...new Set(korrekte_indizes)];
+      // Konsistenz mit korrekte_antwort (defensiv, niemals werfen):
+      // - kein Index, aber korrekte_antwort matcht eine Option => Index heilen.
+      if (!korrekte_indizes.length && korrekte_antwort.trim()) {
+        const m = optionen.findIndex((o) => o.trim() === korrekte_antwort.trim());
+        if (m >= 0) korrekte_indizes = [m];
+      }
+      // - Index gesetzt, aber korrekte_antwort leer/kein Match => Wortlaut aus
+      //   dem ersten richtigen Index nachziehen, damit alle Wortlaut-Altpfade
+      //   (Dedup, Single-Choice-Render) weiter funktionieren.
+      if (korrekte_indizes.length) {
+        const hasMatch = optionen.some((o) => o.trim() === korrekte_antwort.trim());
+        if (!korrekte_antwort.trim() || !hasMatch) {
+          korrekte_antwort = optionen[korrekte_indizes[0]] || korrekte_antwort;
+        }
+      }
+    }
+
     const quellen = Array.isArray(q.quellen)
       ? q.quellen
           .filter((s) => s && typeof s === "object")
@@ -800,7 +844,8 @@ function normalizeQuizData(result) {
       schwierigkeit: validDiff(q.schwierigkeit),
       frage,
       optionen,
-      korrekte_antwort: typeof q.korrekte_antwort === "string" ? q.korrekte_antwort : "",
+      korrekte_antwort,
+      korrekte_indizes,
       erklaerungen: Array.isArray(q.erklaerungen) ? q.erklaerungen.filter((e) => typeof e === "string") : [],
       lerninfo: typeof q.lerninfo === "string" ? q.lerninfo : "",
       quellen,
@@ -1551,6 +1596,82 @@ function fragenKey(q) {
   return [q.frage, q.korrekte_antwort, ...optionen].map(normText).join(" | ");
 }
 
+/* ---------- Multiple-Choice: ein vs. mehrere richtige Antworten ---------- */
+// Mehrfach-MC wird ueber das additive Feld korrekte_indizes signalisiert (Anzahl
+// richtiger Optionen > 1). Alle Helfer lesen defensiv, damit alt-generierte
+// Quizze und gespeicherte Versuche ohne korrekte_indizes wie bisher als
+// Single-Choice laufen (Rueckfall auf korrekte_antwort).
+
+// Liefert die Menge der richtigen Options-Indizes einer MC-Frage, defensiv.
+// Mehrfach-MC: aus korrekte_indizes (gefiltert auf gueltige Optionsindizes).
+// Single-Choice / alte Fragen: Index der Option, die korrekte_antwort entspricht.
+function mcCorrectIndices(q) {
+  const optionen = Array.isArray(q.optionen) ? q.optionen : [];
+  if (Array.isArray(q.korrekte_indizes) && q.korrekte_indizes.length) {
+    const set = new Set(
+      q.korrekte_indizes
+        .map((n) => Number(n))
+        .filter((n) => Number.isInteger(n) && n >= 0 && n < optionen.length),
+    );
+    if (set.size) return set;
+  }
+  // Fallback: Single-Choice ueber Wortlaut
+  const ka = (q.korrekte_antwort || "").trim();
+  const idx = optionen.findIndex((o) => typeof o === "string" && o.trim() === ka);
+  return new Set(idx >= 0 ? [idx] : []);
+}
+
+// true, wenn die Frage als Mehrfachauswahl behandelt werden soll. Haengt an der
+// Zahl der RICHTIGEN Optionen, nicht an einem Schema-Flag: liefert das Modell
+// faelschlich nur eine richtige Option, faellt die Frage automatisch auf
+// sauberes Single-Choice zurueck.
+function mcIsMulti(q) {
+  return q.typ === "multiple_choice" && mcCorrectIndices(q).size > 1;
+}
+
+// Mehrfach-MC-Auswahl <-> answers-String. Format: JSON-Array der ausgewaehlten
+// Optionsindizes, z. B. "[0,2]". answers ist bereits string[]; ein JSON-Array
+// bleibt ein String und bricht beim Speichern/Wiederherstellen nichts.
+function parseMultiSelection(answerStr) {
+  try {
+    const arr = JSON.parse(answerStr);
+    return new Set(Array.isArray(arr) ? arr.map(Number).filter(Number.isInteger) : []);
+  } catch {
+    return new Set();
+  }
+}
+function serializeMultiSelection(set) {
+  return JSON.stringify([...set].sort((a, b) => a - b));
+}
+
+// Lokales, deterministisches Partial-Credit-Scoring fuer Mehrfach-MC (0-10, keine
+// echten Negativpunkte). Liefert einen Eintrag im EVAL_SCHEMA-Format
+// (id/punkte/feedback/musterantwort), damit er sich mit den Modell-Ergebnissen
+// mergen laesst.
+function scoreMultiMc(q, answerStr) {
+  const correct = mcCorrectIndices(q);
+  const sel = parseMultiSelection(answerStr || "");
+  const c = correct.size;
+  const optionen = Array.isArray(q.optionen) ? q.optionen : [];
+  const w = optionen.length - c;
+  let tp = 0;
+  let fp = 0;
+  sel.forEach((i) => (correct.has(i) ? tp++ : fp++));
+  const score = Math.max(0, (c ? tp / c : 0) - (w > 0 ? fp / w : 0));
+  const punkte = Math.round(score * 10);
+  const richtige = [...correct].sort((a, b) => a - b).map((i) => optionen[i]).filter((t) => t);
+  return {
+    id: q.id,
+    punkte,
+    feedback:
+      sel.size === 0
+        ? "Keine Option ausgewählt."
+        : `${tp} von ${c} richtigen Optionen getroffen` +
+          (fp ? `, ${fp} falsch gewählt.` : "."),
+    musterantwort: "Richtig: " + richtige.join(", "),
+  };
+}
+
 // Der exakte Schluessel oben faengt nur wortgleiche Wiederholungen. Schwache
 // Modelle stellen aber auch dieselbe Frage leicht umformuliert ("zum
 // Tagesgeschaeft gehoert..." vs. "primaer im Tagesgeschaeft enthalten...").
@@ -1938,12 +2059,17 @@ async function generateQuiz(opts = {}) {
   showLoading("Fragenkatalog wird erstellt...");
   try {
     const antwortHinweis = isLocal
-      ? "Gib zu jeder Frage die korrekte Antwort an (bei Multiple-Choice exakt den Wortlaut der besten Option, " +
-        "bei offenen Fragen eine knappe Musterantwort), bei Multiple-Choice zu jeder Option eine kurze Erklärung, " +
-        "warum sie richtig oder falsch ist. "
-      : "Gib zu jeder Frage die korrekte Antwort an (bei Multiple-Choice exakt den Wortlaut der besten Option, " +
-        "bei offenen Fragen eine knappe Musterantwort), bei Multiple-Choice zu jeder Option eine kurze Erklärung, " +
-        "warum sie richtig oder falsch ist, einen lernrelevanten Hintergrund (lerninfo) sowie 1 bis 3 Quellen zur Vertiefung. " +
+      ? "Gib zu jeder Frage die korrekte Antwort an (bei Multiple-Choice den Wortlaut mindestens einer richtigen Option, " +
+        "bei offenen Fragen eine knappe Musterantwort). Gib bei Multiple-Choice zusätzlich in korrekte_indizes alle " +
+        "richtigen Options-Indizes (0-basiert) an; bei offenen Fragen ein leeres Array. Gib bei Multiple-Choice zu JEDER " +
+        "Option (richtig wie falsch) eine kurze Erklärung, warum sie richtig oder falsch ist - bei mehreren richtigen " +
+        "Optionen ist entsprechend jede davon als richtig zu begründen. "
+      : "Gib zu jeder Frage die korrekte Antwort an (bei Multiple-Choice den Wortlaut mindestens einer richtigen Option, " +
+        "bei offenen Fragen eine knappe Musterantwort). Gib bei Multiple-Choice zusätzlich in korrekte_indizes alle " +
+        "richtigen Options-Indizes (0-basiert) an; bei offenen Fragen ein leeres Array. Gib bei Multiple-Choice zu JEDER " +
+        "Option (richtig wie falsch) eine kurze Erklärung, warum sie richtig oder falsch ist - bei mehreren richtigen " +
+        "Optionen ist entsprechend jede davon als richtig zu begründen. Liefere ausserdem " +
+        "einen lernrelevanten Hintergrund (lerninfo) sowie 1 bis 3 Quellen zur Vertiefung. " +
         "Nenne nur real existierende Quellen (Gesetze, Normen, Standardwerke, offizielle Dokumentation, etablierte Fachseiten). " +
         "Gib die URL einer Quelle nur an, wenn du dir sicher bist, dass sie existiert - bevorzugt Startseiten oder bekannte, " +
         "stabile Adressen, keine tief verschachtelten Links. Sonst lasse die URL leer und waehle einen praegnanten Titel, " +
@@ -1955,9 +2081,13 @@ async function generateQuiz(opts = {}) {
     const mcMix = vertiefung
       ? "Etwa ein Drittel der Fragen soll Multiple-Choice sein (4 Optionen, genau eine ist die beste; " +
         "alle uebrigen Optionen muessen plausibel sein - typische Fehlannahmen oder haeufige Verwechslungen, " +
-        "keine offensichtlich falschen Optionen), der Rest offene Fragen. "
-      : "Etwa die Hälfte der Fragen soll Multiple-Choice sein (4 plausible Optionen, genau eine ist die beste), " +
-        "der Rest offene Fragen. ";
+        "keine offensichtlich falschen Optionen), der Rest offene Fragen. " +
+        "Markiere bei jeder Multiple-Choice-Frage die richtigen Optionen ueber korrekte_indizes (0-basiert). "
+      : "Etwa die Hälfte der Fragen soll Multiple-Choice sein (4 plausible Optionen). " +
+        "Die meisten Multiple-Choice-Fragen haben genau eine richtige Option. Bei einigen wenigen " +
+        "(hoechstens etwa ein Drittel der Multiple-Choice-Fragen) duerfen mehrere Optionen gleichzeitig richtig sein - " +
+        "dann gib in korrekte_indizes alle richtigen Indizes an. Markiere bei jeder Multiple-Choice-Frage die richtigen " +
+        "Optionen ueber korrekte_indizes (0-basiert). Der Rest sind offene Fragen. ";
 
     // Tiefe-Block fuer Vertiefungen: zwingt Anspruch/Niveau statt es nur zu
     // erhoffen. Leer bei normalen Tests.
@@ -2210,7 +2340,56 @@ function renderQuestion() {
   const hasAnswer = (answers[current] || "").trim() !== "";
   const locked = (isRevealed && hasAnswer) || reviewing;
 
-  if (q.typ === "multiple_choice") {
+  if (q.typ === "multiple_choice" && mcIsMulti(q)) {
+    // Mehrfach-MC: Checkbox-Logik (Klick toggelt), Auswahl als Index-Menge.
+    // Die Hinweiszeile liegt in einem eigenen Container (nicht als Geschwister
+    // der Options-Buttons), damit die nth-child-Animationsstaffelung und der
+    // children[idx]-Fokuspfad stimmen.
+    const correct = mcCorrectIndices(q);
+    const hint = document.createElement("div");
+    hint.className = "mc-multi-hint-wrap";
+    const hintP = document.createElement("p");
+    hintP.className = "mc-multi-hint";
+    hintP.textContent = "Mehrere Antworten möglich";
+    hint.appendChild(hintP);
+    area.appendChild(hint);
+
+    const optWrap = document.createElement("div");
+    optWrap.className = "mc-options";
+    q.optionen.forEach((opt, idx) => {
+      const sel = parseMultiSelection(answers[current] || "");
+      const btn = document.createElement("button");
+      let cls = "option option-checkbox";
+      if (sel.has(idx)) cls += " selected";
+      if (isRevealed) {
+        // Richtige Optionen gruen (auch nicht gewaehlte, damit der Nutzer sieht,
+        // was er verpasst hat), faelschlich gewaehlte rot.
+        if (correct.has(idx)) cls += " correct";
+        else if (sel.has(idx)) cls += " wrong";
+      }
+      btn.className = cls;
+      btn.textContent = opt;
+      btn.setAttribute("aria-pressed", sel.has(idx) ? "true" : "false");
+      if (!locked) {
+        btn.addEventListener("click", () => {
+          const s = parseMultiSelection(answers[current] || "");
+          if (s.has(idx)) s.delete(idx);
+          else s.add(idx);
+          answers[current] = s.size ? serializeMultiSelection(s) : "";
+          renderQuestion();
+          // Fokus auf die geklickte Option zurueck. Die Options liegen in
+          // einem eigenen Container, daher dort indexieren.
+          const wrap = $("answer-area").querySelector(".mc-options");
+          const fresh = wrap && wrap.children[idx];
+          if (fresh) fresh.focus();
+        });
+      } else {
+        btn.disabled = true;
+      }
+      optWrap.appendChild(btn);
+    });
+    area.appendChild(optWrap);
+  } else if (q.typ === "multiple_choice") {
     q.optionen.forEach((opt, idx) => {
       const btn = document.createElement("button");
       let cls = "option";
@@ -2308,10 +2487,17 @@ function renderLearnArea(q, isRevealed) {
   const box = document.createElement("div");
   box.className = "learn-box";
 
+  const correct = mcCorrectIndices(q);
   const answerLine = document.createElement("p");
   answerLine.className = "learn-answer";
-  answerLine.textContent =
-    (q.typ === "multiple_choice" ? "Richtige Antwort: " : "Musterantwort: ") + (q.korrekte_antwort || "");
+  if (mcIsMulti(q)) {
+    answerLine.textContent =
+      "Richtige Antworten: " +
+      [...correct].sort((a, b) => a - b).map((i) => q.optionen[i]).filter((t) => t).join(", ");
+  } else {
+    answerLine.textContent =
+      (q.typ === "multiple_choice" ? "Richtige Antwort: " : "Musterantwort: ") + (q.korrekte_antwort || "");
+  }
   box.appendChild(answerLine);
 
   const erklaerungen = Array.isArray(q.erklaerungen) ? q.erklaerungen : [];
@@ -2321,7 +2507,9 @@ function renderLearnArea(q, isRevealed) {
     q.optionen.forEach((opt, i) => {
       if (!erklaerungen[i]) return;
       const li = document.createElement("li");
-      const isCorrect = opt.trim() === (q.korrekte_antwort || "").trim();
+      // isCorrect ueber Index-Zugehoerigkeit (mcCorrectIndices nutzt fuer
+      // Single-Choice den Wortlaut-Fallback - alte Versuche laufen weiter).
+      const isCorrect = correct.has(i);
       li.className = isCorrect ? "exp-correct" : "exp-wrong";
       li.textContent = `${opt} – ${erklaerungen[i]}`;
       ul.appendChild(li);
@@ -2416,7 +2604,23 @@ async function runEvaluation() {
       "Fragen, die im Lernmodus vor dem Antworten aufgelöst wurden (aufgeloest: true), bewerte normal, " +
       "erwähne den Umstand aber kurz im Feedback. Antworte auf Deutsch.";
 
-    const payload = quiz.fragen.map((q, i) => ({
+    // Mehrfach-MC wird LOKAL/deterministisch gescort (Partial Credit) und NICHT
+    // ans Modell geschickt - das spart Tokens, ist reproduzierbar und kostet im
+    // Hosted-Modus keinen Extra-Worker-Call. Single-Choice-MC und offene Fragen
+    // bleiben bewusst beim Modell (Verhalten bestehender Tests unveraendert).
+    const modelFragen = [];
+    const mcMultiResults = [];
+    quiz.fragen.forEach((q, i) => {
+      if (mcIsMulti(q)) {
+        const res = scoreMultiMc(q, answers[i]);
+        if (mode === "lernen" && revealed[i]) res.feedback += " (im Lernmodus aufgelöst)";
+        mcMultiResults.push(res);
+      } else {
+        modelFragen.push({ q, i });
+      }
+    });
+
+    const payload = modelFragen.map(({ q, i }) => ({
       id: q.id,
       frage: q.frage,
       typ: q.typ,
@@ -2438,23 +2642,56 @@ async function runEvaluation() {
       "\n\nRahmen: " + kontext +
       "\n\nBewerte diese Antworten des Kandidaten:\n" + JSON.stringify(payload, null, 2);
 
-    const total = quiz.fragen.length;
-    setLoadingProgress(0, total, "Das Modell prüft deine Antworten...");
-    const evalHostedPayload = {
-      jobText: quiz.jobText,
-      payload,
-      kontext: { mode, limitMin: timer.limitMin, minutesUsed, overtime: timer.overtime },
-    };
-    const { data: rawResult, cost: evalCost, tokens: evalTokens } = await callLLM(system, user, EVAL_SCHEMA, (acc) => {
-      const seen = (acc.match(/"feedback"\s*:/g) || []).length;
-      setLoadingProgress(seen, total, seen > 0
-        ? `Antwort ${Math.min(seen, total)} von ${total} wird bewertet...`
-        : "Antworten werden ausgewertet...");
-    }, { hosted: { action: "evaluate", payload: evalHostedPayload } });
-    // Form absichern, bevor gespeichert/gerendert wird: ohne striktes Schema
-    // (DeepSeek, lokale Modelle) koennte z. B. das gesamt-Objekt fehlen, was
-    // beim Speichern (result.gesamt.prozent) sonst einen Absturz ausloest
-    const result = normalizeEvalData(rawResult);
+    let result;
+    let evalCost = 0;
+    let evalTokens;
+
+    if (payload.length === 0) {
+      // Sonderfall: ausschliesslich Mehrfach-MC. Kein Modell-/Worker-Call
+      // ausloesen (Kosten/Latenz sparen) - Auswertung komplett lokal.
+      result = normalizeEvalData({
+        ergebnisse: mcMultiResults,
+        gesamt: { prozent: 0, zusammenfassung: "", staerken: [], verbesserungen: [] },
+      });
+      const sumLocal = mcMultiResults.reduce((a, e) => a + (Number(e.punkte) || 0), 0);
+      result.gesamt.zusammenfassung =
+        `${sumLocal} von ${mcMultiResults.length * 10} Punkten in den Multiple-Choice-Fragen erreicht.`;
+    } else {
+      // Progress zaehlt nur die Modell-Fragen (Mehrfach-MC laeuft nicht ueber den
+      // Stream) - sonst bliebe der Balken haengen.
+      const total = payload.length;
+      setLoadingProgress(0, total, "Das Modell prüft deine Antworten...");
+      const evalHostedPayload = {
+        jobText: quiz.jobText,
+        payload,
+        kontext: { mode, limitMin: timer.limitMin, minutesUsed, overtime: timer.overtime },
+      };
+      const { data: rawResult, cost, tokens } = await callLLM(system, user, EVAL_SCHEMA, (acc) => {
+        const seen = (acc.match(/"feedback"\s*:/g) || []).length;
+        setLoadingProgress(seen, total, seen > 0
+          ? `Antwort ${Math.min(seen, total)} von ${total} wird bewertet...`
+          : "Antworten werden ausgewertet...");
+      }, { hosted: { action: "evaluate", payload: evalHostedPayload } });
+      evalCost = cost;
+      evalTokens = tokens;
+      // Form absichern, bevor gespeichert/gerendert wird: ohne striktes Schema
+      // (DeepSeek, lokale Modelle) koennte z. B. das gesamt-Objekt fehlen, was
+      // beim Speichern (result.gesamt.prozent) sonst einen Absturz ausloest
+      result = normalizeEvalData(rawResult);
+      // Lokale Mehrfach-MC-Ergebnisse einmischen (das Modell hat sie nicht
+      // gesehen). Reihenfolge spielt fuer renderResult keine Rolle (Suche per id).
+      result.ergebnisse = result.ergebnisse.concat(mcMultiResults);
+    }
+
+    // gesamt.prozent NEU aus ALLEN Ergebnissen berechnen: das Modell kennt nur
+    // seine Teilmenge, sein prozent ist daher nicht mehr repraesentativ. Deckt
+    // sich mit der Punkte-Summe im Score-Ring (Summe Punkte / n*10).
+    {
+      const sum = result.ergebnisse.reduce((a, e) => a + (Number(e.punkte) || 0), 0);
+      const max = result.ergebnisse.length * 10;
+      result.gesamt.prozent = max ? Math.round((sum / max) * 100) : 0;
+    }
+
     saveAttempt(result, durationMs, evalCost, evalTokens);
     renderResult(result, durationMs);
     // Spielfortschritt dieser Stelle; frisch freigeschaltete Abzeichen und ein
@@ -2583,7 +2820,18 @@ function renderResult(result, durationMs) {
       badge.textContent = difficultyLabel(q.schwierigkeit);
       div.querySelector(".q").appendChild(badge);
     }
-    div.querySelector(".a").textContent = "Deine Antwort: " + (answers[i] || "(keine Antwort)");
+    // Mehrfach-MC speichert die Auswahl als Index-JSON ("[0,2]") - fuer die
+    // Anzeige in lesbare Optionstexte aufloesen. Alte Versuche ohne
+    // korrekte_indizes sind nie mcIsMulti => roher String (bei Single-Choice
+    // ohnehin der Optionstext). Keine Regression.
+    let antwortText = answers[i] || "(keine Antwort)";
+    if (mcIsMulti(q)) {
+      const sel = parseMultiSelection(answers[i] || "");
+      antwortText = sel.size
+        ? [...sel].sort((a, b) => a - b).map((k) => q.optionen[k]).filter((t) => t).join(", ")
+        : "(keine Antwort)";
+    }
+    div.querySelector(".a").textContent = "Deine Antwort: " + antwortText;
     div.querySelectorAll(".fb")[0].textContent = r.feedback || "";
     div.querySelectorAll(".fb")[1].textContent = r.musterantwort ? "Musterantwort: " + r.musterantwort : "";
     const srcEl = div.querySelector(".src");

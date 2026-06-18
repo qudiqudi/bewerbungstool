@@ -24,7 +24,18 @@ export const QUESTIONS_SCHEMA = {
           schwierigkeit: { type: "string", enum: ["leicht", "mittel", "schwer"] },
           frage: { type: "string" },
           optionen: { type: "array", items: { type: "string" } },
-          korrekte_antwort: { type: "string" },
+          korrekte_antwort: {
+            type: "string",
+            description: "Bei multiple_choice der Wortlaut EINER richtigen Option (bei Mehrfachauswahl der ersten); siehe korrekte_indizes fuer alle richtigen Optionen. Bei offenen Fragen eine knappe Musterantwort",
+          },
+          korrekte_indizes: {
+            type: "array",
+            items: { type: "integer" },
+            description:
+              "0-basierte Indizes ALLER richtigen Optionen in 'optionen'. " +
+              "Bei multiple_choice genau ein Index => eine richtige Antwort (Standard); " +
+              "mehrere Indizes => Mehrfachauswahl. Bei offenen Fragen leeres Array [].",
+          },
           erklaerungen: { type: "array", items: { type: "string" } },
           lerninfo: { type: "string" },
           quellen: {
@@ -37,7 +48,7 @@ export const QUESTIONS_SCHEMA = {
             },
           },
         },
-        required: ["id", "typ", "kategorie", "schwierigkeit", "frage", "optionen", "korrekte_antwort", "erklaerungen", "lerninfo", "quellen"],
+        required: ["id", "typ", "kategorie", "schwierigkeit", "frage", "optionen", "korrekte_antwort", "korrekte_indizes", "erklaerungen", "lerninfo", "quellen"],
         additionalProperties: false,
       },
     },
@@ -113,9 +124,12 @@ export function buildQuizMessages({ jobText, numQuestions, difficulty, vertiefun
   const isVertiefung = !!(vertiefung && Array.isArray(vertiefung.felder) && vertiefung.felder.length);
 
   const antwortHinweis =
-    "Gib zu jeder Frage die korrekte Antwort an (bei Multiple-Choice exakt den Wortlaut der besten Option, " +
-    "bei offenen Fragen eine knappe Musterantwort), bei Multiple-Choice zu jeder Option eine kurze Erklärung, " +
-    "warum sie richtig oder falsch ist, einen lernrelevanten Hintergrund (lerninfo) sowie 1 bis 3 Quellen zur Vertiefung. " +
+    "Gib zu jeder Frage die korrekte Antwort an (bei Multiple-Choice den Wortlaut mindestens einer richtigen Option, " +
+    "bei offenen Fragen eine knappe Musterantwort). Gib bei Multiple-Choice zusätzlich in korrekte_indizes alle " +
+    "richtigen Options-Indizes (0-basiert) an; bei offenen Fragen ein leeres Array. Gib bei Multiple-Choice zu JEDER " +
+    "Option (richtig wie falsch) eine kurze Erklärung, warum sie richtig oder falsch ist - bei mehreren richtigen " +
+    "Optionen ist entsprechend jede davon als richtig zu begründen. Liefere ausserdem " +
+    "einen lernrelevanten Hintergrund (lerninfo) sowie 1 bis 3 Quellen zur Vertiefung. " +
     "Nenne nur real existierende Quellen (Gesetze, Normen, Standardwerke, offizielle Dokumentation, etablierte Fachseiten). " +
     "Gib die URL einer Quelle nur an, wenn du dir sicher bist, dass sie existiert - bevorzugt Startseiten oder bekannte, " +
     "stabile Adressen, keine tief verschachtelten Links. Sonst lasse die URL leer und waehle einen praegnanten Titel, " +
@@ -124,9 +138,13 @@ export function buildQuizMessages({ jobText, numQuestions, difficulty, vertiefun
   const mcMix = isVertiefung
     ? "Etwa ein Drittel der Fragen soll Multiple-Choice sein (4 Optionen, genau eine ist die beste; " +
       "alle uebrigen Optionen muessen plausibel sein - typische Fehlannahmen oder haeufige Verwechslungen, " +
-      "keine offensichtlich falschen Optionen), der Rest offene Fragen. "
-    : "Etwa die Hälfte der Fragen soll Multiple-Choice sein (4 plausible Optionen, genau eine ist die beste), " +
-      "der Rest offene Fragen. ";
+      "keine offensichtlich falschen Optionen), der Rest offene Fragen. " +
+      "Markiere bei jeder Multiple-Choice-Frage die richtigen Optionen ueber korrekte_indizes (0-basiert). "
+    : "Etwa die Hälfte der Fragen soll Multiple-Choice sein (4 plausible Optionen). " +
+      "Die meisten Multiple-Choice-Fragen haben genau eine richtige Option. Bei einigen wenigen " +
+      "(hoechstens etwa ein Drittel der Multiple-Choice-Fragen) duerfen mehrere Optionen gleichzeitig richtig sein - " +
+      "dann gib in korrekte_indizes alle richtigen Indizes an. Markiere bei jeder Multiple-Choice-Frage die richtigen " +
+      "Optionen ueber korrekte_indizes (0-basiert). Der Rest sind offene Fragen. ";
 
   const vertiefungTiefe = isVertiefung
     ? "Dies ist ein Vertiefungsbogen: Die Fragen muessen deutlich tiefer gehen als in einem Standardtest. " +

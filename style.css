@@ -696,6 +696,21 @@ button.ghost {
   box-shadow: inset 0 0 0 4px var(--card);
 }
 
+/* Mehrfach-MC: eckige Box statt rundem Radio - "rund = eine Antwort,
+   eckig = mehrere". Selected/correct/wrong erben Faerbung und Fuell-Optik. */
+.option.option-checkbox::before {
+  border-radius: 6px;
+}
+
+/* Hinweiszeile "Mehrere Antworten moeglich". Liegt in einem eigenen Wrapper
+   (.mc-multi-hint-wrap), nicht als Geschwister der Options-Buttons, damit die
+   .option:nth-child-Animationsstaffelung erhalten bleibt. */
+.mc-multi-hint {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0 0 0.5rem;
+}
+
 /* Lernmodus */
 #learn-area { margin-top: 0.7rem; }
 
