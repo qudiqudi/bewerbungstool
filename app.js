@@ -4516,6 +4516,13 @@ function importData(text) {
       else if (providerChanged) delete merged[k];                   // fremder Altwert faellt weg
       // sonst (gleicher Anbieter, leerer Importwert): vorhandenen Wert behalten
     }
+    // Hosted-Qualitaetsstufe ist nicht anbietergebunden: vorhandenen Importwert
+    // additiv uebernehmen, statt ihn beim Umzug stillschweigend zu verlieren. Nur
+    // bekannte Stufen (wie im Settings-Menue angeboten) akzeptieren - ein korruptes
+    // oder handgeschriebenes Backup soll keine ungueltige Stufe persistieren, die
+    // Hosted-Calls bis zum naechsten Speichern scheitern liesse (defensiv lesen).
+    const tierImp = typeof inc.tier === "string" ? inc.tier.trim() : "";
+    if (tierImp === "standard" || tierImp === "guenstig") merged.tier = tierImp;
     settings = merged;
     saveSettings(settings);
     settingsImported = true;
