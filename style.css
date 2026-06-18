@@ -1913,3 +1913,6 @@ button.danger:hover { background: var(--red-soft); border-color: var(--red); }
   border-top-color: var(--primary);
   flex: none;
 }
+
+/* Offener-Lerntest-Karte (Punkt 3): Aktionen rechts gruppiert */
+.resume-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }

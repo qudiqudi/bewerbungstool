@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.2.0";
+const APP_VERSION = "1.3.0";
 
 const CHANGELOG = [
+  {
+    version: "1.3.0",
+    date: "18.06.2026",
+    items: [
+      "Im Lernmodus kannst du einen Test jetzt verlassen und später fortsetzen: Deine Antworten und aufgelösten Fragen bleiben erhalten. Auf der Startseite erscheint dazu „Test fortsetzen“.",
+    ],
+  },
   {
     version: "1.2.0",
     date: "18.06.2026",
@@ -2114,6 +2121,10 @@ function finalizeQuiz(result, ctx) {
   setQuizNotice(ctx.isLocal && !ctx.localAborted && Number.isFinite(ctx.total) && quiz.fragen.length < ctx.total
     ? `Das lokale Modell konnte nur ${quiz.fragen.length} von ${ctx.total} gewünschten Fragen erzeugen. Für mehr Fragen ein größeres Modell verwenden oder erneut starten.`
     : "");
+  // Neuer Lerntest: als fortsetzbar markieren und sofort sichern; ein evtl. zuvor
+  // offener Lerntest wird durch den neuen ersetzt. Pruefungsmodus ist nicht fortsetzbar.
+  if (mode === "lernen") { learnSessionActive = true; saveLearnSession(); }
+  else { clearLearnSession(); }
   renderQuestion();
   showView("view-quiz");
 }
@@ -2313,6 +2324,87 @@ function renderActiveJobCard(state) {
   card.classList.remove("hidden");
 }
 
+/* ---------- Lernmodus: Test verlassen und spaeter fortsetzen (Punkt 3) ---------- */
+
+// Ein im Lernmodus begonnener, noch nicht ausgewerteter Fragebogen wird lokal
+// gesichert, damit man die Seite verlassen und spaeter zurueckkehren kann. Nur
+// Lernmodus (im Pruefungsmodus laeuft ein Zeitlimit, das ein Pausieren ausschliesst).
+const LEARN_SESSION_KEY = "bewerbungstool.learnSession";
+// Markiert, dass der aktuelle Quiz-Zustand ein speicherbarer, laufender Lerntest ist.
+// Verhindert, dass ein bereits ausgewerteter oder nur durchgesehener (reviewing)
+// Fragebogen versehentlich (z. B. via visibilitychange) wieder gespeichert wird.
+let learnSessionActive = false;
+
+function loadLearnSession() {
+  try { const raw = localStorage.getItem(LEARN_SESSION_KEY); if (raw) return JSON.parse(raw); } catch {}
+  return null;
+}
+function saveLearnSession() {
+  if (!learnSessionActive || mode !== "lernen" || !quiz || reviewing) return;
+  try {
+    localStorage.setItem(LEARN_SESSION_KEY, JSON.stringify({
+      quiz, answers, revealed, current, savedAt: Date.now(),
+    }));
+  } catch { /* Speicher voll/blockiert: Fortsetzen ueber Reload entfaellt dann eben */ }
+}
+function clearLearnSession() {
+  learnSessionActive = false;
+  try { localStorage.removeItem(LEARN_SESSION_KEY); } catch {}
+}
+// Beim Tippen nicht bei jedem Anschlag das ganze Quiz serialisieren — kurz buendeln.
+let _learnSaveTimer = null;
+function saveLearnSessionDebounced() {
+  clearTimeout(_learnSaveTimer);
+  _learnSaveTimer = setTimeout(saveLearnSession, 800);
+}
+
+// Gesicherten Lerntest wiederherstellen und in die Frageansicht springen.
+function resumeLearnSession() {
+  const s = loadLearnSession();
+  if (!s || !s.quiz || !Array.isArray(s.quiz.fragen)) { clearLearnSession(); renderHome(); return; }
+  quiz = s.quiz;
+  // Defensiv gegen unvollstaendige/aeltere Staende: Laengen an die Fragen angleichen.
+  const n = quiz.fragen.length;
+  answers = Array.isArray(s.answers) ? s.answers.slice(0, n) : [];
+  while (answers.length < n) answers.push("");
+  revealed = Array.isArray(s.revealed) ? s.revealed.slice(0, n) : [];
+  while (revealed.length < n) revealed.push(false);
+  current = Number.isInteger(s.current) ? Math.min(Math.max(0, s.current), n - 1) : 0;
+  mode = "lernen";
+  reviewing = false;
+  startTime = Date.now();
+  learnSessionActive = true;
+  stopTimer();
+  timer.overtime = false; timer.limitMin = 0; timer.deadline = 0;
+  $("quiz-timer").classList.add("hidden");
+  setQuizNotice("");
+  renderQuestion();
+  showView("view-quiz");
+}
+
+function discardLearnSession() {
+  clearLearnSession();
+  renderHome(); // Karte ausblenden und Leer-Hinweis/Liste korrekt wiederherstellen
+}
+
+// "Test fortsetzen"-Karte auf der Startliste, wenn ein offener Lerntest existiert.
+function renderResumeCard() {
+  const card = $("resume-card");
+  if (!card) return;
+  const s = loadLearnSession();
+  if (!s || !s.quiz || !Array.isArray(s.quiz.fragen) || !s.quiz.fragen.length) {
+    card.classList.add("hidden");
+    return;
+  }
+  const total = s.quiz.fragen.length;
+  const pos = Math.min((Number.isInteger(s.current) ? s.current : 0) + 1, total);
+  const titel = (s.quiz.titel || "Lerntest").trim();
+  $("resume-text").textContent = `Offener Lerntest „${titel}“ – Frage ${pos} von ${total}. Du kannst hier fortsetzen.`;
+  // Widerspricht dem Leer-Hinweis; diesen ausblenden, solange die Karte sichtbar ist.
+  $("home-empty").classList.add("hidden");
+  card.classList.remove("hidden");
+}
+
 /* ---------- Timer (Prüfungsmodus) ---------- */
 
 function computeTimeLimitMin(q) {
@@ -2435,6 +2527,7 @@ function renderQuestion() {
       if (!locked) {
         btn.addEventListener("click", () => {
           answers[current] = opt;
+          saveLearnSession();
           renderQuestion();
           // Das Neuzeichnen ersetzt alle Buttons - den Fokus auf die gewaehlte
           // Option zurueckgeben, sonst landet er auf <body> (Tastaturbedienung)
@@ -2452,7 +2545,9 @@ function renderQuestion() {
     ta.placeholder = "Deine Antwort...";
     ta.value = answers[current] || "";
     ta.readOnly = locked;
-    ta.addEventListener("input", () => (answers[current] = ta.value));
+    ta.addEventListener("input", () => { answers[current] = ta.value; saveLearnSessionDebounced(); });
+    // Beim Verlassen des Feldes (z. B. vor dem Wegklicken) sofort sichern.
+    ta.addEventListener("blur", saveLearnSession);
     area.appendChild(ta);
   }
 
@@ -2496,6 +2591,7 @@ function renderLearnArea(q, isRevealed) {
     btn.textContent = "Auflösen und erklären";
     btn.addEventListener("click", () => {
       revealed[current] = true;
+      saveLearnSession();
       renderQuestion();
       // Lokaler Lernmodus: Lernhintergrund und Quellen jetzt einzeln nachladen
       // (zeichnet die Box bei Erfolg neu). Bei Cloud-Fragen ist beides schon da.
@@ -2570,6 +2666,7 @@ function renderLearnArea(q, isRevealed) {
 function nextQuestion() {
   if (current < quiz.fragen.length - 1) {
     current++;
+    saveLearnSession();
     renderQuestion();
   } else if (reviewing) {
     // Bereits bewertet: zurueck zur gespeicherten Auswertung, keine neue Bewertung
@@ -2582,6 +2679,7 @@ function nextQuestion() {
 function prevQuestion() {
   if (current > 0) {
     current--;
+    saveLearnSession();
     renderQuestion();
   }
 }
@@ -2662,6 +2760,8 @@ async function runEvaluation() {
     // (DeepSeek, lokale Modelle) koennte z. B. das gesamt-Objekt fehlen, was
     // beim Speichern (result.gesamt.prozent) sonst einen Absturz ausloest
     const result = normalizeEvalData(rawResult);
+    // Ausgewertet: der Lerntest ist abgeschlossen, kein Fortsetzen mehr noetig.
+    clearLearnSession();
     saveAttempt(result, durationMs, evalCost, evalTokens);
     renderResult(result, durationMs);
     // Spielfortschritt dieser Stelle; frisch freigeschaltete Abzeichen und ein
@@ -3902,6 +4002,8 @@ function renderHome() {
   // herstellen (sie blendet den widerspruechlichen "Noch keine Stelle"-Hinweis aus).
   const aj = loadActiveJob();
   if (aj) renderActiveJobCard(aj.status === "ready" ? "ready" : "pending");
+  // Offenen Lerntest anbieten (blendet bei Bedarf den Leer-Hinweis aus).
+  renderResumeCard();
 }
 
 // Gueltiger Fragenzahl-Bereich - identisch zum Stepper im Eingabe-Bildschirm
@@ -4989,6 +5091,13 @@ $("btn-history-back").addEventListener("click", goReturn);
 // Startliste und Stellen-Subpage
 $("btn-new-job").addEventListener("click", () => showView("view-input"));
 $("active-job-start").addEventListener("click", startReadyJob);
+$("resume-continue").addEventListener("click", resumeLearnSession);
+$("resume-discard").addEventListener("click", discardLearnSession);
+
+// Lerntest sichern, wenn der Tab in den Hintergrund geht oder geschlossen wird —
+// auf Mobilgeraeten der zuverlaessigste Zeitpunkt (pagehide feuert dort nicht immer).
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") saveLearnSession(); });
+window.addEventListener("pagehide", saveLearnSession);
 $("btn-input-back").addEventListener("click", goHome);
 $("btn-job-back").addEventListener("click", goHome);
 $("btn-all-jobs").addEventListener("click", () => {
