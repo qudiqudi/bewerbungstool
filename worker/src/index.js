@@ -80,6 +80,9 @@ export default {
     const gate = await doCall(stub, "reserve", { amount: reserve, subject: ip, ip, exclusive });
     if (!gate.ok) {
       const status = gate.reason === "budget" ? 503 : 429; // active-job/inflight/subject/ip → 429
+      // Gate-Ablehnung in Workers Logs festhalten, damit der Grund im Dashboard/per
+      // API sichtbar ist - ohne rohe IP (Datenschutz). action nennt den Endpoint.
+      console.log(JSON.stringify({ ev: "gate-deny", action: route.action, reason: gate.reason, status }));
       return json({ error: gate.reason }, status, env, origin);
     }
     const reserveId = gate.reserveId;
@@ -171,6 +174,7 @@ async function startJob(req, env, ctx, origin) {
   const gate = await doCall(stub, "reserve", { amount: reserve, subject: ip, ip, exclusive: true });
   if (!gate.ok) {
     const status = gate.reason === "budget" ? 503 : 429; // active-job/inflight/subject/ip → 429
+    console.log(JSON.stringify({ ev: "gate-deny", action: "jobs", reason: gate.reason, status }));
     return json({ error: gate.reason }, status, env, origin);
   }
 
