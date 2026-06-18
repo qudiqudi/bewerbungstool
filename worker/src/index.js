@@ -12,6 +12,7 @@ import { corsHeaders, preflight } from "./cors.js";
 import { verifyTurnstile } from "./turnstile.js";
 import { validateQuiz, validateEval, validateThemenfelder } from "./validate.js";
 import { handleAuth, getSessionUser, devMintSession } from "./auth.js";
+import { devEnabled } from "./env.js";
 import {
   QUESTIONS_SCHEMA, EVAL_SCHEMA, THEMENFELDER_SCHEMA,
   buildQuizMessages, buildEvalMessages, buildThemenfelderMessages,
@@ -33,15 +34,25 @@ export default {
 
     const path = new URL(req.url).pathname;
 
+    // Fail-closed: Dev-Bypässe werden NUR honoriert, wenn ENV EXPLIZIT eine Dev-Umgebung
+    // markiert. Absent/getippt-falsch/"production" → dev=false → Bypässe AUS. Ein
+    // versehentlich in Prod gesetztes SKIP_TURNSTILE/MOCK_UPSTREAM würde den Worker sonst
+    // zu einem offenen, kostenpflichtigen LLM-Proxy machen. In Prod ist ENV bewusst NICHT
+    // gesetzt (wrangler.toml); lokal setzt .dev.vars ENV=development.
+    const dev = devEnabled(env);
+    const skipTurnstile = dev && env.SKIP_TURNSTILE === "1";
+    const mockUpstream = dev && env.MOCK_UPSTREAM === "1";
+
     // Nur in Dev (MOCK_UPSTREAM) freigegebener Status-Endpunkt für den Last-Test.
-    if (path === "/debug/stats" && env.MOCK_UPSTREAM === "1") {
+    if (path === "/debug/stats" && mockUpstream) {
       const stub = budgetStub(env);
       const stats = await stub.fetch("https://do/stats").then((r) => r.json());
       return json(stats, 200, env, origin);
     }
-    // Nur in Dev (MOCK_UPSTREAM): mintet eine Session, damit der Lasttest den Auth-Pflicht-
-    // Pfad echt durchlaeuft. In Produktion NIE erreichbar (MOCK_UPSTREAM ungesetzt).
-    if (path === "/debug/session" && env.MOCK_UPSTREAM === "1") {
+    // Nur in Dev: mintet eine Session, damit der Lasttest den Auth-Pflicht-Pfad echt
+    // durchlaeuft. Fail-closed an dev gekoppelt (mockUpstream) - ein versehentlich in Prod
+    // gesetztes MOCK_UPSTREAM darf hier keine Sessions ausgeben. In Produktion NIE erreichbar.
+    if (path === "/debug/session" && mockUpstream) {
       const token = await devMintSession(env, new URL(req.url).searchParams.get("email"));
       if (!token) return json({ error: "dev-email-only" }, 403, env, origin); // nur @dev.local
       return json({ token }, 200, env, origin);
@@ -59,6 +70,11 @@ export default {
     const route = ROUTES[path];
     if (req.method !== "POST" || !route) return json({ error: "not-found" }, 404, env, origin);
     const ip = req.headers.get("CF-Connecting-IP") || "0.0.0.0";
+    // Rate-Limit-Schlüssel: IPv6 auf das /64-Präfix kürzen. Eine übliche Endkunden-
+    // Allokation IST ein /64 (2^64 Adressen) — ohne Bucketing umgeht ein einzelner
+    // Nutzer durch Adressrotation PER_IP_DAY UND PER_SUBJECT_SHARE und leert das
+    // Tagesbudget. Turnstile bekommt weiter die volle IP (siteverify braucht sie).
+    const ipKey = rateLimitKey(ip);
 
     // 0) Anmeldung Pflicht (Phase B): jeder gehostete Call haengt an einem Konto.
     // Zuerst pruefen, damit unauth schnell und ohne Turnstile-Kosten abprallt.
@@ -66,8 +82,8 @@ export default {
     if (g.resp) return g.resp;
     const user = g.user;
 
-    // 1) Turnstile (Dev-Bypass via SKIP_TURNSTILE=1)
-    if (env.SKIP_TURNSTILE !== "1") {
+    // 1) Turnstile (Dev-Bypass via SKIP_TURNSTILE=1, nur außerhalb Prod)
+    if (!skipTurnstile) {
       const token = req.headers.get("CF-Turnstile-Token") || "";
       const tv = await verifyTurnstile(token, { action: route.action, secret: env.TURNSTILE_SECRET, ip });
       if (!tv.ok) return json({ error: "turnstile", reason: tv.reason }, 403, env, origin);
@@ -95,9 +111,10 @@ export default {
     // bleiben nicht-exklusiv (kurze Aufrufe, kein Generierungs-Slot).
     const exclusive = route.action === "generate-quiz";
     // Subjekt = Konto, wenn angemeldet (Per-Subjekt-Share + exclusive-Gate pro Nutzer);
-    // im Cutover-Fenster (anonym erlaubt) faellt es auf die IP zurueck. ip bleibt separat
-    // fuer den Tagescap PER_IP_DAY.
-    const gate = await doCall(stub, "reserve", { amount: reserve, subject: user ? user.id : ip, ip, exclusive });
+    // im Cutover-Fenster (anonym erlaubt) faellt es auf den /64-gebucketeten IP-Schluessel
+    // zurueck. ipKey (IPv6 → /64) dient auch dem Tagescap PER_IP_DAY, damit Adressrotation
+    // innerhalb einer Endkunden-Allokation die Pro-IP-Limits nicht aushebelt.
+    const gate = await doCall(stub, "reserve", { amount: reserve, subject: user ? user.id : ipKey, ip: ipKey, exclusive });
     if (!gate.ok) {
       const status = gate.reason === "budget" ? 503 : 429; // active-job/inflight/subject/ip → 429
       // Gate-Ablehnung in Workers Logs festhalten, damit der Grund im Dashboard/per
@@ -111,8 +128,8 @@ export default {
     try {
       const messages = route.build(body);
 
-      const res = env.MOCK_UPSTREAM === "1"
-        ? mockUpstream(env, route.action)
+      const res = mockUpstream
+        ? mockUpstreamResponse(env, route.action)
         : await fetch(OPENROUTER_URL, {
             method: "POST",
             headers: {
@@ -172,13 +189,20 @@ export default {
 // → Budget reservieren (mit Pro-Nutzer-Gate exclusive) → Job-DO anstossen → jobId zurück.
 async function startJob(req, env, ctx, origin) {
   const ip = req.headers.get("CF-Connecting-IP") || "0.0.0.0";
+  // IPv6 auf /64 bucketen wie im synchronen Pfad (rateLimitKey), sonst bliebe die
+  // Pro-IP-Begrenzung auf dem PRIMAEREN (asynchronen) Generierungspfad per Adress-
+  // rotation umgehbar.
+  const ipKey = rateLimitKey(ip);
 
   // Anmeldung Pflicht (Phase B) – zuerst, vor Turnstile.
   const g = await gateUser(req, env, origin);
   if (g.resp) return g.resp;
   const user = g.user;
 
-  if (env.SKIP_TURNSTILE !== "1") {
+  // Turnstile-Dev-Bypass fail-closed an dev gekoppelt (wie im fetch-Handler): ein in Prod
+  // gesetztes SKIP_TURNSTILE darf den Job-Start nicht ungeschuetzt lassen.
+  const skipTurnstile = devEnabled(env) && env.SKIP_TURNSTILE === "1";
+  if (!skipTurnstile) {
     const token = req.headers.get("CF-Turnstile-Token") || "";
     const tv = await verifyTurnstile(token, { action: "generate-quiz", secret: env.TURNSTILE_SECRET, ip });
     if (!tv.ok) return json({ error: "turnstile", reason: tv.reason }, 403, env, origin);
@@ -196,10 +220,11 @@ async function startJob(req, env, ctx, origin) {
 
   const reserve = worstCaseCost(tier, Number(env.HARD_CAP_TOKENS || 24000));
   const stub = budgetStub(env);
-  // Subjekt = Konto, wenn angemeldet; im Cutover-Fenster anonym → IP. ip separat fuer Cap.
-  const subject = user ? user.id : ip;
+  // Subjekt = Konto, wenn angemeldet; im Cutover-Fenster anonym → /64-gebucketeter IP-
+  // Schluessel (ipKey). ipKey separat fuer den Tagescap PER_IP_DAY.
+  const subject = user ? user.id : ipKey;
   const subjectKind = user ? "user" : null; // nur User-Jobs unterliegen der Ownership-Pruefung
-  const gate = await doCall(stub, "reserve", { amount: reserve, subject, ip, exclusive: true });
+  const gate = await doCall(stub, "reserve", { amount: reserve, subject, ip: ipKey, exclusive: true });
   if (!gate.ok) {
     const status = gate.reason === "budget" ? 503 : 429; // active-job/inflight/subject/ip → 429
     console.log(JSON.stringify({ ev: "gate-deny", action: "jobs", reason: gate.reason, status }));
@@ -275,6 +300,44 @@ async function gateUser(req, env, origin, opts) {
   return { user };
 }
 
+// Bucketet die Rate-Limit-IP. IPv4 → unverändert. IPv6 → /64 (erste 4 Hextets), damit
+// Adressrotation innerhalb einer Endkunden-Allokation die Pro-IP-Limits nicht aushebelt.
+// Eingabe ist die kanonische CF-Connecting-IP (von Cloudflare gesetzt, vertrauenswürdig).
+function rateLimitKey(ip) {
+  if (!ip || !ip.includes(":")) return ip || "0.0.0.0"; // IPv4 oder leer
+  // Kanonische IPv4-mapped Form (::ffff:1.2.3.4) als IPv4 behandeln.
+  const mapped = ip.match(/^::ffff:((?:\d{1,3}\.){3}\d{1,3})$/i);
+  if (mapped) return mapped[1];
+
+  // Ein sonstiger eingebetteter Dotted-Quad (…:a.b.c.d) belegt ZWEI Hextets — abspalten
+  // und in zwei Hex-Gruppen umrechnen, sonst stimmt die Hextet-Zählung beim Expandieren
+  // der "::"-Kompression nicht.
+  let core = ip;
+  let v4Tail = [];
+  const m = ip.match(/^(.*:)((?:\d{1,3}\.){3}\d{1,3})$/);
+  if (m) {
+    core = m[1].slice(0, -1); // ":" am Ende entfernen
+    const o = m[2].split(".").map((n) => Number(n) & 0xff);
+    v4Tail = [((o[0] << 8) | o[1]).toString(16), ((o[2] << 8) | o[3]).toString(16)];
+  }
+
+  // "::" zu 8 Hextets expandieren, dann die ersten 4 (= /64) nehmen.
+  const [head, tail] = core.split("::");
+  const headParts = head ? head.split(":").filter(Boolean) : [];
+  const tailParts = tail !== undefined ? (tail ? tail.split(":").filter(Boolean) : []) : null;
+  let groups;
+  if (tailParts === null) {
+    groups = [...headParts, ...v4Tail]; // keine Kompression
+  } else {
+    const fill = Math.max(0, 8 - headParts.length - tailParts.length - v4Tail.length);
+    groups = [...headParts, ...Array(fill).fill("0"), ...tailParts, ...v4Tail];
+  }
+  // Jedes Hextet kanonisieren (führende Nullen weg), damit 2001:0db8:… und 2001:db8:…
+  // auf denselben /64-Schlüssel fallen. Take /64 = erste 4 Gruppen.
+  const prefix = [0, 1, 2, 3].map((i) => parseInt(groups[i] || "0", 16).toString(16));
+  return "v6/64:" + prefix.join(":");
+}
+
 async function doCall(stub, op, payload) {
   const r = await stub.fetch(`https://do/${op}`, { method: "POST", body: JSON.stringify(payload) });
   return r.json();
@@ -338,7 +401,7 @@ async function readUsageCost(stream) {
 // Dev-Mock: gefälschter SSE-Stream mit gültigem, schema-geformtem JSON je Aktion +
 // synthetischem usage.cost. Erlaubt den Last-Test (Gate ohne echte Kosten) UND einen
 // End-to-End-Test des Clients (rendert echte Mock-Fragen/Bewertung).
-function mockUpstream(env, action) {
+function mockUpstreamResponse(env, action) {
   const cost = Number(env.MOCK_COST || 0.08);
   const payloads = {
     "generate-quiz": {
