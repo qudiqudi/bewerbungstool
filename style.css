@@ -2037,14 +2037,32 @@ button.danger:hover { background: var(--red-soft); border-color: var(--red); }
 }
 
 /* Turnstile-Host: standardmaessig ausgeblendet; app.js blendet es NUR waehrend des
-   Loesens ein (setTurnstileVisible) und danach wieder aus, damit es keine App-Meldung
-   verdeckt. In der Ecke statt mittig, falls doch eine Interaktion verlangt wird. */
+   Loesens ein (.is-visible) und danach wieder aus, damit es keine App-Meldung
+   verdeckt. Stiller Pass (interaction-only, keine Interaktion) bleibt unten in der
+   Ecke und faellt nicht auf. */
 .turnstile-host {
   display: none;
   position: fixed;
   right: 16px;
   bottom: 16px;
   z-index: 1000;
+}
+.turnstile-host.is-visible {
+  display: block;
+}
+/* Echte Challenge (.challenge wird per before-interactive-callback gesetzt):
+   zentriert mit abgedunkeltem Hintergrund, damit sie klar im Fokus ist und der
+   Nutzer sie sofort bestaetigt - statt sie in der Ecke zu uebersehen. Regel steht
+   bewusst nach .is-visible, damit display:flex bei gleicher Spezifitaet gewinnt. */
+.turnstile-host.challenge {
+  display: flex;
+  position: fixed;
+  inset: 0; /* setzt top/right/bottom/left = 0 → Vollbild, hebt die Ecken-Werte auf */
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.55);
 }
 
 /* Aktiver Hintergrund-Job auf der Startliste (Punkt 1: Test wird serverseitig erstellt) */

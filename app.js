@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.6.1";
+const APP_VERSION = "1.6.2";
 
 const CHANGELOG = [
+  {
+    version: "1.6.2",
+    date: "18.06.2026",
+    items: [
+      "Wenn der Bot-Schutz im gehosteten Modus ausnahmsweise eine Bestätigung verlangt, erscheint sie jetzt zentral im Bildschirm (mit abgedunkeltem Hintergrund) statt unten in der Ecke. So übersiehst du sie nicht und der Ablauf stockt nicht. Im Normalfall – ohne nötige Bestätigung – bleibt weiterhin alles unsichtbar.",
+    ],
+  },
   {
     version: "1.6.1",
     date: "18.06.2026",
@@ -1168,9 +1175,16 @@ let _tsPending = null;
 
 // Das Widget nur WÄHREND des Lösens einblenden; danach ausblenden, damit der kurze
 // Challenge-/Erfolgs-Status keine App-Meldung (z. B. die Fehlerkarte) verdeckt.
+// Sichtbarkeit über eine Klasse (nicht inline-style), damit die zentrierte
+// Challenge-Darstellung (.challenge) per CSS gewinnen kann. Beim Ausblenden auch
+// den Challenge-Zustand zuruecksetzen. aria-hidden spiegelt die Sichtbarkeit, damit
+// eine verlangte Interaktion fuer Screenreader erreichbar ist.
 function setTurnstileVisible(v) {
   const el = document.getElementById("turnstile-container");
-  if (el) el.style.display = v ? "block" : "none";
+  if (!el) return;
+  el.classList.toggle("is-visible", v);
+  if (!v) el.classList.remove("challenge");
+  el.setAttribute("aria-hidden", v ? "false" : "true");
 }
 
 // Wartet, bis das (async geladene) Turnstile-Script bereit ist.
@@ -1196,6 +1210,17 @@ function ensureTurnstileWidget() {
       callback: (token) => { if (_tsPending) { const f = _tsPending; _tsPending = null; f(token); } },
       "error-callback": () => { if (_tsPending) { const f = _tsPending; _tsPending = null; f(""); } },
       "timeout-callback": () => { if (_tsPending) { const f = _tsPending; _tsPending = null; f(""); } },
+      // Nur wenn Cloudflare eine echte Interaktion verlangt, die Challenge zentriert
+      // und abgedunkelt in den Fokus holen - sonst bliebe sie unten in der Ecke leicht
+      // uebersehen und der Flow wirkte haengend. Stiller Pass bleibt unsichtbar.
+      "before-interactive-callback": () => {
+        const el = document.getElementById("turnstile-container");
+        if (el) el.classList.add("challenge");
+      },
+      "after-interactive-callback": () => {
+        const el = document.getElementById("turnstile-container");
+        if (el) el.classList.remove("challenge");
+      },
     });
     return _tsWidgetId != null;
   } catch {
