@@ -1231,19 +1231,51 @@ function cleanAuthParamsFromUrl(params) {
   try { history.replaceState(null, "", url); } catch { /* egal */ }
 }
 
-// Nimmt nach Magic-Link/Google-Redirect das Token entgegen: ?session=<tok> direkt,
-// ?auth=<magic> via /auth/magic/verify; ?auth_error=1 als abgebrochene Anmeldung.
+// sessionStorage-Schluessel fuer den OAuth-Verifier (PKCE-artige Browser-Bindung).
+const OAUTH_VERIFIER_KEY = "bewerbungstool.oauthVerifier";
+
+// SHA-256 als Hex (fuer den Verifier-Hash). crypto.subtle ist auf https/localhost da.
+async function sha256hex(str) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function randomVerifier() {
+  const a = new Uint8Array(32);
+  crypto.getRandomValues(a);
+  return btoa(String.fromCharCode(...a)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// Nimmt nach Magic-Link/Google-Redirect das Token entgegen: ?code=<handoff> (Google) wird
+// per /auth/exchange MIT dem in sessionStorage gehaltenen Verifier gegen die Session
+// getauscht (kein durables Token in der URL, Browser-gebunden); ?auth=<magic> via
+// /auth/magic/verify; ?auth_error=1 als abgebrochene Anmeldung.
 // Gibt true zurueck, wenn ein Anmeldeversuch verarbeitet wurde.
 async function consumeAuthRedirect() {
   let params;
   try { params = new URLSearchParams(location.search); } catch { return false; }
-  const sess = params.get("session");
+  const code = params.get("code");
   const magic = params.get("auth");
   const err = params.get("auth_error");
-  if (!sess && !magic && !err) return false;
+  if (!code && !magic && !err) return false;
   cleanAuthParamsFromUrl(params);
   if (err) { _authRedirectMsg = "Die Anmeldung wurde abgebrochen."; return true; }
-  if (sess) { setAuthToken(sess); _authRedirectMsg = "Erfolgreich angemeldet."; return true; }
+  if (code) {
+    let verifier = "";
+    try { verifier = sessionStorage.getItem(OAUTH_VERIFIER_KEY) || ""; } catch { /* egal */ }
+    try { sessionStorage.removeItem(OAUTH_VERIFIER_KEY); } catch { /* egal */ }
+    if (!verifier) { _authRedirectMsg = "Anmeldung in diesem Browser nicht erkannt. Bitte erneut anmelden."; return true; }
+    try {
+      const r = await fetch(hostedBase() + "/auth/exchange", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, verifier }),
+      });
+      if (r.ok) { const d = await r.json(); setAuthToken(d.token); _authRedirectMsg = "Erfolgreich angemeldet."; }
+      else _authRedirectMsg = "Die Anmeldung ist fehlgeschlagen oder abgelaufen. Bitte erneut versuchen.";
+    } catch { _authRedirectMsg = "Anmeldung fehlgeschlagen. Bitte erneut versuchen."; }
+    return true;
+  }
   try {
     const r = await fetch(hostedBase() + "/auth/magic/verify", {
       method: "POST",
@@ -5784,7 +5816,12 @@ $("btn-login-google").addEventListener("click", async () => {
   btn.disabled = true;
   $("login-msg").textContent = "Weiterleitung zu Google...";
   try {
-    const r = await fetch(hostedBase() + "/auth/google/start", { headers: { Accept: "application/json" } });
+    // PKCE-artige Browser-Bindung: Verifier in sessionStorage, nur dessen Hash an den
+    // Server. Nach dem Google-Redirect tauscht /auth/exchange den Code MIT dem Verifier.
+    const verifier = randomVerifier();
+    try { sessionStorage.setItem(OAUTH_VERIFIER_KEY, verifier); } catch { /* egal */ }
+    const vh = await sha256hex(verifier);
+    const r = await fetch(hostedBase() + "/auth/google/start?vh=" + encodeURIComponent(vh), { headers: { Accept: "application/json" } });
     if (r.ok) {
       const d = await r.json();
       if (d.url) { window.location.href = d.url; return; }

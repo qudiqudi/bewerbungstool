@@ -179,24 +179,29 @@ async function magicVerify(req, env, origin) {
   return json({ token, user: { email: user.email, created_at: user.created_at } }, 200, env, origin);
 }
 
-function googleStart(req, env, origin) {
+async function googleStart(req, env, origin) {
   if (!env.GOOGLE_CLIENT_ID) return json({ error: "oauth-unconfigured" }, 503, env, origin);
+  // PKCE-artige Browser-Bindung: der Client haelt einen Verifier in sessionStorage und
+  // schickt hier nur dessen Hash. Der spaetere /auth/exchange verlangt den Verifier zurueck;
+  // so kann ein per Login-CSRF untergeschobener Callback von einem fremden Browser nicht
+  // eingeloest werden (Codex-Review R3).
+  const vh = new URL(req.url).searchParams.get("vh") || "";
+  if (!/^[0-9a-f]{64}$/.test(vh)) return json({ error: "bad-verifier" }, 400, env, origin);
   const state = randomToken(24);
   const redirectUri = new URL(req.url).origin + "/auth/google/callback";
   // state-Insert vor dem Redirect (CSRF). waitUntil reicht nicht – muss persistiert sein.
-  return env.DB.prepare(
-    "INSERT INTO oauth_states (state, created_at, expires_at) VALUES (?, ?, ?)"
-  ).bind(state, now(), now() + STATE_TTL).run().then(() => {
-    const u = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-    u.searchParams.set("client_id", env.GOOGLE_CLIENT_ID);
-    u.searchParams.set("redirect_uri", redirectUri);
-    u.searchParams.set("response_type", "code");
-    u.searchParams.set("scope", "openid email");
-    u.searchParams.set("state", state);
-    u.searchParams.set("access_type", "online");
-    u.searchParams.set("prompt", "select_account");
-    return json({ url: u.toString() }, 200, env, origin);
-  });
+  await env.DB.prepare(
+    "INSERT INTO oauth_states (state, created_at, expires_at, verifier_hash) VALUES (?, ?, ?, ?)"
+  ).bind(state, now(), now() + STATE_TTL, vh).run();
+  const u = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  u.searchParams.set("client_id", env.GOOGLE_CLIENT_ID);
+  u.searchParams.set("redirect_uri", redirectUri);
+  u.searchParams.set("response_type", "code");
+  u.searchParams.set("scope", "openid email");
+  u.searchParams.set("state", state);
+  u.searchParams.set("access_type", "online");
+  u.searchParams.set("prompt", "select_account");
+  return json({ url: u.toString() }, 200, env, origin);
 }
 
 async function googleCallback(req, env, origin) {
@@ -207,10 +212,10 @@ async function googleCallback(req, env, origin) {
   const fail = () => redirect(`${appOrigin}/?auth_error=1`, env, origin);
   if (!code || !state) return fail();
 
-  // state einmalig prüfen + verbrauchen.
-  const st = await env.DB.prepare("SELECT expires_at FROM oauth_states WHERE state = ?").bind(state).first();
+  // state einmalig prüfen + verbrauchen; den gebundenen Verifier-Hash uebernehmen.
+  const st = await env.DB.prepare("SELECT expires_at, verifier_hash FROM oauth_states WHERE state = ?").bind(state).first();
   await env.DB.prepare("DELETE FROM oauth_states WHERE state = ?").bind(state).run();
-  if (!st || st.expires_at <= now()) return fail();
+  if (!st || st.expires_at <= now() || !st.verifier_hash) return fail();
 
   if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) return fail();
   const redirectUri = url.origin + "/auth/google/callback";
@@ -235,11 +240,44 @@ async function googleCallback(req, env, origin) {
 
     const user = await upsertUser(env, email);
     await ensureIdentity(env, user.id, "google", String(info.sub));
-    const token = await createSession(env, user.id);
-    return redirect(`${appOrigin}/?session=${token}`, env, origin);
+    // KEIN durables Session-Token in die URL (Codex-Review R3): stattdessen einen
+    // kurzlebigen Einmal-Code, an den Verifier-Hash gebunden. Die SPA tauscht ihn per
+    // POST /auth/exchange (mit dem Verifier) gegen die Session.
+    const handoff = randomToken();
+    await env.DB.prepare(
+      "INSERT INTO handoff_codes (code_hash, user_id, verifier_hash, created_at, expires_at, consumed) VALUES (?, ?, ?, ?, ?, 0)"
+    ).bind(await sha256hex(handoff), user.id, st.verifier_hash, now(), now() + 120).run();
+    return redirect(`${appOrigin}/?code=${handoff}`, env, origin);
   } catch {
     return fail();
   }
+}
+
+// Tauscht den kurzlebigen Handoff-Code (aus dem Google-Redirect) gegen ein Session-Token.
+// Verlangt den Verifier zurueck (Browser-Bindung): nur der Browser, der den Login gestartet
+// hat, kann einloesen. Einmalig + kurzlebig.
+async function exchange(req, env, origin) {
+  let body;
+  try { body = await req.json(); } catch { return json({ error: "bad-json" }, 400, env, origin); }
+  const rawCode = body && typeof body.code === "string" ? body.code : "";
+  const verifier = body && typeof body.verifier === "string" ? body.verifier : "";
+  if (!rawCode || !verifier) return json({ error: "invalid" }, 400, env, origin);
+  const codeHash = await sha256hex(rawCode);
+  const row = await env.DB.prepare(
+    "SELECT user_id, verifier_hash, expires_at, consumed FROM handoff_codes WHERE code_hash = ?"
+  ).bind(codeHash).first();
+  if (!row || row.consumed || row.expires_at <= now()) return json({ error: "invalid" }, 400, env, origin);
+  // Verifier-Bindung pruefen: sha256(verifier) muss zum gespeicherten Hash passen.
+  if ((await sha256hex(verifier)) !== row.verifier_hash) return json({ error: "invalid" }, 400, env, origin);
+  // Einmalig: atomar als verbraucht markieren.
+  const upd = await env.DB.prepare(
+    "UPDATE handoff_codes SET consumed = 1 WHERE code_hash = ? AND consumed = 0"
+  ).bind(codeHash).run();
+  if (!upd.meta || upd.meta.changes !== 1) return json({ error: "invalid" }, 400, env, origin);
+  const u = await env.DB.prepare("SELECT id, email, created_at FROM users WHERE id = ?").bind(row.user_id).first();
+  if (!u) return json({ error: "invalid" }, 400, env, origin);
+  const token = await createSession(env, u.id);
+  return json({ token, user: { email: u.email, created_at: u.created_at } }, 200, env, origin);
 }
 
 async function me(req, env, origin) {
@@ -268,6 +306,7 @@ export async function handleAuth(req, env, ctx, path, origin) {
   if (path === "/auth/magic/verify" && m === "POST") return magicVerify(req, env, origin);
   if (path === "/auth/google/start" && m === "GET") return googleStart(req, env, origin);
   if (path === "/auth/google/callback" && m === "GET") return googleCallback(req, env, origin);
+  if (path === "/auth/exchange" && m === "POST") return exchange(req, env, origin);
   if (path === "/auth/me" && m === "GET") return me(req, env, origin);
   if (path === "/auth/logout" && m === "POST") return logout(req, env, origin);
   return json({ error: "not-found" }, 404, env, origin);
