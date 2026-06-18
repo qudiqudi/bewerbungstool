@@ -57,7 +57,14 @@ export class GenerationJobDO {
       // bekommt und nicht selbst spekulativ raeumen muss.
       if (status === "pending") {
         const createdAt = (await this.state.storage.get("createdAt")) || 0;
-        if (Date.now() - createdAt > JOB_TIMEOUT_MS) {
+        const alarmStartedAt = (await this.state.storage.get("alarmStartedAt")) || 0;
+        // Nur timeouten, wenn KEIN Generierungs-Versuch mehr laufen kann: entweder hat
+        // der Alarm nie begonnen (Zustellung ausgeblieben) ODER ein begonnener Versuch
+        // liegt sicher jenseits seines Eigen-Timeouts (haengende/abgestuerzte Invocation).
+        // So kann der Status-Timeout niemals einen noch laufenden Alarm wegraeumen und
+        // dessen echtes Settle verlieren (Codex-Review R3, Race).
+        const attemptDead = !alarmStartedAt || (Date.now() - alarmStartedAt > GEN_TIMEOUT_MS + 60 * 1000);
+        if (Date.now() - createdAt > JOB_TIMEOUT_MS && attemptDead) {
           const reserveId = await this.state.storage.get("reserveId");
           await this.finish("error", null, "timeout", reserveId, null);
           return jsonResponse({ status: "error", errorCode: "timeout" });
@@ -82,12 +89,20 @@ export class GenerationJobDO {
     const reserveAmount = await this.state.storage.get("reserveAmount");
     const hardCap = Number(this.env.HARD_CAP_TOKENS || 24000);
 
+    // Beginn des Versuchs markieren → der Status-Timeout weiss, dass gerade ein Lauf
+    // aktiv ist und raeumt ihn nicht weg (s. status-Handler).
+    await this.state.storage.put("alarmStartedAt", Date.now());
+
     let result = null;
     let errorCode = null;
     let cost = null;
     // Wurde eine 200-Antwort (potenziell kostenpflichtig) erreicht? Dann darf ein
     // anschliessender Lese-/Parse-Fehler die Reserve NICHT freigeben, sonst liesse sich
     // ueber wiederholte degradierte 200-Antworten das Budget umgehen (Codex-Review R2).
+    // charged = ein potenziell kostenpflichtiger Upstream-Call wurde ABGESCHICKT. Wird
+    // VOR dem await gesetzt: ein Abbruch/Netzfehler nach dem Absenden (AbortSignal-
+    // Timeout, Verbindungsabbruch) kann bereits Kosten verursacht haben → dann nie
+    // freigeben, sondern konservativ den Worst-Case settlen (Codex-Review R3).
     let charged = false;
     try {
       if (this.env.MOCK_UPSTREAM === "1") {
@@ -112,6 +127,7 @@ export class GenerationJobDO {
           ? { response_format: { type: "json_schema", json_schema: { name: "ergebnis", strict: true, schema: QUESTIONS_SCHEMA } } }
           : {}),
       };
+      charged = true; // Call wird jetzt abgeschickt — ab hier Kosten moeglich.
       const res = await fetch(OPENROUTER_URL, {
         method: "POST",
         headers: {
@@ -121,15 +137,15 @@ export class GenerationJobDO {
           "X-Title": "jobreif",
         },
         body: JSON.stringify(body),
-        // Haengenden Upstream selbst abbrechen (vor dem Alarm-Wall-Limit). Bricht VOR
-        // einer Antwort ab → keine Kosten → Reserve wird freigegeben.
+        // Haengenden Upstream selbst abbrechen (vor dem Alarm-Wall-Limit). Ein Abbruch
+        // NACH dem Absenden gilt als kostenunbekannt (charged bleibt true).
         signal: AbortSignal.timeout(GEN_TIMEOUT_MS),
       });
       if (!res.ok) {
+        // HTTP-Fehlerantwort von OpenRouter → nicht abgerechnet, Reserve freigeben.
+        charged = false;
         errorCode = "upstream";
       } else {
-        // Ab hier ist eine (kostenpflichtige) Antwort erreicht.
-        charged = true;
         const json = await res.json();
         cost = typeof json.usage?.cost === "number" ? json.usage.cost : null;
         result = parseLoose(json.choices?.[0]?.message?.content ?? "");
@@ -157,10 +173,16 @@ export class GenerationJobDO {
   // (settle auf Ist/Estimate ODER release ODER — bei charged-ohne-Kosten — stehen
   // lassen), sensiblen Input (jobText) + interne Felder sofort loeschen und einen
   // Raeum-Alarm setzen, der das Ergebnis nach der TTL entfernt.
+  //
+  // Idempotent per Compare-and-Set auf "pending": kommen Alarm-Abschluss und Status-
+  // Timeout knapp nacheinander, gewinnt der erste; der zweite ist ein No-op und kann
+  // weder doppelt settlen/releasen noch den Terminalzustand ueberschreiben
+  // (Codex-Review R3). DO-Handler laufen serialisiert, daher ist get→put hier atomar.
   async finish(status, result, errorCode, reserveId, cost, leaveReserve = false) {
+    if ((await this.state.storage.get("status")) !== "pending") return;
     await this.state.storage.put({ status, result: result || null, errorCode: errorCode || null });
     if (!leaveReserve) await settleBudget(this.env, reserveId, cost);
-    await this.state.storage.delete(["params", "tier", "reserveId", "reserveAmount"]);
+    await this.state.storage.delete(["params", "tier", "reserveId", "reserveAmount", "alarmStartedAt"]);
     await this.state.storage.setAlarm(Date.now() + RESULT_TTL_MS);
   }
 }
