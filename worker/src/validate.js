@@ -17,6 +17,9 @@ export function validateQuiz(data) {
       (!Number.isInteger(data.numQuestions) || data.numQuestions < 1 || data.numQuestions > MAX_QUESTIONS))
     return "numQuestions";
   if (data.difficulty != null && !DIFFICULTIES.includes(data.difficulty)) return "difficulty";
+  // kernpunkte ist KEIN Inbound-Parameter: das Feld gehoert zum Modell-Output-
+  // Schema (QUESTIONS_SCHEMA in prompts.js), nicht zur Client-Eingabe. Der Client
+  // schickt es nie als Parameter, daher hier bewusst keine Pruefung/Aenderung.
   if (data.vertiefung != null) {
     const v = data.vertiefung;
     if (typeof v !== "object") return "vertiefung";

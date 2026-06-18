@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.8.3";
+const APP_VERSION = "1.8.4";
 
 const CHANGELOG = [
+  {
+    version: "1.8.4",
+    date: "18.06.2026",
+    items: [
+      "Stellenseite: Die wichtigsten Kernpunkte einer Anzeige – Aufgaben, Anforderungen und Besonderheiten – erscheinen jetzt als übersichtliche Karten oben auf der Stelle. Sie werden beim Erstellen eines Tests automatisch aus der Anzeige gelesen (ohne Zusatzkosten) und sind als Anhaltspunkt gedacht – im Zweifel die Originalanzeige prüfen. Ältere Stellen bekommen die Übersicht beim nächsten Test.",
+    ],
+  },
   {
     version: "1.8.3",
     date: "18.06.2026",
@@ -844,8 +851,52 @@ const QUESTIONS_SCHEMA = {
         additionalProperties: false,
       },
     },
+    kernpunkte: {
+      type: "object",
+      description:
+        "Die wichtigsten Kernpunkte der Stelle, ausschliesslich aus dem Anzeigentext " +
+        "extrahiert. Nichts erfinden: was nicht im Text steht, bleibt leerer String " +
+        "bzw. leeres Array.",
+      properties: {
+        aufgaben: {
+          type: "array",
+          items: { type: "string" },
+          description: "Wichtigste Aufgaben/Taetigkeiten, je ein knapper Punkt; leer wenn nicht genannt",
+        },
+        anforderungen_muss: {
+          type: "array",
+          items: { type: "string" },
+          description: "Zwingende Anforderungen / Muss-Skills; leer wenn nicht genannt",
+        },
+        anforderungen_optional: {
+          type: "array",
+          items: { type: "string" },
+          description: "Nice-to-have / wuenschenswerte Anforderungen; leer wenn nicht genannt",
+        },
+        arbeitsmodell: {
+          type: "string",
+          description: "Arbeitszeit/Modell (Vollzeit/Teilzeit, Schicht, Remote/Hybrid, Befristung); leerer String wenn nicht genannt",
+        },
+        gehalt: {
+          type: "string",
+          description: "Gehalt/Verguetung wortgetreu wie genannt (Spanne, Tarif); leerer String wenn nicht genannt",
+        },
+        benefits: {
+          type: "array",
+          items: { type: "string" },
+          description: "Benefits/Zusatzleistungen; leer wenn nicht genannt",
+        },
+        besonderheiten: {
+          type: "array",
+          items: { type: "string" },
+          description: "Sonstige relevante Besonderheiten der Stelle; leer wenn nicht genannt",
+        },
+      },
+      required: ["aufgaben", "anforderungen_muss", "anforderungen_optional", "arbeitsmodell", "gehalt", "benefits", "besonderheiten"],
+      additionalProperties: false,
+    },
   },
-  required: ["titel", "arbeitgeber", "arbeitsort", "empfohlene_zeit_minuten", "fragen"],
+  required: ["titel", "arbeitgeber", "arbeitsort", "empfohlene_zeit_minuten", "fragen", "kernpunkte"],
   additionalProperties: false,
 };
 
@@ -862,6 +913,11 @@ const QUESTIONS_SCHEMA_LOCAL = (() => {
   delete item.properties.lerninfo;
   delete item.properties.quellen;
   item.required = item.required.filter((k) => k !== "lerninfo" && k !== "quellen");
+  // Kernpunkte fuer lokale Modelle ganz entfernen: lokale Modelle halluzinieren
+  // gern und sollen pro Block moeglichst wenig erzeugen. Aus properties UND
+  // required strippen, sonst gibt der strikte lokale Pfad (strict: true) HTTP 400.
+  delete s.properties.kernpunkte;
+  s.required = s.required.filter((k) => k !== "kernpunkte");
   return s;
 })();
 
@@ -930,6 +986,36 @@ const EVAL_SCHEMA = {
 // weglassen oder den Typ verfehlen. Diese Helfer machen die Antwort robust
 // nutzbar (harmlose Luecken auffuellen) und werfen nur, wenn das Ergebnis
 // grundsaetzlich unbrauchbar ist.
+
+// Kernpunkte der Stelle defensiv aufbereiten. Gibt null zurueck, wenn keine
+// Kategorie befuellt ist (nicht-extrahierende Provider/lokal sollen keinen
+// leeren Block speichern). Tolerant gegen Fehlen und Teilbefuellung.
+function normalizeKernpunkte(k) {
+  if (!k || typeof k !== "object") return null;
+  const strArr = (v) =>
+    (Array.isArray(v)
+      ? v.map((x) => (typeof x === "string" ? x.trim() : "")).filter(Boolean)
+      : []);
+  const str = (v) => (typeof v === "string" ? v.trim() : "");
+  const out = {
+    aufgaben: strArr(k.aufgaben),
+    anforderungen_muss: strArr(k.anforderungen_muss),
+    anforderungen_optional: strArr(k.anforderungen_optional),
+    arbeitsmodell: str(k.arbeitsmodell),
+    gehalt: str(k.gehalt),
+    benefits: strArr(k.benefits),
+    besonderheiten: strArr(k.besonderheiten),
+  };
+  const hasAny =
+    out.aufgaben.length ||
+    out.anforderungen_muss.length ||
+    out.anforderungen_optional.length ||
+    out.arbeitsmodell ||
+    out.gehalt ||
+    out.benefits.length ||
+    out.besonderheiten.length;
+  return hasAny ? out : null;
+}
 
 function normalizeQuizData(result) {
   if (!result || typeof result !== "object" || !Array.isArray(result.fragen)) {
@@ -1062,12 +1148,15 @@ function normalizeQuizData(result) {
     throw new Error("Die Modellantwort enthielt keine verwertbaren Fragen.");
   }
   const zeit = Math.round(Number(result.empfohlene_zeit_minuten));
+  const kp = normalizeKernpunkte(result.kernpunkte);
   return {
     titel: typeof result.titel === "string" && result.titel.trim() ? result.titel.trim() : "Einstellungstest",
     arbeitgeber: typeof result.arbeitgeber === "string" ? result.arbeitgeber.trim() : "",
     arbeitsort: typeof result.arbeitsort === "string" ? result.arbeitsort.trim() : "",
     empfohlene_zeit_minuten: Number.isFinite(zeit) && zeit > 0 ? zeit : 0,
     fragen,
+    // Nur setzen, wenn wirklich etwas extrahiert wurde (sonst Feld weglassen).
+    ...(kp ? { kernpunkte: kp } : {}),
   };
 }
 
@@ -2561,7 +2650,11 @@ async function generateQuiz(opts = {}) {
         "Nenne nur real existierende Quellen (Gesetze, Normen, Standardwerke, offizielle Dokumentation, etablierte Fachseiten). " +
         "Gib die URL einer Quelle nur an, wenn du dir sicher bist, dass sie existiert - bevorzugt Startseiten oder bekannte, " +
         "stabile Adressen, keine tief verschachtelten Links. Sonst lasse die URL leer und waehle einen praegnanten Titel, " +
-        "der sich gut als Suchbegriff eignet. ";
+        "der sich gut als Suchbegriff eignet. " +
+        "Extrahiere zusätzlich die wichtigsten Kernpunkte der Stelle (Aufgaben, zwingende und optionale Anforderungen, " +
+        "Arbeitsmodell, Gehalt, Benefits, Besonderheiten) ausschliesslich aus dem Anzeigentext. Erfinde nichts und leite " +
+        "nichts her - was nicht ausdrücklich im Text steht, lässt du leer (leerer String bzw. leeres Array). Formuliere " +
+        "jeden Punkt knapp; Gehalt möglichst wortgetreu. ";
 
     // Vertiefungen tragen Tiefe ueber offene Fragen besser als ueber MC, und die
     // Distraktoren muessen anspruchsvoll sein. Normale Tests behalten exakt die
@@ -4902,6 +4995,15 @@ function saveAttempt(result, durationMs, evalCost, evalTokens) {
     // dann auf den Titel allein zurueck. Leere Werte ueberschreiben nichts.
     if (typeof quiz.arbeitgeber === "string" && quiz.arbeitgeber.trim()) job.arbeitgeber = quiz.arbeitgeber.trim();
     if (typeof quiz.arbeitsort === "string" && quiz.arbeitsort.trim()) job.arbeitsort = quiz.arbeitsort.trim();
+    // Kernpunkte der Stelle am Job auffrischen, sobald welche extrahiert wurden.
+    // Nur bei normalen Tests (kein Vertiefungsbogen, dessen Quiz Teilthemen verengt)
+    // und nur, wenn quiz.kernpunkte befuellt ist (normalizeQuizData setzt das Feld
+    // nur dann). Ein spaeterer Test ohne Extraktion (lokal) darf bestehende
+    // Kernpunkte NICHT loeschen - der Guard laesst sie unberuehrt. Versionswrapper
+    // wie bei themenfelder, erleichtert spaetere Migrationen.
+    if (quiz.kernpunkte && typeof quiz.kernpunkte === "object") {
+      job.kernpunkte = { v: 1, generatedAt: Date.now(), data: quiz.kernpunkte };
+    }
   }
   // identityKey aus den aktuellen Feldern der Stelle ableiten (nicht aus dem
   // einzelnen Versuch), damit er zur Stelle passt und ältere, vor diesem Feld
@@ -4948,6 +5050,7 @@ function saveAttempt(result, durationMs, evalCost, evalTokens) {
   delete quizCopy.urlKey;  // liegt am Job
   delete quizCopy.jobUrl;  // liegt am Job
   delete quizCopy.vertiefungFelder; // liegt als attempt.vertiefung am Versuch
+  delete quizCopy.kernpunkte; // liegt am Job (job.kernpunkte), nicht doppelt je Versuch
 
   const attempt = {
     date: Date.now(),
@@ -5313,6 +5416,81 @@ function buildNumStepper(initial, onChange, opts = {}) {
   return wrap;
 }
 
+// Kernpunkte-Panel der Stellenseite: scanbare Karten mit den wichtigsten Punkten
+// der Anzeige (Aufgaben, Anforderungen, Arbeitsmodell, Gehalt, Benefits,
+// Besonderheiten). Defensiv: fehlen die Daten (alte Stellen, lokale Tests),
+// gibt die Funktion null zurueck und renderJob haengt nichts ein. Modell-Output
+// wird ausschliesslich ueber textContent gesetzt (kein innerHTML).
+const KERNPUNKTE_LIST_MAX = 8; // sehr lange Listen kappen (geschwaetzige Modelle)
+function buildKernpunktePanel(job) {
+  const kp = job && job.kernpunkte && job.kernpunkte.data ? job.kernpunkte.data : null;
+  if (!kp) return null;
+  const sections = [
+    { key: "aufgaben", label: "Aufgaben", type: "list" },
+    { key: "anforderungen_muss", label: "Muss-Anforderungen", type: "list" },
+    { key: "anforderungen_optional", label: "Nice-to-have", type: "list" },
+    { key: "arbeitsmodell", label: "Arbeitsmodell", type: "text" },
+    { key: "gehalt", label: "Gehalt", type: "text" },
+    { key: "benefits", label: "Benefits", type: "chips" },
+    { key: "besonderheiten", label: "Besonderheiten", type: "list" },
+  ];
+  const present = sections.filter((s) => {
+    const v = kp[s.key];
+    return s.type === "text"
+      ? (typeof v === "string" && v.trim())
+      : (Array.isArray(v) && v.length);
+  });
+  if (!present.length) return null;
+
+  const panel = document.createElement("div");
+  panel.className = "kernpunkte-panel";
+  const heading = document.createElement("h3");
+  heading.textContent = "Das Wichtigste auf einen Blick";
+  panel.appendChild(heading);
+
+  const grid = document.createElement("div");
+  grid.className = "kernpunkte-grid";
+
+  present.forEach((s) => {
+    const card = document.createElement("div");
+    card.className = "kernpunkte-card";
+    const title = document.createElement("div");
+    title.className = "kernpunkte-card-title";
+    title.textContent = s.label;
+    card.appendChild(title);
+
+    if (s.type === "text") {
+      const p = document.createElement("p");
+      p.className = "kernpunkte-text";
+      p.textContent = String(kp[s.key]).trim();
+      card.appendChild(p);
+    } else if (s.type === "chips") {
+      const chips = document.createElement("div");
+      chips.className = "kernpunkte-chips";
+      kp[s.key].slice(0, KERNPUNKTE_LIST_MAX).forEach((item) => {
+        const chip = document.createElement("span");
+        chip.className = "kp-chip";
+        chip.textContent = String(item);
+        chips.appendChild(chip);
+      });
+      card.appendChild(chips);
+    } else {
+      const ul = document.createElement("ul");
+      ul.className = "kernpunkte-list";
+      kp[s.key].slice(0, KERNPUNKTE_LIST_MAX).forEach((item) => {
+        const li = document.createElement("li");
+        li.textContent = String(item);
+        ul.appendChild(li);
+      });
+      card.appendChild(ul);
+    }
+    grid.appendChild(card);
+  });
+
+  panel.appendChild(grid);
+  return panel;
+}
+
 // Start-Panel der Subpage: Schwierigkeit und Fragenzahl stehen direkt sichtbar
 // ueber zwei Startknoepfen (Lern-/Pruefungsmodus) - kein aufklappbarer Bereich
 // mehr. Generiert wird erst beim ausdruecklichen Klick auf einen Startknopf,
@@ -5611,6 +5789,12 @@ function renderJob(job) {
   // Start-Panel direkt unter den Kopf (vor den Trend) setzen, damit der Titel
   // zuerst kommt und die Startknoepfe gleich darunter sichtbar sind.
   block.insertBefore(buildStartPanel(job), block.children[1] || null);
+  // Kernpunkte-Panel direkt unter das Start-Panel (vor den Trend), wenn die
+  // Stelle welche traegt. Reihenfolge: Titel -> Startknoepfe -> Kernpunkte ->
+  // Fortschritt/Verlauf. Alte Stellen ohne kernpunkte liefern null -> nichts
+  // eingehaengt, Screen wie bisher.
+  const kpPanel = buildKernpunktePanel(job);
+  if (kpPanel) block.insertBefore(kpPanel, block.children[2] || null);
   const wrap = $("job-detail");
   wrap.innerHTML = "";
   wrap.appendChild(block);
@@ -6273,6 +6457,10 @@ function importData(text) {
       if (impJob.arbeitgeber && !existing.arbeitgeber) existing.arbeitgeber = impJob.arbeitgeber;
       if (impJob.arbeitsort && !existing.arbeitsort) existing.arbeitsort = impJob.arbeitsort;
       if (impIKey && !existing.identityKey) existing.identityKey = impIKey;
+      // Kernpunkte aus dem Import additiv nachtragen, falls lokal noch keine
+      // vorhanden sind (analog Arbeitgeber/Ort). Beim Neuanlegen oben uebernimmt
+      // der Spread sie ohnehin.
+      if (impJob.kernpunkte && !existing.kernpunkte) existing.kernpunkte = impJob.kernpunkte;
       // Vertiefungs-Themenfelder aus dem Import uebernehmen: fehlt lokal eins
       // oder ist das importierte neuer (generatedAt), das importierte behalten -
       // sonst geht eine schon bezahlte Ableitung beim Restore/Sync verloren.

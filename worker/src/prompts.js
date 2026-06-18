@@ -62,8 +62,52 @@ export const QUESTIONS_SCHEMA = {
         additionalProperties: false,
       },
     },
+    kernpunkte: {
+      type: "object",
+      description:
+        "Die wichtigsten Kernpunkte der Stelle, ausschliesslich aus dem Anzeigentext " +
+        "extrahiert. Nichts erfinden: was nicht im Text steht, bleibt leerer String " +
+        "bzw. leeres Array.",
+      properties: {
+        aufgaben: {
+          type: "array",
+          items: { type: "string" },
+          description: "Wichtigste Aufgaben/Taetigkeiten, je ein knapper Punkt; leer wenn nicht genannt",
+        },
+        anforderungen_muss: {
+          type: "array",
+          items: { type: "string" },
+          description: "Zwingende Anforderungen / Muss-Skills; leer wenn nicht genannt",
+        },
+        anforderungen_optional: {
+          type: "array",
+          items: { type: "string" },
+          description: "Nice-to-have / wuenschenswerte Anforderungen; leer wenn nicht genannt",
+        },
+        arbeitsmodell: {
+          type: "string",
+          description: "Arbeitszeit/Modell (Vollzeit/Teilzeit, Schicht, Remote/Hybrid, Befristung); leerer String wenn nicht genannt",
+        },
+        gehalt: {
+          type: "string",
+          description: "Gehalt/Verguetung wortgetreu wie genannt (Spanne, Tarif); leerer String wenn nicht genannt",
+        },
+        benefits: {
+          type: "array",
+          items: { type: "string" },
+          description: "Benefits/Zusatzleistungen; leer wenn nicht genannt",
+        },
+        besonderheiten: {
+          type: "array",
+          items: { type: "string" },
+          description: "Sonstige relevante Besonderheiten der Stelle; leer wenn nicht genannt",
+        },
+      },
+      required: ["aufgaben", "anforderungen_muss", "anforderungen_optional", "arbeitsmodell", "gehalt", "benefits", "besonderheiten"],
+      additionalProperties: false,
+    },
   },
-  required: ["titel", "arbeitgeber", "arbeitsort", "empfohlene_zeit_minuten", "fragen"],
+  required: ["titel", "arbeitgeber", "arbeitsort", "empfohlene_zeit_minuten", "fragen", "kernpunkte"],
   additionalProperties: false,
 };
 
@@ -144,7 +188,11 @@ export function buildQuizMessages({ jobText, numQuestions, difficulty, vertiefun
     "Nenne nur real existierende Quellen (Gesetze, Normen, Standardwerke, offizielle Dokumentation, etablierte Fachseiten). " +
     "Gib die URL einer Quelle nur an, wenn du dir sicher bist, dass sie existiert - bevorzugt Startseiten oder bekannte, " +
     "stabile Adressen, keine tief verschachtelten Links. Sonst lasse die URL leer und waehle einen praegnanten Titel, " +
-    "der sich gut als Suchbegriff eignet. ";
+    "der sich gut als Suchbegriff eignet. " +
+    "Extrahiere zusätzlich die wichtigsten Kernpunkte der Stelle (Aufgaben, zwingende und optionale Anforderungen, " +
+    "Arbeitsmodell, Gehalt, Benefits, Besonderheiten) ausschliesslich aus dem Anzeigentext. Erfinde nichts und leite " +
+    "nichts her - was nicht ausdrücklich im Text steht, lässt du leer (leerer String bzw. leeres Array). Formuliere " +
+    "jeden Punkt knapp; Gehalt möglichst wortgetreu. ";
 
   // Hosted nutzt starke Cloud-Modelle -> Reihenfolge-Aufgaben werden hier (anders
   // als im App-local-Pfad) NICHT unterdrueckt.
