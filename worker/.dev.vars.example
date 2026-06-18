@@ -1,0 +1,10 @@
+# Kopieren nach .dev.vars (gitignored) für `wrangler dev`.
+# Für den Last-Test reichen die Dev-Flags — Secrets werden im Mock-/Skip-Modus nicht gelesen.
+
+MOCK_UPSTREAM=1
+SKIP_TURNSTILE=1
+MOCK_COST=0.08
+
+# Für einen echten lokalen Lauf (OHNE Mock) stattdessen:
+# OPENROUTER_KEY=sk-or-...
+# TURNSTILE_SECRET=1x0000000000000000000000000000000AA   # Cloudflare-Testsecret (immer ok)

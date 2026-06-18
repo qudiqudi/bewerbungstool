@@ -4,8 +4,18 @@ Das Tool ist öffentlich auf GitHub Pages deployt und hat aktive Nutzer. Ab jetz
 
 ## Gespeicherte Nutzerdaten (localStorage) sind Produktivdaten
 
-- `bewerbungstool.settings`: { provider, apiKey, model }
+- `bewerbungstool.settings`: { provider, apiKey, model, tier }
 - `bewerbungstool.history`: { jobs: [{ key, titel, jobText, attempts: [...] }] }
+
+Seit 1.1.0 ist `provider: "hosted"` der Default: das Tool läuft über einen eigenen
+Cloudflare Worker (`worker/`, app-spezifische Endpoints zu OpenRouter, Budget-Gate,
+Turnstile) und braucht keinen Nutzer-Key. BYOK (anthropic/openai/deepseek) und `local`
+bleiben als Fallback erhalten (in den Einstellungen unter „Anbieter"), also KEIN Bruch
+der keine-Breaking-Changes-Regel. `tier` ist die im Hosted-Modus gewählte Qualitätsstufe
+(standard/guenstig; „beste"/Opus hinter der Paywall). Alte Keys nie löschen — sie sind
+die Credentials des BYOK-Fallbacks. Prompt-Logik wird doppelt gepflegt: Client (BYOK) in
+`app.js`, Server (Hosted) in `worker/src/prompts.js` — bei Prompt-Änderungen beide Seiten
+nachziehen und den Golden-Set-Test (`worker/test/golden-set.mjs`) laufen lassen.
 
 Regeln:
 - Formate nur abwärtskompatibel erweitern: neue Felder optional, nie bestehende Felder umbenennen oder entfernen, nie die Storage-Keys ändern.

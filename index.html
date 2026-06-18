@@ -10,7 +10,7 @@
        localhost-Eintraege erlauben den lokalen Anbieter (Ollama :11434, LM Studio
        :1234 oder eine eigene Adresse). Neue externe Hosts muessen hier ergaenzt
        werden, sonst blockt der Browser sie. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-AS03majGGAgYGEK0v1Hwe170PaXGMA1A1goCTG9ZANs='; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self' https://api.anthropic.com https://api.openai.com https://api.deepseek.com https://r.jina.ai http://localhost:* http://127.0.0.1:*; manifest-src 'self'; worker-src 'self'; base-uri 'none'; object-src 'none'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-AS03majGGAgYGEK0v1Hwe170PaXGMA1A1goCTG9ZANs=' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self' https://api.jobreif.de https://api.anthropic.com https://api.openai.com https://api.deepseek.com https://r.jina.ai https://challenges.cloudflare.com http://localhost:* http://127.0.0.1:*; frame-src https://challenges.cloudflare.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; object-src 'none'; form-action 'self'">
   <meta name="theme-color" content="#c5543a" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#3a2a25" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#c5543a">
@@ -29,6 +29,10 @@
       if (__t === "light" || __t === "dark") document.documentElement.dataset.theme = __t;
     } catch (e) {}
   </script>
+  <!-- Cloudflare Turnstile (Bot-/Missbrauchsschutz im Hosted-Modus, Plan A.2.5/A.3.4).
+       Explizites Rendern: app.js erzeugt/fuehrt das Widget bei Bedarf aus. Ohne
+       gesetzten Sitekey passiert nichts (BYOK/lokal brauchen kein Turnstile). -->
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
 </head>
 <body>
   <header>
@@ -102,11 +106,21 @@
       <h2>Einstellungen</h2>
       <label for="provider">Anbieter</label>
       <select id="provider">
-        <option value="anthropic">Claude (Anthropic)</option>
-        <option value="openai">OpenAI</option>
-        <option value="deepseek">DeepSeek</option>
+        <option value="hosted">Gehostet (empfohlen – kein eigener Schlüssel nötig)</option>
+        <option value="anthropic">Eigener Schlüssel: Claude (Anthropic)</option>
+        <option value="openai">Eigener Schlüssel: OpenAI</option>
+        <option value="deepseek">Eigener Schlüssel: DeepSeek</option>
         <option value="local">Lokales Modell (Ollama / LM Studio)</option>
       </select>
+
+      <div id="row-tier">
+        <label for="tier">Qualitätsstufe</label>
+        <select id="tier">
+          <option value="standard">Standard – empfohlen</option>
+          <option value="guenstig">Günstig – schneller und sparsamer</option>
+        </select>
+        <p class="hint">Im gehosteten Modus ist die Nutzung kostenlos (mit einem fairen Tageskontingent). Deine Eingaben werden zur Erstellung der Tests an unseren Dienst gesendet – Details im <a href="#" id="link-datenschutz-tier">Datenschutzhinweis</a>.</p>
+      </div>
 
       <div id="row-api-key">
         <label for="api-key">API-Key</label>
@@ -120,8 +134,10 @@
         <p class="hint">Ollama: <code>http://localhost:11434/v1</code> · LM Studio: <code>http://localhost:1234/v1</code>. Es werden keine Daten an einen Anbieter gesendet, alles bleibt auf deinem Rechner. Wichtig: Damit diese Seite über https auf den lokalen Server zugreifen darf, muss er Cross-Origin-Anfragen erlauben – in LM Studio im Server-Tab die Option „Enable CORS“ aktivieren, bei Ollama den Server mit <code>OLLAMA_ORIGINS</code> starten. Klappt die Verbindung mit <code>localhost</code> nicht, probiere <code>127.0.0.1</code>.</p>
       </div>
 
-      <label for="model">Modell</label>
-      <select id="model"></select>
+      <div id="row-model">
+        <label for="model">Modell</label>
+        <select id="model"></select>
+      </div>
       <div id="row-local-models" class="hidden">
         <div class="row wrap">
           <button id="btn-load-models" type="button" class="ghost">Modelle laden</button>
@@ -351,6 +367,72 @@
       </div>
     </div>
 
+    <!-- Datenschutzhinweis -->
+    <div id="datenschutz-modal" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="datenschutz-title">
+      <div class="modal card changelog-modal">
+        <h2 id="datenschutz-title">Datenschutzhinweis</h2>
+
+        <p>jobreif.de macht aus einer Stellenanzeige einen Übungs-Einstellungstest und bewertet deine Antworten. Hier steht, welche Daten dabei wohin fließen.</p>
+
+        <h3>Zwei Betriebsarten</h3>
+        <p><strong>Gehostet (Standard):</strong> Die KI läuft über unseren Dienst. Wenn du einen Test erstellst oder auswerten lässt, werden die dafür nötigen Eingaben an unsere Server gesendet.</p>
+        <p><strong>Eigener Schlüssel oder lokales Modell:</strong> In den Einstellungen kannst du stattdessen einen eigenen API-Schlüssel hinterlegen oder ein lokales Modell verwenden. Dann läuft nichts über unsere Server – die Daten gehen direkt an den von dir gewählten Anbieter oder bleiben bei einem lokalen Modell vollständig auf deinem Rechner.</p>
+
+        <h3>Welche Daten im gehosteten Modus übertragen werden</h3>
+        <p>Nur die für die jeweilige Funktion nötigen Inhalte: der Text der Stellenanzeige, deine eingegebenen Antworten (zur Bewertung) und die gewählte Qualitätsstufe. Es gibt kein Nutzerkonto und keine Anmeldung.</p>
+        <p>Bitte beachte: Stellenanzeigen und besonders deine Antworten können personenbezogene oder sensible Angaben enthalten. Gib im gehosteten Modus nichts ein, das nicht über fremde Dienste laufen soll – wenn du das vermeiden willst, nutze einen eigenen Schlüssel oder ein lokales Modell.</p>
+
+        <h3>Wer die Daten verarbeitet (Empfänger)</h3>
+        <ul>
+          <li>Cloudflare – Hosting unseres Vermittlungs-Servers (weltweit verteilte Server)</li>
+          <li>OpenRouter – leitet die Anfrage an das jeweilige KI-Modell weiter</li>
+          <li>Der jeweilige Modellanbieter je nach Qualitätsstufe (z. B. OpenAI, Anthropic, DeepSeek)</li>
+        </ul>
+        <p>Diese Anbieter verarbeiten die übermittelten Inhalte, um die Antwort zu erzeugen. Dabei ist eine Übermittlung in Länder außerhalb der EU (u. a. USA) möglich.</p>
+
+        <h3>Speicherung</h3>
+        <p>Unser Server speichert die Inhalte deiner Anfragen nicht dauerhaft und protokolliert sie nicht; geführt wird nur ein anonymer Zähler für das Tageskontingent (Schutz vor Missbrauch und Kostenausreißern). Wie die genannten Anbieter die Daten behandeln, richtet sich nach deren eigenen Bestimmungen.</p>
+        <p>Dein Verlauf (erstellte Tests, Ergebnisse) und deine Einstellungen werden ausschließlich lokal in deinem Browser gespeichert und nicht an uns übertragen. Du kannst sie jederzeit über die Einstellungen exportieren oder löschen.</p>
+
+        <h3>Verantwortlicher</h3>
+        <p>Sebastian Chudoba<br>
+        c/o Block Services<br>
+        Stuttgarter Str. 106<br>
+        70736 Fellbach<br>
+        Kontakt: <a href="mailto:datenschutz@jobreif.de">datenschutz@jobreif.de</a></p>
+
+        <div class="row">
+          <button id="btn-datenschutz-close" class="primary">Schließen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Impressum -->
+    <div id="impressum-modal" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="impressum-title">
+      <div class="modal card changelog-modal">
+        <h2 id="impressum-title">Impressum</h2>
+
+        <h3>Angaben gemäß § 5 DDG</h3>
+        <p>Sebastian Chudoba<br>
+        c/o Block Services<br>
+        Stuttgarter Str. 106<br>
+        70736 Fellbach</p>
+
+        <h3>Kontakt</h3>
+        <p>E-Mail: <a href="mailto:info@jobreif.de">info@jobreif.de</a></p>
+
+        <h3>Verantwortlich für den Inhalt nach § 18 Abs. 2 MStV</h3>
+        <p>Sebastian Chudoba (Anschrift wie oben)</p>
+
+        <p class="hint">jobreif.de ist ein privates Projekt. Bei Fragen zum Datenschutz siehe den
+        Datenschutzhinweis.</p>
+
+        <div class="row">
+          <button id="btn-impressum-close" class="primary">Schließen</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Abzeichen-Detail -->
     <div id="badge-modal" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="badge-modal-title">
       <div class="modal card badge-modal">
@@ -423,11 +505,18 @@
       <span class="footer-sep">&middot;</span>
       <a href="https://github.com/qudiqudi/bewerbungstool/issues" target="_blank" rel="noopener">Fehler melden</a>
       <span class="footer-sep">&middot;</span>
+      <a href="#" id="link-impressum">Impressum</a>
+      <span class="footer-sep">&middot;</span>
+      <a href="#" id="link-datenschutz">Datenschutz</a>
+      <span class="footer-sep">&middot;</span>
       <a href="#" id="link-changelog" title="Was ist neu"></a>
     </p>
-    <p>Läuft vollständig in deinem Browser: kein Konto, keine Server. API-Schlüssel und Historie bleiben lokal auf deinem Gerät.</p>
+    <p>Kein Konto, keine Anmeldung. Verlauf und Einstellungen bleiben lokal in deinem Browser. Im gehosteten Standardmodus werden deine Eingaben zur Testerstellung an unseren Dienst gesendet; mit eigenem Schlüssel oder lokalem Modell bleibt das aus (<a href="#" id="link-datenschutz-footer">Datenschutz</a>).</p>
   </footer>
 
+  <!-- Turnstile-Host: meist unsichtbar (interaction-only), erscheint nur, wenn eine
+       Challenge eine Interaktion verlangt. -->
+  <div id="turnstile-container" class="turnstile-host" aria-hidden="true"></div>
   <script src="app.js"></script>
 </body>
 </html>

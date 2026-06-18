@@ -5,3 +5,6 @@
 *.swp
 .vscode/
 .idea/
+
+# Lokale Notizen / Pläne (nicht eingecheckt)
+.local/

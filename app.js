@@ -4,9 +4,18 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.0.40";
+const APP_VERSION = "1.1.0";
 
 const CHANGELOG = [
+  {
+    version: "1.1.0",
+    date: "17.06.2026",
+    items: [
+      "Neu: gehosteter Modus. Du kannst das Tool jetzt ohne eigenen API-Schlüssel sofort nutzen – Stellenanzeige einfügen und loslegen. Die Nutzung ist kostenlos, mit einem fairen Tageskontingent.",
+      "Einen eigenen API-Schlüssel oder ein lokales Modell kannst du weiterhin verwenden: in den Einstellungen unter „Anbieter“. Damit laufen deine Daten nicht über unseren Dienst.",
+      "Neuer Datenschutzhinweis (Link unten in der Fußzeile und in den Einstellungen): erklärt, welche Daten im gehosteten Modus wohin fließen.",
+    ],
+  },
   {
     version: "1.0.40",
     date: "15.06.2026",
@@ -868,8 +877,160 @@ async function readSSEText(res, extractDelta, onChunk) {
   return acc;
 }
 
+/* ---------- Hosted-Modus (gehosteter Worker, kein Nutzer-Key) ---------- */
+
+// Basis-URL des Hosted-Workers. Override per localStorage nur fuer lokale Tests
+// (z. B. gegen `wrangler dev`), Default ist die Produktions-Subdomain.
+function hostedBase() {
+  try {
+    return localStorage.getItem("bewerbungstool.hostedBase") || "https://api.jobreif.de";
+  } catch {
+    return "https://api.jobreif.de";
+  }
+}
+
+// Turnstile (Bot-/Missbrauchsschutz im Hosted-Modus). PRODUKTION: echten Sitekey hier
+// eintragen (Cloudflare-Dashboard → Turnstile). Override per localStorage nur fuer Tests
+// (z. B. Cloudflare-Testkey "1x00000000000000000000BB" = unsichtbar, immer ok). Ohne
+// Sitekey liefert getTurnstileToken "" → nur sinnvoll, wenn der Worker SKIP_TURNSTILE
+// gesetzt hat. BYOK/lokal brauchen kein Turnstile.
+const TURNSTILE_SITEKEY = "0x4AAAAAADmmEQ6MVc83TvmX";
+function turnstileSitekey() {
+  try {
+    return localStorage.getItem("bewerbungstool.turnstileSitekey") || TURNSTILE_SITEKEY;
+  } catch {
+    return TURNSTILE_SITEKEY;
+  }
+}
+
+let _tsWidgetId = null;
+let _tsPending = null;
+
+// Wartet, bis das (async geladene) Turnstile-Script bereit ist.
+async function turnstileReady(ms = 4000) {
+  const start = Date.now();
+  while (typeof window.turnstile === "undefined" && Date.now() - start < ms) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return typeof window.turnstile !== "undefined";
+}
+
+// Rendert das Widget einmalig (execution:"execute" → laeuft erst bei execute();
+// interaction-only → meist unsichtbar). Gibt true zurueck, wenn ein Widget bereitsteht.
+function ensureTurnstileWidget() {
+  const key = turnstileSitekey();
+  if (!key || typeof window.turnstile === "undefined") return false;
+  if (_tsWidgetId !== null) return true;
+  try {
+    _tsWidgetId = window.turnstile.render("#turnstile-container", {
+      sitekey: key,
+      execution: "execute",
+      appearance: "interaction-only",
+      callback: (token) => { if (_tsPending) { const f = _tsPending; _tsPending = null; f(token); } },
+      "error-callback": () => { if (_tsPending) { const f = _tsPending; _tsPending = null; f(""); } },
+      "timeout-callback": () => { if (_tsPending) { const f = _tsPending; _tsPending = null; f(""); } },
+    });
+    return _tsWidgetId != null;
+  } catch {
+    _tsWidgetId = null;
+    return false;
+  }
+}
+
+// Frisches, einmaliges Token fuer genau diese Aktion. Leerer String, wenn Turnstile
+// nicht konfiguriert/bereit ist (dann muss der Worker SKIP_TURNSTILE gesetzt haben).
+async function getTurnstileToken(action) {
+  if (!turnstileSitekey()) return "";
+  if (!(await turnstileReady())) return "";
+  if (!ensureTurnstileWidget()) return "";
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (t) => { if (!done) { done = true; resolve(t || ""); } };
+    _tsPending = finish;
+    try {
+      window.turnstile.reset(_tsWidgetId); // vorheriges Token verwerfen → frisches erzwingen
+      window.turnstile.execute(_tsWidgetId, { action });
+    } catch {
+      if (_tsPending === finish) _tsPending = null;
+      finish("");
+      return;
+    }
+    // Haengt das Widget, den Aufruf nicht ewig blockieren.
+    setTimeout(() => { if (_tsPending === finish) _tsPending = null; finish(""); }, 20000);
+  });
+}
+
+// Stabile, nutzerfreundliche Meldungen fuer die Hosted-Fehlercodes (Plan A.3.5).
+function hostedErrorMessage(status) {
+  switch (status) {
+    case 403:
+      return "Sicherheitsprüfung fehlgeschlagen. Bitte die Seite neu laden und erneut versuchen.";
+    case 429:
+      return "Gerade sind viele Anfragen unterwegs (oder dein Tageskontingent ist erreicht). Bitte kurz warten und erneut versuchen.";
+    case 503:
+      return "Das kostenlose Tageskontingent ist für heute erschöpft – morgen ist es wieder verfügbar. Wenn du sofort weitermachen möchtest, kannst du in den Einstellungen unter „Anbieter“ einen eigenen API-Schlüssel hinterlegen.";
+    case 402:
+      return "Diese Qualitätsstufe ist im kostenlosen Modus nicht verfügbar.";
+    case 400:
+      return "Die Anfrage war ungültig. Bitte die Stellenanzeige prüfen.";
+    default:
+      return "Der Dienst ist momentan nicht erreichbar. Bitte später erneut versuchen.";
+  }
+}
+
+// Hosted-Aufruf: schickt strukturierte DATEN (keine Prompts) an den app-spezifischen
+// Worker-Endpoint; der Worker baut Prompt + Schema und streamt im OpenAI-SSE-Format
+// zurueck, sodass readSSEText/parseJsonLoose unveraendert greifen. Kosten bleiben im
+// Hosted-Modus verborgen (fuer den Nutzer gratis) → cost/tokens null.
+async function callHosted(hosted, onProgress, opts = {}) {
+  if (!hosted || !hosted.action) {
+    throw new Error("Interner Fehler: Hosted-Aufruf ohne Aktion.");
+  }
+  const tier = settings.tier || "standard";
+  const body = JSON.stringify({ ...hosted.payload, tier });
+  const headers = { "Content-Type": "application/json" };
+  const token = await getTurnstileToken(hosted.action);
+  if (token) headers["CF-Turnstile-Token"] = token;
+
+  let res;
+  try {
+    res = await fetch(hostedBase() + "/api/" + hosted.action, {
+      method: "POST",
+      headers,
+      body,
+      signal: opts.signal,
+    });
+  } catch (e) {
+    if (e && e.name === "AbortError") throw e;
+    throw new Error("Keine Verbindung zum Dienst. Bitte Internetverbindung prüfen und erneut versuchen.");
+  }
+
+  if (!res.ok) throw new Error(hostedErrorMessage(res.status));
+
+  let finishReason = null;
+  const text = await readSSEText(
+    res,
+    (d) => {
+      if (d.choices?.[0]?.finish_reason) finishReason = d.choices[0].finish_reason;
+      return d.choices?.[0]?.delta?.content || "";
+    },
+    onProgress
+  );
+
+  if (finishReason === "length") {
+    throw new Error("Die Antwort wurde abgeschnitten. Bitte mit weniger Fragen erneut versuchen.");
+  }
+  if (!text) throw new Error("Leere Antwort vom Dienst erhalten.");
+  // Kosten/Token im Hosted-Modus bewusst nicht ausweisen (gratis fuer den Nutzer).
+  return { data: parseJsonLoose(text), cost: null, tokens: null };
+}
+
 async function callLLM(systemPrompt, userPrompt, schema, onProgress, opts = {}) {
-  const provider = settings.provider || "anthropic";
+  const provider = settings.provider || "hosted";
+  // Hosted ist der Default: strukturierte Daten an den Worker, kein Nutzer-Key.
+  if (provider === "hosted") {
+    return callHosted(opts.hosted, onProgress, opts);
+  }
   // Lokale Modelle brauchen keinen Key (laufen ohne Anbieter-Konto).
   if (provider !== "local" && !settings.apiKey) {
     throw new Error("Kein API-Key hinterlegt. Bitte zuerst die Einstellungen ausfüllen.");
@@ -1680,7 +1841,9 @@ async function deriveThemenfelder(job) {
   const user =
     `Stellenausschreibung:\n\n${(job.jobText || "").slice(0, 30000)}\n\n` +
     `Bisherige Schwachstellen des Bewerbers (Punkte je Frage, 0-10, schwaechste zuerst):\n${buildSchwaechenSummary(job)}`;
-  const { data, cost, tokens } = await callLLM(system, user, THEMENFELDER_SCHEMA);
+  const { data, cost, tokens } = await callLLM(system, user, THEMENFELDER_SCHEMA, undefined, {
+    hosted: { action: "themenfelder", payload: { jobText: job.jobText || "", schwaechen: buildSchwaechenSummary(job) } },
+  });
   const fields = (data && Array.isArray(data.themenfelder) ? data.themenfelder : [])
     .filter((f) => f && typeof f.label === "string" && f.label.trim())
     .slice(0, 6)
@@ -1848,11 +2011,20 @@ async function generateQuiz(opts = {}) {
         vertiefungHinweis +
         `Erstelle einen Einstellungstest mit genau ${numQuestions} Fragen zu dieser Stellenausschreibung:\n\n` +
         jobText.slice(0, 30000);
+      // Hosted: strukturierte Parameter statt Prompt - der Worker baut den Prompt.
+      const hostedPayload = {
+        jobText,
+        numQuestions: Number(numQuestions),
+        difficulty,
+        vertiefung: vertiefung
+          ? { felder: vertiefung.felder.map((f) => ({ label: f.label })), niveau: vertiefung.niveau || undefined }
+          : undefined,
+      };
       const out = await callLLM(system, user, QUESTIONS_SCHEMA, (acc) => {
         // Jede fertige Frage hat im gestreamten JSON genau einen "frage"-Schluessel
         const seen = (acc.match(/"frage"\s*:/g) || []).length;
         progress(seen);
-      });
+      }, { hosted: { action: "generate-quiz", payload: hostedPayload } });
       result = out.data; genCost = out.cost; genTokens = out.tokens;
     }
     // Defensiv gegen Modelle ohne striktes Schema (DeepSeek, lokale Modelle):
@@ -2253,12 +2425,17 @@ async function runEvaluation() {
 
     const total = quiz.fragen.length;
     setLoadingProgress(0, total, "Das Modell prüft deine Antworten...");
+    const evalHostedPayload = {
+      jobText: quiz.jobText,
+      payload,
+      kontext: { mode, limitMin: timer.limitMin, minutesUsed, overtime: timer.overtime },
+    };
     const { data: rawResult, cost: evalCost, tokens: evalTokens } = await callLLM(system, user, EVAL_SCHEMA, (acc) => {
       const seen = (acc.match(/"feedback"\s*:/g) || []).length;
       setLoadingProgress(seen, total, seen > 0
         ? `Antwort ${Math.min(seen, total)} von ${total} wird bewertet...`
         : "Antworten werden ausgewertet...");
-    });
+    }, { hosted: { action: "evaluate", payload: evalHostedPayload } });
     // Form absichern, bevor gespeichert/gerendert wird: ohne striktes Schema
     // (DeepSeek, lokale Modelle) koennte z. B. das gesamt-Objekt fehlen, was
     // beim Speichern (result.gesamt.prozent) sonst einen Absturz ausloest
@@ -4187,23 +4364,30 @@ function updateModelDesc() {
 // Blendet je nach Anbieter die passenden Felder ein (lokal: keine Key-Eingabe,
 // dafuer Server-Adresse, „Modelle laden“ und der Hinweis zu kleinen Modellen).
 function updateSettingsProviderUI() {
-  const isLocal = $("provider").value === "local";
-  $("row-api-key").classList.toggle("hidden", isLocal);
+  const provider = $("provider").value;
+  const isLocal = provider === "local";
+  const isHosted = provider === "hosted";
+  // Hosted: kein Key, kein Modell-/Lokal-Block; stattdessen die Qualitaetsstufe.
+  $("row-tier").classList.toggle("hidden", !isHosted);
+  $("row-model").classList.toggle("hidden", isHosted);
+  $("model-desc").classList.toggle("hidden", isHosted);
+  $("row-api-key").classList.toggle("hidden", isLocal || isHosted);
   $("row-base-url").classList.toggle("hidden", !isLocal);
   $("row-local-models").classList.toggle("hidden", !isLocal);
-  $("row-cloud-hints").classList.toggle("hidden", isLocal);
+  $("row-cloud-hints").classList.toggle("hidden", isLocal || isHosted);
   $("hint-local").classList.toggle("hidden", !isLocal);
 }
 
 function initSettingsForm() {
-  $("provider").value = settings.provider || "anthropic";
+  $("provider").value = settings.provider || "hosted";
   $("api-key").value = settings.apiKey || "";
   $("base-url").value = settings.baseUrl || "";
+  $("tier").value = settings.tier || "standard";
   updateSettingsProviderUI();
   if ($("provider").value === "local") {
     populateLocalModelSelect([], settings.model);
     $("local-models-status").textContent = "";
-  } else {
+  } else if ($("provider").value !== "hosted") {
     populateModelSelect($("provider").value, settings.model);
   }
 }
@@ -4221,7 +4405,7 @@ $("provider").addEventListener("change", () => {
     const keep = settings.provider === "local" ? settings.model : "";
     populateLocalModelSelect([], keep);
     $("local-models-status").textContent = "Auf „Modelle laden“ klicken, um die installierten Modelle anzuzeigen.";
-  } else {
+  } else if ($("provider").value !== "hosted") {
     populateModelSelect($("provider").value, settings.model);
   }
 });
@@ -4255,13 +4439,20 @@ $("btn-load-models").addEventListener("click", async () => {
 
 $("btn-save-settings").addEventListener("click", () => {
   const provider = $("provider").value;
-  settings = {
-    provider,
-    apiKey: $("api-key").value.trim(),
-    model: $("model").value.trim(),
-  };
-  // Server-Adresse nur fuer den lokalen Anbieter sichern (optionales Feld)
-  if (provider === "local") settings.baseUrl = normalizeBaseUrl($("base-url").value);
+  if (provider === "hosted") {
+    // Hosted: nur Provider + Stufe setzen. Vorhandene BYOK-Felder (apiKey/baseUrl/
+    // model) BLEIBEN als Fallback erhalten - nie verwerfen (Leitplanke).
+    settings = { ...settings, provider: "hosted", tier: $("tier").value || "standard" };
+  } else {
+    settings = {
+      ...settings,
+      provider,
+      apiKey: $("api-key").value.trim(),
+      model: $("model").value.trim(),
+    };
+    // Server-Adresse nur fuer den lokalen Anbieter sichern (optionales Feld)
+    if (provider === "local") settings.baseUrl = normalizeBaseUrl($("base-url").value);
+  }
   saveSettings(settings);
   goReturn();
 });
@@ -4325,6 +4516,13 @@ function importData(text) {
       else if (providerChanged) delete merged[k];                   // fremder Altwert faellt weg
       // sonst (gleicher Anbieter, leerer Importwert): vorhandenen Wert behalten
     }
+    // Hosted-Qualitaetsstufe ist nicht anbietergebunden: vorhandenen Importwert
+    // additiv uebernehmen, statt ihn beim Umzug stillschweigend zu verlieren. Nur
+    // bekannte Stufen (wie im Settings-Menue angeboten) akzeptieren - ein korruptes
+    // oder handgeschriebenes Backup soll keine ungueltige Stufe persistieren, die
+    // Hosted-Calls bis zum naechsten Speichern scheitern liesse (defensiv lesen).
+    const tierImp = typeof inc.tier === "string" ? inc.tier.trim() : "";
+    if (tierImp === "standard" || tierImp === "guenstig") merged.tier = tierImp;
     settings = merged;
     saveSettings(settings);
     settingsImported = true;
@@ -4734,6 +4932,43 @@ $("changelog-modal").addEventListener("click", (e) => {
   if (e.target === $("changelog-modal")) closeChangelog();
 });
 
+/* ---------- Datenschutzhinweis ---------- */
+function openDatenschutz(e) {
+  if (e) e.preventDefault();
+  $("datenschutz-modal").classList.remove("hidden");
+  const panel = $("datenschutz-modal").querySelector(".modal");
+  if (panel) panel.scrollTop = 0;
+  $("btn-datenschutz-close").focus({ preventScroll: true });
+}
+function closeDatenschutz() {
+  $("datenschutz-modal").classList.add("hidden");
+}
+["link-datenschutz", "link-datenschutz-footer", "link-datenschutz-tier"].forEach((id) => {
+  const el = $(id);
+  if (el) el.addEventListener("click", openDatenschutz);
+});
+$("btn-datenschutz-close").addEventListener("click", closeDatenschutz);
+$("datenschutz-modal").addEventListener("click", (e) => {
+  if (e.target === $("datenschutz-modal")) closeDatenschutz();
+});
+
+/* ---------- Impressum ---------- */
+function openImpressum(e) {
+  if (e) e.preventDefault();
+  $("impressum-modal").classList.remove("hidden");
+  const panel = $("impressum-modal").querySelector(".modal");
+  if (panel) panel.scrollTop = 0;
+  $("btn-impressum-close").focus({ preventScroll: true });
+}
+function closeImpressum() {
+  $("impressum-modal").classList.add("hidden");
+}
+$("link-impressum").addEventListener("click", openImpressum);
+$("btn-impressum-close").addEventListener("click", closeImpressum);
+$("impressum-modal").addEventListener("click", (e) => {
+  if (e.target === $("impressum-modal")) closeImpressum();
+});
+
 $("btn-badge-close").addEventListener("click", closeBadgeModal);
 // Klick auf den abgedunkelten Hintergrund (nicht auf die Karte) schliesst
 $("badge-modal").addEventListener("click", (e) => {
@@ -4759,6 +4994,8 @@ document.addEventListener("visibilitychange", () => {
 // je zwei gleichzeitig offen waeren; ein neues Overlay braucht nur einen Eintrag.
 const ESCAPE_CLOSERS = [
   ["changelog-modal", closeChangelog],
+  ["datenschutz-modal", closeDatenschutz],
+  ["impressum-modal", closeImpressum],
   ["confirm-eval-modal", cancelConfirmEval],
   ["badge-modal", closeBadgeModal],
   ["confirm-delete-modal", closeConfirmDelete],
@@ -4775,9 +5012,13 @@ document.addEventListener("keydown", (e) => {
 restoreDraft();
 
 // Beim ersten Start zum Onboarding, sonst auf die Startliste der Stellen.
-// Lokaler Anbieter laeuft ohne API-Schluessel - dort gilt ein gewaehltes Modell
-// als eingerichtet, sonst landeten lokale Nutzer bei jedem Reload im Onboarding.
-const isConfigured = settings.provider === "local" ? !!settings.model : !!settings.apiKey;
+// Hosted ist der Default und braucht keinen Schluessel → sofort einsatzbereit, kein
+// Onboarding-Wall. Lokaler Anbieter gilt mit gewaehltem Modell als eingerichtet,
+// BYOK-Anbieter mit hinterlegtem Key.
+const provider0 = settings.provider || "hosted";
+const isConfigured = provider0 === "hosted" ? true
+  : provider0 === "local" ? !!settings.model
+  : !!settings.apiKey;
 if (!isConfigured) {
   renderOnboardingSteps($("ob-provider").value);
   showView("view-onboarding");

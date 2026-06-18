@@ -1878,3 +1878,13 @@ button.danger:hover { background: var(--red-soft); border-color: var(--red); }
     transition-duration: 0.001ms !important;
   }
 }
+
+/* Turnstile-Host: im interaction-only-Modus meist unsichtbar; erscheint nur, wenn
+   eine Challenge eine Interaktion verlangt - dann mittig unten und ueber allem. */
+.turnstile-host {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 1000;
+}
