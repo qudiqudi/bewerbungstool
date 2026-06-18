@@ -24,7 +24,18 @@ export const QUESTIONS_SCHEMA = {
           schwierigkeit: { type: "string", enum: ["leicht", "mittel", "schwer"] },
           frage: { type: "string" },
           optionen: { type: "array", items: { type: "string" } },
-          korrekte_antwort: { type: "string" },
+          korrekte_antwort: {
+            type: "string",
+            description: "Bei multiple_choice der Wortlaut EINER richtigen Option (bei Mehrfachauswahl der ersten); siehe korrekte_indizes fuer alle richtigen Optionen. Bei offenen Fragen eine knappe Musterantwort",
+          },
+          korrekte_indizes: {
+            type: "array",
+            items: { type: "integer" },
+            description:
+              "0-basierte Indizes ALLER richtigen Optionen in 'optionen'. " +
+              "Bei multiple_choice genau ein Index => eine richtige Antwort (Standard); " +
+              "mehrere Indizes => Mehrfachauswahl. Bei offenen Fragen leeres Array [].",
+          },
           erklaerungen: { type: "array", items: { type: "string" } },
           elemente: {
             type: "array",
@@ -47,7 +58,7 @@ export const QUESTIONS_SCHEMA = {
             },
           },
         },
-        required: ["id", "typ", "kategorie", "schwierigkeit", "frage", "optionen", "korrekte_antwort", "erklaerungen", "elemente", "korrekte_reihenfolge", "lerninfo", "quellen"],
+        required: ["id", "typ", "kategorie", "schwierigkeit", "frage", "optionen", "korrekte_antwort", "korrekte_indizes", "erklaerungen", "elemente", "korrekte_reihenfolge", "lerninfo", "quellen"],
         additionalProperties: false,
       },
     },
@@ -123,9 +134,12 @@ export function buildQuizMessages({ jobText, numQuestions, difficulty, vertiefun
   const isVertiefung = !!(vertiefung && Array.isArray(vertiefung.felder) && vertiefung.felder.length);
 
   const antwortHinweis =
-    "Gib zu jeder Frage die korrekte Antwort an (bei Multiple-Choice exakt den Wortlaut der besten Option, " +
-    "bei offenen Fragen eine knappe Musterantwort), bei Multiple-Choice zu jeder Option eine kurze Erklärung, " +
-    "warum sie richtig oder falsch ist, einen lernrelevanten Hintergrund (lerninfo) sowie 1 bis 3 Quellen zur Vertiefung. " +
+    "Gib zu jeder Frage die korrekte Antwort an (bei Multiple-Choice den Wortlaut mindestens einer richtigen Option, " +
+    "bei offenen Fragen eine knappe Musterantwort). Gib bei Multiple-Choice zusätzlich in korrekte_indizes alle " +
+    "richtigen Options-Indizes (0-basiert) an; bei offenen Fragen ein leeres Array. Gib bei Multiple-Choice zu JEDER " +
+    "Option (richtig wie falsch) eine kurze Erklärung, warum sie richtig oder falsch ist - bei mehreren richtigen " +
+    "Optionen ist entsprechend jede davon als richtig zu begründen. Liefere ausserdem " +
+    "einen lernrelevanten Hintergrund (lerninfo) sowie 1 bis 3 Quellen zur Vertiefung. " +
     "Bei Reihenfolge-Aufgaben enthaelt korrekte_antwort die korrekte Reihenfolge als lesbaren Text (Elemente durch ' -> ' getrennt). " +
     "Nenne nur real existierende Quellen (Gesetze, Normen, Standardwerke, offizielle Dokumentation, etablierte Fachseiten). " +
     "Gib die URL einer Quelle nur an, wenn du dir sicher bist, dass sie existiert - bevorzugt Startseiten oder bekannte, " +
@@ -148,9 +162,13 @@ export function buildQuizMessages({ jobText, numQuestions, difficulty, vertiefun
   const mcMix = isVertiefung
     ? "Etwa ein Drittel der Fragen soll Multiple-Choice sein (4 Optionen, genau eine ist die beste; " +
       "alle uebrigen Optionen muessen plausibel sein - typische Fehlannahmen oder haeufige Verwechslungen, " +
-      "keine offensichtlich falschen Optionen), der Rest offene Fragen. "
-    : "Etwa die Hälfte der Fragen soll Multiple-Choice sein (4 plausible Optionen, genau eine ist die beste), " +
-      "der Rest offene Fragen. ";
+      "keine offensichtlich falschen Optionen), der Rest offene Fragen. " +
+      "Markiere bei jeder Multiple-Choice-Frage die richtigen Optionen ueber korrekte_indizes (0-basiert). "
+    : "Etwa die Hälfte der Fragen soll Multiple-Choice sein (4 plausible Optionen). " +
+      "Die meisten Multiple-Choice-Fragen haben genau eine richtige Option. Bei einigen wenigen " +
+      "(hoechstens etwa ein Drittel der Multiple-Choice-Fragen) duerfen mehrere Optionen gleichzeitig richtig sein - " +
+      "dann gib in korrekte_indizes alle richtigen Indizes an. Markiere bei jeder Multiple-Choice-Frage die richtigen " +
+      "Optionen ueber korrekte_indizes (0-basiert). Der Rest sind offene Fragen. ";
 
   const vertiefungTiefe = isVertiefung
     ? "Dies ist ein Vertiefungsbogen: Die Fragen muessen deutlich tiefer gehen als in einem Standardtest. " +
@@ -223,10 +241,30 @@ export function buildEvalMessages({ jobText, payload, kontext }) {
     "erwähne den Umstand aber kurz im Feedback. Antworte auf Deutsch.";
 
   const rahmen = buildKontext(kontext);
+  // Mehrfach-MC-Fragen werden clientseitig deterministisch gescort und nicht im
+  // payload mitgeschickt. Damit die Gesamtbewertung sie trotzdem beruecksichtigt,
+  // nennt der Client sie kompakt in kontext.mcLokal ([{ frage, punkte }]).
+  // Gleicher Wortlaut wie der Client-Pfad in app.js (runEvaluation).
+  // Defensiv begrenzen, obwohl validateEval mcLokal bereits prueft: hoechstens
+  // 60 Eintraege, punkte hart auf 0-10 geklemmt, Fragetext gekuerzt.
+  const mcLokal = (kontext && Array.isArray(kontext.mcLokal) ? kontext.mcLokal : []).slice(0, 60);
+  const mcLokalHinweis = mcLokal.length
+    ? "\n\nZusätzlich wurden " + mcLokal.length + " Multiple-Choice-Fragen mit Mehrfachauswahl " +
+      "bereits separat und deterministisch bewertet. Bewerte sie NICHT erneut und gib fuer sie KEINE " +
+      "eigenen Ergebnis-Eintraege aus; beziehe ihre Ergebnisse aber in die Gesamteinschätzung " +
+      "(Zusammenfassung, Stärken, Verbesserungen) mit ein:\n" +
+      mcLokal
+        .map((m) => {
+          const pkt = Math.max(0, Math.min(10, Math.round(Number((m && m.punkte) || 0)) || 0));
+          return `- ${String((m && m.frage) || "").slice(0, 160)}: ${pkt}/10`;
+        })
+        .join("\n")
+    : "";
   const user =
     "Stellenausschreibung:\n" + String(jobText).slice(0, 15000) +
     "\n\nRahmen: " + rahmen +
-    "\n\nBewerte diese Antworten des Kandidaten:\n" + JSON.stringify(payload, null, 2);
+    "\n\nBewerte diese Antworten des Kandidaten:\n" + JSON.stringify(payload, null, 2) +
+    mcLokalHinweis;
 
   return [
     { role: "system", content: system },

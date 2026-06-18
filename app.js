@@ -4,14 +4,36 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.1.3";
+const APP_VERSION = "1.5.0";
 
 const CHANGELOG = [
   {
-    version: "1.1.3",
+    version: "1.5.0",
     date: "18.06.2026",
     items: [
       "Neuer Aufgabentyp: Reihenfolge-Aufgaben. Bei Abläufen und Prozessen bringst du jetzt Elemente per Ziehen am Griff oder über Hoch-/Runter-Pfeile in die richtige Reihenfolge – auch am Handy. Die Bewertung erfolgt automatisch mit Teilpunkten.",
+    ],
+  },
+  {
+    version: "1.4.0",
+    date: "18.06.2026",
+    items: [
+      "Neu: Multiple-Choice-Fragen können jetzt mehrere richtige Antworten haben. Solche Fragen erkennst du an den eckigen Auswahlkästchen und dem Hinweis „Mehrere Antworten möglich“. Du bekommst Teilpunkte für richtig markierte Optionen; falsch Angekreuztes mindert die Punkte, damit blosses Ankreuzen aller Optionen nichts bringt.",
+      "Die Antwortoptionen bei Multiple-Choice werden jetzt zufällig angeordnet. So liegt die richtige Antwort nicht mehr auffällig oft auf demselben Platz und lässt sich nicht erraten.",
+    ],
+  },
+  {
+    version: "1.3.0",
+    date: "18.06.2026",
+    items: [
+      "Im Lernmodus kannst du einen Test jetzt verlassen und später fortsetzen: Deine Antworten und aufgelösten Fragen bleiben erhalten. Auf der Startseite erscheint dazu „Test fortsetzen“.",
+    ],
+  },
+  {
+    version: "1.2.0",
+    date: "18.06.2026",
+    items: [
+      "Im gehosteten Modus wird dein Test jetzt im Hintergrund erstellt: Du kannst die Seite verlassen, das Handy sperren oder wegklicken – die Erstellung läuft weiter. Sobald der Test fertig ist, erscheint er oben auf der Startseite und du startest ihn mit „Loslegen“.",
     ],
   },
   {
@@ -667,7 +689,15 @@ const QUESTIONS_SCHEMA = {
           },
           korrekte_antwort: {
             type: "string",
-            description: "Bei multiple_choice exakt der Wortlaut der besten Option; bei offenen Fragen eine knappe Musterantwort",
+            description: "Bei multiple_choice der Wortlaut EINER richtigen Option (bei Mehrfachauswahl der ersten); siehe korrekte_indizes fuer alle richtigen Optionen. Bei offenen Fragen eine knappe Musterantwort",
+          },
+          korrekte_indizes: {
+            type: "array",
+            items: { type: "integer" },
+            description:
+              "0-basierte Indizes ALLER richtigen Optionen in 'optionen'. " +
+              "Bei multiple_choice genau ein Index => eine richtige Antwort (Standard); " +
+              "mehrere Indizes => Mehrfachauswahl. Bei offenen Fragen leeres Array [].",
           },
           erklaerungen: {
             type: "array",
@@ -702,7 +732,7 @@ const QUESTIONS_SCHEMA = {
             description: "1 bis 3 real existierende Quellen zur Vertiefung",
           },
         },
-        required: ["id", "typ", "kategorie", "schwierigkeit", "frage", "optionen", "korrekte_antwort", "erklaerungen", "elemente", "korrekte_reihenfolge", "lerninfo", "quellen"],
+        required: ["id", "typ", "kategorie", "schwierigkeit", "frage", "optionen", "korrekte_antwort", "korrekte_indizes", "erklaerungen", "elemente", "korrekte_reihenfolge", "lerninfo", "quellen"],
         additionalProperties: false,
       },
     },
@@ -808,6 +838,63 @@ function normalizeQuizData(result) {
     let optionen = Array.isArray(q.optionen) ? q.optionen.filter((o) => typeof o === "string") : [];
     // Multiple-Choice ohne brauchbare Optionen ist nicht bedienbar -> offene Frage
     if (typ === "multiple_choice" && optionen.length < 2) { typ = "offen"; optionen = []; }
+    // korrekte_indizes defensiv normalisieren: nur gueltige Optionsindizes,
+    // ohne Duplikate. Additiv - alte Daten ohne das Feld bleiben [].
+    let korrekte_antwort = typeof q.korrekte_antwort === "string" ? q.korrekte_antwort : "";
+    let korrekte_indizes = [];
+    let erklaerungen = Array.isArray(q.erklaerungen) ? q.erklaerungen.filter((e) => typeof e === "string") : [];
+    if (typ === "multiple_choice") {
+      korrekte_indizes = Array.isArray(q.korrekte_indizes)
+        ? q.korrekte_indizes
+            .map((n) => Number(n))
+            .filter((n) => Number.isInteger(n) && n >= 0 && n < optionen.length)
+        : [];
+      korrekte_indizes = [...new Set(korrekte_indizes)];
+      // Konsistenz mit korrekte_antwort (defensiv, niemals werfen):
+      // - kein Index, aber korrekte_antwort matcht eine Option => Index heilen.
+      if (!korrekte_indizes.length && korrekte_antwort.trim()) {
+        const m = optionen.findIndex((o) => o.trim() === korrekte_antwort.trim());
+        if (m >= 0) korrekte_indizes = [m];
+      }
+      // - Sind gueltige Indizes vorhanden, sind SIE die einzige Wahrheit:
+      //   korrekte_antwort IMMER an den ersten richtigen Index angleichen. Sonst
+      //   koennte das Modell korrekte_indizes:[2] und korrekte_antwort=Option 1
+      //   liefern - dann markiert mcCorrectIndices() Option 2 als richtig,
+      //   waehrend Single-Choice-Render, Dedup und Eval-Payload Option 1 nutzen.
+      //   Ein solcher Widerspruch wuerde den Nutzer gegen eine andere Option
+      //   bewerten als angezeigt. Das Angleichen schliesst das aus.
+      if (korrekte_indizes.length && optionen[korrekte_indizes[0]]) {
+        korrekte_antwort = optionen[korrekte_indizes[0]];
+      }
+
+      // Antwortoptionen unsichtbar mischen (clientseitig, einmalig beim Laden):
+      // manche Modelle legen die richtige Option auffaellig oft auf denselben
+      // Platz (meist die erste). Optionen und die parallel laufenden erklaerungen
+      // gemeinsam permutieren und korrekte_indizes auf die neuen Positionen
+      // umrechnen, damit die Zuordnung exakt erhalten bleibt. Laeuft in
+      // normalizeQuizData (einmal pro Quiz, alle Provider); das Ergebnis wird
+      // gespeichert, sodass sich die Reihenfolge bei Re-Render/Review nicht aendert.
+      if (optionen.length >= 2) {
+        const perm = optionen.map((_, idx) => idx);
+        for (let p = perm.length - 1; p > 0; p--) {
+          const r = Math.floor(Math.random() * (p + 1));
+          [perm[p], perm[r]] = [perm[r], perm[p]];
+        }
+        // perm[neu] = alterIndex; inv[alterIndex] = neu.
+        const inv = [];
+        perm.forEach((alt, neu) => { inv[alt] = neu; });
+        optionen = perm.map((alt) => optionen[alt]);
+        if (erklaerungen.length) erklaerungen = perm.map((alt) => erklaerungen[alt] || "");
+        korrekte_indizes = korrekte_indizes
+          .map((alt) => inv[alt])
+          .filter((n) => Number.isInteger(n))
+          .sort((a, b) => a - b);
+        if (korrekte_indizes.length && optionen[korrekte_indizes[0]]) {
+          korrekte_antwort = optionen[korrekte_indizes[0]];
+        }
+      }
+    }
+
     // Reihenfolge-Aufgabe: nur gueltig, wenn elemente + korrekte_reihenfolge
     // eine echte Permutation bilden. Sonst auf offene Frage zurueckfallen
     // (immer bedienbar). Felder werden unten IMMER mitgeschrieben (leer bei
@@ -830,6 +917,7 @@ function normalizeQuizData(result) {
         korrekte_reihenfolge = [];
       }
     }
+
     const quellen = Array.isArray(q.quellen)
       ? q.quellen
           .filter((s) => s && typeof s === "object")
@@ -840,18 +928,22 @@ function normalizeQuizData(result) {
           .filter((s) => s.titel || s.url)
       : [];
     fragen.push({
-      // Garantiert eindeutige Frage-id (1-basiert, in Quiz-Reihenfolge). Modelle
-      // vergeben ids haeufig nicht eindeutig; eine doppelte id wuerde beim
-      // id-basierten Merge/Anzeige der Ergebnisse ein fremdes Resultat auf die
-      // falsche Frage schreiben. Daher hier NICHT die modellgelieferte id nutzen.
+      // Eigene, garantiert eindeutige id (Position) statt der modellgelieferten:
+      // Modelle vergeben ids nicht zwingend eindeutig (und bei Batch-Generierung
+      // wiederholen sie sich ueber Batches hinweg als 1..n). Da Auswertung und
+      // Anzeige Ergebnisse per id den Fragen zuordnen (runEvaluation-Merge,
+      // renderResult), wuerde eine doppelte id ein fremdes Ergebnis auf die
+      // falsche Frage schreiben - inkl. Historie/Prozent/Abzeichen. Eindeutige
+      // 1..n-ids schliessen das aus. (Der lokale Batch-Pfad renummeriert ohnehin.)
       id: i + 1,
       typ,
       kategorie: typeof q.kategorie === "string" ? q.kategorie : "",
       schwierigkeit: validDiff(q.schwierigkeit),
       frage,
       optionen,
-      korrekte_antwort: typeof q.korrekte_antwort === "string" ? q.korrekte_antwort : "",
-      erklaerungen: Array.isArray(q.erklaerungen) ? q.erklaerungen.filter((e) => typeof e === "string") : [],
+      korrekte_antwort,
+      korrekte_indizes,
+      erklaerungen,
       elemente,
       korrekte_reihenfolge,
       lerninfo: typeof q.lerninfo === "string" ? q.lerninfo : "",
@@ -884,9 +976,10 @@ function normalizeEvalData(result) {
     ergebnisse: Array.isArray(result.ergebnisse)
       ? result.ergebnisse
           .filter((e) => e && typeof e === "object")
-          // id auf Number normalisieren: Hosted-guenstig/DeepSeek/lokal liefern
-          // sie teils als String "1". Spaetere Merge-/Anzeige-Joins vergleichen
-          // mit Number(...), brauchen aber eine konsistente Number-id.
+          // id auf Zahl normalisieren: nicht-strikte Provider (Hosted guenstig,
+          // DeepSeek, lokal) liefern id teils als String ("1"). Sonst scheitert
+          // der id-basierte Abgleich (runEvaluation-Merge, renderResult) und
+          // gueltige Bewertungen wuerden faelschlich als 0 gespeichert.
           .map((e) => ({ ...e, id: Number(e.id) }))
       : [],
     gesamt: {
@@ -1665,7 +1758,101 @@ function normText(t) {
 }
 function fragenKey(q) {
   const optionen = Array.isArray(q.optionen) ? q.optionen : [];
-  return [q.frage, q.korrekte_antwort, ...optionen].map(normText).join(" | ");
+  // Optionen SORTIERT (und normalisiert) einbeziehen, damit der Schluessel
+  // unabhaengig von der Anzeige-Reihenfolge ist. normalizeQuizData mischt die
+  // Optionen jetzt zufaellig; ohne Sortierung bekaeme dieselbe MC-Frage aus zwei
+  // lokalen Batches unterschiedliche Schluessel und wuerde nicht mehr als
+  // Dublette erkannt.
+  const optsNorm = optionen.map(normText).sort();
+  // Korrektheit als SORTIERTE MENGE der richtigen Optionstexte (shuffle-
+  // invariant). NICHT korrekte_antwort verwenden: das ist bei Mehrfach-MC
+  // optionen[korrekte_indizes[0]] und haengt damit von der gemischten
+  // Reihenfolge ab - dieselbe Frage bekaeme sonst je Shuffle einen anderen
+  // Schluessel. Bei offenen Fragen (keine Optionen) bleibt die Musterantwort
+  // (korrekte_antwort) der Korrektheitsteil wie bisher.
+  const correctNorm = [...mcCorrectIndices(q)]
+    .map((i) => optionen[i])
+    .filter((o) => typeof o === "string")
+    .map(normText)
+    .sort();
+  const answerPart = optionen.length ? correctNorm : [normText(q.korrekte_antwort)];
+  return [normText(q.frage), ...answerPart, "|opt|", ...optsNorm].join(" | ");
+}
+
+/* ---------- Multiple-Choice: ein vs. mehrere richtige Antworten ---------- */
+// Mehrfach-MC wird ueber das additive Feld korrekte_indizes signalisiert (Anzahl
+// richtiger Optionen > 1). Alle Helfer lesen defensiv, damit alt-generierte
+// Quizze und gespeicherte Versuche ohne korrekte_indizes wie bisher als
+// Single-Choice laufen (Rueckfall auf korrekte_antwort).
+
+// Liefert die Menge der richtigen Options-Indizes einer MC-Frage, defensiv.
+// Mehrfach-MC: aus korrekte_indizes (gefiltert auf gueltige Optionsindizes).
+// Single-Choice / alte Fragen: Index der Option, die korrekte_antwort entspricht.
+function mcCorrectIndices(q) {
+  const optionen = Array.isArray(q.optionen) ? q.optionen : [];
+  if (Array.isArray(q.korrekte_indizes) && q.korrekte_indizes.length) {
+    const set = new Set(
+      q.korrekte_indizes
+        .map((n) => Number(n))
+        .filter((n) => Number.isInteger(n) && n >= 0 && n < optionen.length),
+    );
+    if (set.size) return set;
+  }
+  // Fallback: Single-Choice ueber Wortlaut
+  const ka = (q.korrekte_antwort || "").trim();
+  const idx = optionen.findIndex((o) => typeof o === "string" && o.trim() === ka);
+  return new Set(idx >= 0 ? [idx] : []);
+}
+
+// true, wenn die Frage als Mehrfachauswahl behandelt werden soll. Haengt an der
+// Zahl der RICHTIGEN Optionen, nicht an einem Schema-Flag: liefert das Modell
+// faelschlich nur eine richtige Option, faellt die Frage automatisch auf
+// sauberes Single-Choice zurueck.
+function mcIsMulti(q) {
+  return q.typ === "multiple_choice" && mcCorrectIndices(q).size > 1;
+}
+
+// Mehrfach-MC-Auswahl <-> answers-String. Format: JSON-Array der ausgewaehlten
+// Optionsindizes, z. B. "[0,2]". answers ist bereits string[]; ein JSON-Array
+// bleibt ein String und bricht beim Speichern/Wiederherstellen nichts.
+function parseMultiSelection(answerStr) {
+  try {
+    const arr = JSON.parse(answerStr);
+    return new Set(Array.isArray(arr) ? arr.map(Number).filter(Number.isInteger) : []);
+  } catch {
+    return new Set();
+  }
+}
+function serializeMultiSelection(set) {
+  return JSON.stringify([...set].sort((a, b) => a - b));
+}
+
+// Lokales, deterministisches Partial-Credit-Scoring fuer Mehrfach-MC (0-10, keine
+// echten Negativpunkte). Liefert einen Eintrag im EVAL_SCHEMA-Format
+// (id/punkte/feedback/musterantwort), damit er sich mit den Modell-Ergebnissen
+// mergen laesst.
+function scoreMultiMc(q, answerStr) {
+  const correct = mcCorrectIndices(q);
+  const sel = parseMultiSelection(answerStr || "");
+  const c = correct.size;
+  const optionen = Array.isArray(q.optionen) ? q.optionen : [];
+  const w = optionen.length - c;
+  let tp = 0;
+  let fp = 0;
+  sel.forEach((i) => (correct.has(i) ? tp++ : fp++));
+  const score = Math.max(0, (c ? tp / c : 0) - (w > 0 ? fp / w : 0));
+  const punkte = Math.round(score * 10);
+  const richtige = [...correct].sort((a, b) => a - b).map((i) => optionen[i]).filter((t) => t);
+  return {
+    id: q.id,
+    punkte,
+    feedback:
+      sel.size === 0
+        ? "Keine Option ausgewählt."
+        : `${tp} von ${c} richtigen Optionen getroffen` +
+          (fp ? `, ${fp} falsch gewählt.` : "."),
+    musterantwort: "Richtig: " + richtige.join(", "),
+  };
 }
 
 // Der exakte Schluessel oben faengt nur wortgleiche Wiederholungen. Schwache
@@ -2038,6 +2225,18 @@ async function generateQuiz(opts = {}) {
     difficulty = "schwer";
   }
 
+  // Punkt 3: einen offenen, noch nicht ausgewerteten Lerntest nicht stillschweigend
+  // ueberschreiben. Nur im Lernmodus relevant; bei Bestaetigung wird die alte Sitzung
+  // verworfen und die Generierung mit gesetztem Flag erneut angestossen.
+  if (mode === "lernen" && !opts._replaceConfirmed && loadLearnSession()) {
+    openConfirmReplaceLearn(() => {
+      clearLearnSession();
+      renderHome();
+      generateQuiz({ ...opts, _replaceConfirmed: true });
+    });
+    return;
+  }
+
   // "schwer" sind die Fragen, die im echten Auswahlverfahren am
   // wahrscheinlichsten drankommen; die Stufe steuert deren Anteil
   const DIFFICULTY_MIX = {
@@ -2050,6 +2249,29 @@ async function generateQuiz(opts = {}) {
   // entsprechend einen Prompt ohne die teuren Quellen-Anweisungen - beides wird
   // erst beim Aufloesen einer Frage nachgeladen.
   const isLocal = (settings.provider || "anthropic") === "local";
+  const isHosted = (settings.provider || "hosted") === "hosted";
+
+  // Stabile URL-Identitaet jetzt festhalten (lastFetch kann sich bis zur
+  // Fertigstellung aendern, v. a. im asynchronen Hosted-Flow).
+  let urlKey = null, jobUrl = null;
+  if (lastFetch.url && jobText === lastFetch.text) {
+    const uk = urlKeyOf(lastFetch.url);
+    if (uk) { urlKey = uk; jobUrl = lastFetch.url; }
+  }
+  const vertiefungFelder = vertiefung ? vertiefung.felder.map((f) => ({ id: f.id, label: f.label })) : null;
+
+  // Hosted (Punkt 1): Generierung laeuft serverseitig als Hintergrund-Job. Der Client
+  // startet den Job und pollt; der Test bricht NICHT ab, wenn der Tab in den Hintergrund
+  // geht, das Handy sperrt oder man die Seite verlaesst und spaeter zurueckkehrt.
+  if (isHosted) {
+    return startHostedGeneration({
+      jobText, difficulty, mode, urlKey, jobUrl, vertiefungFelder,
+      numQuestions: Number(numQuestions),
+      vertiefung: vertiefung
+        ? { felder: vertiefung.felder.map((f) => ({ label: f.label })), niveau: vertiefung.niveau || undefined }
+        : undefined,
+    });
+  }
 
   actionRunning = true;
   showLoading("Fragenkatalog wird erstellt...");
@@ -2075,12 +2297,17 @@ async function generateQuiz(opts = {}) {
       "lesbaren Text (Elemente durch ' -> ' getrennt). ";
 
     const antwortHinweis = isLocal
-      ? "Gib zu jeder Frage die korrekte Antwort an (bei Multiple-Choice exakt den Wortlaut der besten Option, " +
-        "bei offenen Fragen eine knappe Musterantwort), bei Multiple-Choice zu jeder Option eine kurze Erklärung, " +
-        "warum sie richtig oder falsch ist. "
-      : "Gib zu jeder Frage die korrekte Antwort an (bei Multiple-Choice exakt den Wortlaut der besten Option, " +
-        "bei offenen Fragen eine knappe Musterantwort), bei Multiple-Choice zu jeder Option eine kurze Erklärung, " +
-        "warum sie richtig oder falsch ist, einen lernrelevanten Hintergrund (lerninfo) sowie 1 bis 3 Quellen zur Vertiefung. " +
+      ? "Gib zu jeder Frage die korrekte Antwort an (bei Multiple-Choice den Wortlaut mindestens einer richtigen Option, " +
+        "bei offenen Fragen eine knappe Musterantwort). Gib bei Multiple-Choice zusätzlich in korrekte_indizes alle " +
+        "richtigen Options-Indizes (0-basiert) an; bei offenen Fragen ein leeres Array. Gib bei Multiple-Choice zu JEDER " +
+        "Option (richtig wie falsch) eine kurze Erklärung, warum sie richtig oder falsch ist - bei mehreren richtigen " +
+        "Optionen ist entsprechend jede davon als richtig zu begründen. "
+      : "Gib zu jeder Frage die korrekte Antwort an (bei Multiple-Choice den Wortlaut mindestens einer richtigen Option, " +
+        "bei offenen Fragen eine knappe Musterantwort). Gib bei Multiple-Choice zusätzlich in korrekte_indizes alle " +
+        "richtigen Options-Indizes (0-basiert) an; bei offenen Fragen ein leeres Array. Gib bei Multiple-Choice zu JEDER " +
+        "Option (richtig wie falsch) eine kurze Erklärung, warum sie richtig oder falsch ist - bei mehreren richtigen " +
+        "Optionen ist entsprechend jede davon als richtig zu begründen. Liefere ausserdem " +
+        "einen lernrelevanten Hintergrund (lerninfo) sowie 1 bis 3 Quellen zur Vertiefung. " +
         reihenfolgeAntwort +
         "Nenne nur real existierende Quellen (Gesetze, Normen, Standardwerke, offizielle Dokumentation, etablierte Fachseiten). " +
         "Gib die URL einer Quelle nur an, wenn du dir sicher bist, dass sie existiert - bevorzugt Startseiten oder bekannte, " +
@@ -2093,9 +2320,13 @@ async function generateQuiz(opts = {}) {
     const mcMix = vertiefung
       ? "Etwa ein Drittel der Fragen soll Multiple-Choice sein (4 Optionen, genau eine ist die beste; " +
         "alle uebrigen Optionen muessen plausibel sein - typische Fehlannahmen oder haeufige Verwechslungen, " +
-        "keine offensichtlich falschen Optionen), der Rest offene Fragen. "
-      : "Etwa die Hälfte der Fragen soll Multiple-Choice sein (4 plausible Optionen, genau eine ist die beste), " +
-        "der Rest offene Fragen. ";
+        "keine offensichtlich falschen Optionen), der Rest offene Fragen. " +
+        "Markiere bei jeder Multiple-Choice-Frage die richtigen Optionen ueber korrekte_indizes (0-basiert). "
+      : "Etwa die Hälfte der Fragen soll Multiple-Choice sein (4 plausible Optionen). " +
+        "Die meisten Multiple-Choice-Fragen haben genau eine richtige Option. Bei einigen wenigen " +
+        "(hoechstens etwa ein Drittel der Multiple-Choice-Fragen) duerfen mehrere Optionen gleichzeitig richtig sein - " +
+        "dann gib in korrekte_indizes alle richtigen Indizes an. Markiere bei jeder Multiple-Choice-Frage die richtigen " +
+        "Optionen ueber korrekte_indizes (0-basiert). Der Rest sind offene Fragen. ";
 
     // Tiefe-Block fuer Vertiefungen: zwingt Anspruch/Niveau statt es nur zu
     // erhoffen. Leer bei normalen Tests.
@@ -2181,69 +2412,342 @@ async function generateQuiz(opts = {}) {
       }, { hosted: { action: "generate-quiz", payload: hostedPayload } });
       result = out.data; genCost = out.cost; genTokens = out.tokens;
     }
-    // Defensiv gegen Modelle ohne striktes Schema (DeepSeek, lokale Modelle):
-    // Form pruefen und harmlose Luecken auffuellen, statt spaeter beim Rendern
-    // an einem fehlenden Feld zu scheitern
-    quiz = normalizeQuizData(result);
-    quiz.jobText = jobText;
-    // Stabile Stellen-Identität aus der Quell-URL mitführen, solange der geladene
-    // Text seit dem Laden nicht von Hand verändert wurde - sonst kann die URL
-    // nicht mehr für diesen Text bürgen (z. B. anderer Job manuell eingefügt).
-    if (lastFetch.url && jobText === lastFetch.text) {
-      const uk = urlKeyOf(lastFetch.url);
-      if (uk) {
-        quiz.urlKey = uk;
-        quiz.jobUrl = lastFetch.url;
-      }
-    }
-    quiz.schwierigkeitsgrad = difficulty;
-    // Vertiefungs-Felder am Quiz mitfuehren - saveAttempt schreibt sie als
-    // attempt.vertiefung raus. Nur id/label, kompakt.
-    if (vertiefung) {
-      quiz.vertiefungFelder = vertiefung.felder.map((f) => ({ id: f.id, label: f.label }));
-    }
-    // Kosten der Fragenerstellung (inkl. Verarbeitung der Stellenanzeige) bis
-    // zur Auswertung am Quiz mitfuehren, damit der Gesamtpreis je Fragebogen
-    // gespeichert werden kann
-    quiz.genCost = genCost;
-    // Token-Verbrauch der Erstellung mitfuehren - bei lokalen Modellen gibt es
-    // keinen Preis, dort dient die Token-Zahl als Verbrauchsanzeige
-    quiz.genTokens = genTokens;
-    answers = new Array(quiz.fragen.length).fill("");
-    revealed = new Array(quiz.fragen.length).fill(false);
-    sortDisplay = {};
-    current = 0;
-    reviewing = false;
-    startTime = Date.now();
-
-    if (mode === "pruefung") {
-      startTimer(computeTimeLimitMin(quiz));
-    } else {
-      // Lernmodus hat kein Zeitlimit - Timerzustand vollstaendig zuruecksetzen,
-      // damit kein „ueberzogen“ oder altes Limit aus einer frueheren Pruefung
-      // am Lern-Versuch haengen bleibt
-      stopTimer();
-      timer.overtime = false;
-      timer.limitMin = 0;
-      timer.deadline = 0;
-      $("quiz-timer").classList.add("hidden");
-    }
-
-    // Lokale Modelle liefern manchmal weniger Fragen als angefordert (kleine
-    // Modelle erschoepfen sich oder wiederholen sich nur noch). Das nicht
-    // stillschweigend hinnehmen, sondern offen anzeigen - ausser der Nutzer hat
-    // selbst gestoppt, dann ist die kleinere Zahl gewollt.
-    setQuizNotice(isLocal && !localAborted && quiz.fragen.length < total
-      ? `Das lokale Modell konnte nur ${quiz.fragen.length} von ${total} gewünschten Fragen erzeugen. Für mehr Fragen ein größeres Modell verwenden oder erneut starten.`
-      : "");
-    renderQuestion();
-    showView("view-quiz");
+    // Quiz-Session aus dem Ergebnis aufbauen (gemeinsam mit dem Hosted-Async-Pfad).
+    finalizeQuiz(result, {
+      jobText, difficulty, urlKey, jobUrl, vertiefungFelder, mode,
+      genCost, genTokens, isLocal, localAborted, total,
+    });
   } catch (e) {
     showError(e.message);
   } finally {
     actionRunning = false;
     hideLoading();
   }
+}
+
+// Baut die Quiz-Session aus dem Generierungsergebnis auf — gemeinsam genutzt vom
+// synchronen (BYOK/lokal) und vom asynchronen Hosted-Pfad. ctx traegt den zur
+// Fertigstellung noetigen Kontext (zur Startzeit festgehalten).
+function finalizeQuiz(result, ctx) {
+  quiz = normalizeQuizData(result);
+  quiz.jobText = ctx.jobText;
+  if (ctx.urlKey) { quiz.urlKey = ctx.urlKey; quiz.jobUrl = ctx.jobUrl; }
+  quiz.schwierigkeitsgrad = ctx.difficulty;
+  if (ctx.vertiefungFelder) quiz.vertiefungFelder = ctx.vertiefungFelder;
+  quiz.genCost = ctx.genCost ?? null;
+  quiz.genTokens = ctx.genTokens ?? null;
+  answers = new Array(quiz.fragen.length).fill("");
+  revealed = new Array(quiz.fragen.length).fill(false);
+  sortDisplay = {};
+  current = 0;
+  reviewing = false;
+  startTime = Date.now();
+  mode = ctx.mode || mode;
+  if (mode === "pruefung") {
+    startTimer(computeTimeLimitMin(quiz));
+  } else {
+    stopTimer();
+    timer.overtime = false;
+    timer.limitMin = 0;
+    timer.deadline = 0;
+    $("quiz-timer").classList.add("hidden");
+  }
+  setQuizNotice(ctx.isLocal && !ctx.localAborted && Number.isFinite(ctx.total) && quiz.fragen.length < ctx.total
+    ? `Das lokale Modell konnte nur ${quiz.fragen.length} von ${ctx.total} gewünschten Fragen erzeugen. Für mehr Fragen ein größeres Modell verwenden oder erneut starten.`
+    : "");
+  // Neuer Lerntest: als fortsetzbar markieren und sofort sichern; ein evtl. zuvor
+  // offener Lerntest wird durch den neuen ersetzt. Pruefungsmodus ist nicht fortsetzbar.
+  if (mode === "lernen") { learnSessionActive = true; saveLearnSession(); }
+  else { clearLearnSession(); }
+  renderQuestion();
+  showView("view-quiz");
+}
+
+/* ---------- Hosted-Hintergrund-Generierung (Punkt 1) ---------- */
+
+const ACTIVE_JOB_KEY = "bewerbungstool.activeJob";
+// In-Memory-Spiegel: faellt localStorage aus (voll/blockiert), geht der einzige Zeiger
+// auf den bereits serverseitig laufenden (ggf. kostenpflichtigen) Job nicht verloren —
+// Polling/Loslegen funktioniert dann zumindest im aktuellen Tab weiter.
+let _activeJobMem = null;
+function loadActiveJob() {
+  try { const raw = localStorage.getItem(ACTIVE_JOB_KEY); if (raw) return JSON.parse(raw); } catch {}
+  return _activeJobMem;
+}
+function saveActiveJob(j) {
+  _activeJobMem = j;
+  try { localStorage.setItem(ACTIVE_JOB_KEY, JSON.stringify(j)); return true; } catch { return false; }
+}
+function clearActiveJob() {
+  _activeJobMem = null;
+  try { localStorage.removeItem(ACTIVE_JOB_KEY); } catch {}
+}
+
+let _jobPollTimer = null;
+function scheduleJobPoll(delayMs) {
+  clearTimeout(_jobPollTimer);
+  _jobPollTimer = setTimeout(pollActiveJob, delayMs);
+}
+
+// Startet einen serverseitigen Generierungsjob (Turnstile einmal beim Start) und kehrt
+// sofort zurueck; die Erstellung laeuft im Hintergrund (Worker-DO), tab-unabhaengig.
+async function startHostedGeneration(ctx) {
+  if (actionRunning) return;
+  // Nur EIN Test in Erstellung zugleich (deckt sich mit dem serverseitigen
+  // exclusive-Gate). Ein bereits fertiger Job ("ready") blockiert nicht — er wird
+  // durch den neuen Start ersetzt (saveActiveJob ueberschreibt ihn).
+  const existing = loadActiveJob();
+  if (existing && existing.status !== "ready") {
+    showError("Es wird gerade schon ein Test erstellt. Bitte warte, bis er fertig ist.");
+    return;
+  }
+  actionRunning = true;
+  showLoading("Test wird gestartet...");
+  try {
+    const token = await getTurnstileToken("generate-quiz");
+    const headers = { "Content-Type": "application/json" };
+    if (token) headers["CF-Turnstile-Token"] = token;
+    const res = await fetch(hostedBase() + "/api/jobs", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        jobText: ctx.jobText,
+        numQuestions: ctx.numQuestions,
+        difficulty: ctx.difficulty,
+        vertiefung: ctx.vertiefung,
+        tier: settings.tier || "standard",
+      }),
+    });
+    if (!res.ok) throw new Error(hostedErrorMessage(res.status));
+    const data = await res.json();
+    if (!data.jobId) throw new Error("Der Test konnte nicht gestartet werden. Bitte erneut versuchen.");
+    // Nur den fuer die Fertigstellung noetigen Kontext sichern (keine Prompts/Tokens).
+    const persisted = saveActiveJob({
+      jobId: data.jobId,
+      status: "pending",
+      createdAt: Date.now(),
+      ctx: {
+        jobText: ctx.jobText, difficulty: ctx.difficulty, mode: ctx.mode,
+        urlKey: ctx.urlKey, jobUrl: ctx.jobUrl, vertiefungFelder: ctx.vertiefungFelder,
+      },
+    });
+    hideLoading();
+    showView("view-home");
+    renderActiveJobCard("pending");
+    // Konnte der Zeiger nicht dauerhaft gespeichert werden (Speicher voll/blockiert),
+    // laeuft der Job dank In-Memory-Spiegel im aktuellen Tab weiter — ein Reload oder
+    // Tabwechsel wuerde ihn aber verlieren. Den Nutzer darauf hinweisen.
+    if (!persisted) {
+      showError("Dein Test wird erstellt, kann aber nicht dauerhaft gesichert werden (Browser-Speicher voll?). Bitte diesen Tab geöffnet lassen, bis der Test fertig ist.");
+    }
+    scheduleJobPoll(0);
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    actionRunning = false;
+    hideLoading();
+  }
+}
+
+async function pollActiveJob() {
+  const job = loadActiveJob();
+  if (!job || job.status === "ready") return; // fertig: wartet auf "Loslegen"
+
+  // WICHTIG: der Client raeumt einen Job nie nach lokal verstrichener Zeit weg — das
+  // koennte einen serverseitig noch laufenden (ggf. bezahlten) Job verwerfen und einen
+  // Doppellauf ausloesen (Codex-Review). Die Staleness ist server-eigen: der Status-
+  // Endpunkt markiert einen zu lange "pending" Job selbst terminal (status "timeout")
+  // und gibt die Reserve frei. Der Client wartet auf genau diese Server-Aussage (bzw.
+  // 404, wenn der Job nicht mehr existiert) und pollt bei Netzfehlern nur weiter.
+  let r;
+  try {
+    r = await fetch(hostedBase() + "/api/jobs/" + encodeURIComponent(job.jobId));
+  } catch {
+    scheduleJobPoll(5000); // Netzfehler/Offline: spaeter erneut versuchen, Job behalten
+    return;
+  }
+  if (r.status === 404) {
+    clearActiveJob();
+    renderActiveJobCard(null);
+    showError("Der erstellte Test ist nicht mehr verfügbar. Bitte starte ihn neu.");
+    return;
+  }
+  if (!r.ok) {
+    // Server-/Gateway-Fehler (5xx/403/…): voruebergehend, mit Abstand erneut versuchen.
+    scheduleJobPoll(5000);
+    return;
+  }
+  let data;
+  try { data = await r.json(); } catch { scheduleJobPoll(5000); return; }
+
+  if (data.status === "done" && data.quiz) {
+    // Ergebnis sichern und ruhen lassen — der Nutzer startet selbst (kein Wegreissen).
+    saveActiveJob({ ...job, status: "ready", quiz: data.quiz });
+    renderActiveJobCard("ready");
+  } else if (data.status === "done") {
+    // Defensiv: "done" ohne Quiz ist ein Serverfehler — nicht endlos weiter pollen.
+    clearActiveJob();
+    renderActiveJobCard("error");
+    showError(jobErrorMessage("unknown"));
+  } else if (data.status === "error") {
+    clearActiveJob();
+    renderActiveJobCard("error");
+    showError(jobErrorMessage(data.code));
+  } else {
+    renderActiveJobCard("pending");
+    scheduleJobPoll(3000);
+  }
+}
+
+function jobErrorMessage(code) {
+  if (code === "parse" || code === "upstream") {
+    return "Bei der Erstellung ist ein Fehler aufgetreten. Bitte erneut versuchen, ggf. mit weniger Fragen.";
+  }
+  if (code === "timeout") {
+    return "Die Erstellung hat zu lange gedauert und wurde abgebrochen. Bitte starte den Test neu.";
+  }
+  return "Der Test konnte nicht erstellt werden. Bitte erneut versuchen.";
+}
+
+// Beim App-Start einen offenen/fertigen Job wieder aufnehmen (Punkt 1: zurueckkehren).
+function resumeActiveJob() {
+  // Nur im Hosted-Modus aufnehmen: ein Hintergrund-Job gehoert zu api.jobreif.de. Hat
+  // der Nutzer auf BYOK/lokal umgestellt, den Zeiger ruhen lassen (kein Hosted-Poll,
+  // keine Karte), bis wieder hosted aktiv ist.
+  if ((settings.provider || "hosted") !== "hosted") return;
+  const job = loadActiveJob();
+  if (!job) return;
+  if (job.status === "ready" && job.quiz) { renderActiveJobCard("ready"); return; }
+  renderActiveJobCard("pending");
+  scheduleJobPoll(0);
+}
+
+function startReadyJob() {
+  const job = loadActiveJob();
+  if (!job || !job.quiz) return;
+  clearActiveJob();
+  renderActiveJobCard(null);
+  finalizeQuiz(job.quiz, { ...job.ctx, genCost: null, genTokens: null, isLocal: false });
+}
+
+// Status-Karte fuer den Hintergrund-Job auf der Startliste. state: "pending"|"ready"|"error"|null.
+function renderActiveJobCard(state) {
+  const card = $("active-job-card");
+  if (!card) return;
+  if (!state) {
+    card.classList.add("hidden");
+    renderHome(); // Empty-Hinweis/Liste wieder korrekt herstellen
+    return;
+  }
+  // Solange ein Job laeuft/fertig ist, den "Noch keine Stelle"-Hinweis nicht zeigen
+  // (er wuerde dem Karten-Status widersprechen).
+  $("home-empty").classList.add("hidden");
+  const textEl = $("active-job-text");
+  const spin = $("active-job-spinner");
+  const startBtn = $("active-job-start");
+  const ready = state === "ready";
+  if (textEl) {
+    textEl.textContent = state === "error"
+      ? "Die Erstellung ist fehlgeschlagen. Bitte erneut starten."
+      : ready
+      ? "Dein Test ist fertig."
+      : "Dein Test wird erstellt … du kannst die Seite verlassen und später zurückkehren.";
+  }
+  if (spin) spin.classList.toggle("hidden", state !== "pending");
+  if (startBtn) startBtn.classList.toggle("hidden", !ready);
+  card.classList.remove("hidden");
+}
+
+/* ---------- Lernmodus: Test verlassen und spaeter fortsetzen (Punkt 3) ---------- */
+
+// Ein im Lernmodus begonnener, noch nicht ausgewerteter Fragebogen wird lokal
+// gesichert, damit man die Seite verlassen und spaeter zurueckkehren kann. Nur
+// Lernmodus (im Pruefungsmodus laeuft ein Zeitlimit, das ein Pausieren ausschliesst).
+const LEARN_SESSION_KEY = "bewerbungstool.learnSession";
+// Markiert, dass der aktuelle Quiz-Zustand ein speicherbarer, laufender Lerntest ist.
+// Verhindert, dass ein bereits ausgewerteter oder nur durchgesehener (reviewing)
+// Fragebogen versehentlich (z. B. via visibilitychange) wieder gespeichert wird.
+let learnSessionActive = false;
+
+function loadLearnSession() {
+  try { const raw = localStorage.getItem(LEARN_SESSION_KEY); if (raw) return JSON.parse(raw); } catch {}
+  return null;
+}
+let _learnSaveWarned = false;
+function saveLearnSession() {
+  if (!learnSessionActive || mode !== "lernen" || !quiz || reviewing) return false;
+  try {
+    localStorage.setItem(LEARN_SESSION_KEY, JSON.stringify({
+      quiz, answers, revealed, current, savedAt: Date.now(),
+    }));
+    _learnSaveWarned = false; // wieder ok → kuenftige Fehler duerfen erneut warnen
+    return true;
+  } catch {
+    // Nicht stumm schlucken: das Feature verspricht "spaeter fortsetzen". Einmal
+    // sichtbar warnen, damit der Nutzer nicht ahnungslos die Seite schliesst.
+    if (!_learnSaveWarned) {
+      _learnSaveWarned = true;
+      showError("Dein Lernfortschritt kann gerade nicht gespeichert werden (Browser-Speicher voll?). Wenn du die Seite jetzt verlässt, lässt sich der Test eventuell nicht fortsetzen.");
+    }
+    return false;
+  }
+}
+function clearLearnSession() {
+  learnSessionActive = false;
+  try { localStorage.removeItem(LEARN_SESSION_KEY); } catch {}
+}
+// Beim Tippen nicht bei jedem Anschlag das ganze Quiz serialisieren — kurz buendeln.
+let _learnSaveTimer = null;
+function saveLearnSessionDebounced() {
+  clearTimeout(_learnSaveTimer);
+  _learnSaveTimer = setTimeout(saveLearnSession, 800);
+}
+
+// Gesicherten Lerntest wiederherstellen und in die Frageansicht springen.
+function resumeLearnSession() {
+  const s = loadLearnSession();
+  if (!s || !s.quiz || !Array.isArray(s.quiz.fragen) || !s.quiz.fragen.length) { clearLearnSession(); renderHome(); return; }
+  quiz = s.quiz;
+  // Defensiv gegen unvollstaendige/aeltere Staende: Laengen an die Fragen angleichen.
+  const n = quiz.fragen.length;
+  answers = Array.isArray(s.answers) ? s.answers.slice(0, n) : [];
+  while (answers.length < n) answers.push("");
+  revealed = Array.isArray(s.revealed) ? s.revealed.slice(0, n) : [];
+  while (revealed.length < n) revealed.push(false);
+  current = Number.isInteger(s.current) ? Math.min(Math.max(0, s.current), n - 1) : 0;
+  mode = "lernen";
+  reviewing = false;
+  startTime = Date.now();
+  learnSessionActive = true;
+  stopTimer();
+  timer.overtime = false; timer.limitMin = 0; timer.deadline = 0;
+  $("quiz-timer").classList.add("hidden");
+  setQuizNotice("");
+  renderQuestion();
+  showView("view-quiz");
+}
+
+function discardLearnSession() {
+  clearLearnSession();
+  renderHome(); // Karte ausblenden und Leer-Hinweis/Liste korrekt wiederherstellen
+}
+
+// "Test fortsetzen"-Karte auf der Startliste, wenn ein offener Lerntest existiert.
+function renderResumeCard() {
+  const card = $("resume-card");
+  if (!card) return;
+  const s = loadLearnSession();
+  if (!s || !s.quiz || !Array.isArray(s.quiz.fragen) || !s.quiz.fragen.length) {
+    card.classList.add("hidden");
+    return;
+  }
+  const total = s.quiz.fragen.length;
+  const pos = Math.min((Number.isInteger(s.current) ? s.current : 0) + 1, total);
+  const titel = (s.quiz.titel || "Lerntest").trim();
+  $("resume-text").textContent = `Offener Lerntest „${titel}“ – Frage ${pos} von ${total}. Du kannst hier fortsetzen.`;
+  // Widerspricht dem Leer-Hinweis; diesen ausblenden, solange die Karte sichtbar ist.
+  $("home-empty").classList.add("hidden");
+  card.classList.remove("hidden");
 }
 
 /* ---------- Timer (Prüfungsmodus) ---------- */
@@ -2351,7 +2855,56 @@ function renderQuestion() {
   const hasAnswer = (answers[current] || "").trim() !== "";
   const locked = (isRevealed && hasAnswer) || reviewing;
 
-  if (q.typ === "multiple_choice") {
+  if (q.typ === "multiple_choice" && mcIsMulti(q)) {
+    // Mehrfach-MC: Checkbox-Logik (Klick toggelt), Auswahl als Index-Menge.
+    // Die Hinweiszeile liegt in einem eigenen Container (nicht als Geschwister
+    // der Options-Buttons), damit die nth-child-Animationsstaffelung und der
+    // children[idx]-Fokuspfad stimmen.
+    const correct = mcCorrectIndices(q);
+    const hint = document.createElement("div");
+    hint.className = "mc-multi-hint-wrap";
+    const hintP = document.createElement("p");
+    hintP.className = "mc-multi-hint";
+    hintP.textContent = "Mehrere Antworten möglich";
+    hint.appendChild(hintP);
+    area.appendChild(hint);
+
+    const optWrap = document.createElement("div");
+    optWrap.className = "mc-options";
+    q.optionen.forEach((opt, idx) => {
+      const sel = parseMultiSelection(answers[current] || "");
+      const btn = document.createElement("button");
+      let cls = "option option-checkbox";
+      if (sel.has(idx)) cls += " selected";
+      if (isRevealed) {
+        // Richtige Optionen gruen (auch nicht gewaehlte, damit der Nutzer sieht,
+        // was er verpasst hat), faelschlich gewaehlte rot.
+        if (correct.has(idx)) cls += " correct";
+        else if (sel.has(idx)) cls += " wrong";
+      }
+      btn.className = cls;
+      btn.textContent = opt;
+      btn.setAttribute("aria-pressed", sel.has(idx) ? "true" : "false");
+      if (!locked) {
+        btn.addEventListener("click", () => {
+          const s = parseMultiSelection(answers[current] || "");
+          if (s.has(idx)) s.delete(idx);
+          else s.add(idx);
+          answers[current] = s.size ? serializeMultiSelection(s) : "";
+          renderQuestion();
+          // Fokus auf die geklickte Option zurueck. Die Options liegen in
+          // einem eigenen Container, daher dort indexieren.
+          const wrap = $("answer-area").querySelector(".mc-options");
+          const fresh = wrap && wrap.children[idx];
+          if (fresh) fresh.focus();
+        });
+      } else {
+        btn.disabled = true;
+      }
+      optWrap.appendChild(btn);
+    });
+    area.appendChild(optWrap);
+  } else if (q.typ === "multiple_choice") {
     q.optionen.forEach((opt, idx) => {
       const btn = document.createElement("button");
       let cls = "option";
@@ -2369,6 +2922,7 @@ function renderQuestion() {
       if (!locked) {
         btn.addEventListener("click", () => {
           answers[current] = opt;
+          saveLearnSession();
           renderQuestion();
           // Das Neuzeichnen ersetzt alle Buttons - den Fokus auf die gewaehlte
           // Option zurueckgeben, sonst landet er auf <body> (Tastaturbedienung)
@@ -2390,7 +2944,9 @@ function renderQuestion() {
     ta.placeholder = "Deine Antwort...";
     ta.value = answers[current] || "";
     ta.readOnly = locked;
-    ta.addEventListener("input", () => (answers[current] = ta.value));
+    ta.addEventListener("input", () => { answers[current] = ta.value; saveLearnSessionDebounced(); });
+    // Beim Verlassen des Feldes (z. B. vor dem Wegklicken) sofort sichern.
+    ta.addEventListener("blur", saveLearnSession);
     area.appendChild(ta);
   }
 
@@ -2646,6 +3202,7 @@ function renderLearnArea(q, isRevealed) {
     btn.textContent = "Auflösen und erklären";
     btn.addEventListener("click", () => {
       revealed[current] = true;
+      saveLearnSession();
       renderQuestion();
       // Lokaler Lernmodus: Lernhintergrund und Quellen jetzt einzeln nachladen
       // (zeichnet die Box bei Erfolg neu). Bei Cloud-Fragen ist beides schon da.
@@ -2687,10 +3244,17 @@ function renderLearnArea(q, isRevealed) {
     });
     box.appendChild(ol);
   } else {
+    const correct = mcCorrectIndices(q);
     const answerLine = document.createElement("p");
     answerLine.className = "learn-answer";
-    answerLine.textContent =
-      (q.typ === "multiple_choice" ? "Richtige Antwort: " : "Musterantwort: ") + (q.korrekte_antwort || "");
+    if (mcIsMulti(q)) {
+      answerLine.textContent =
+        "Richtige Antworten: " +
+        [...correct].sort((a, b) => a - b).map((i) => q.optionen[i]).filter((t) => t).join(", ");
+    } else {
+      answerLine.textContent =
+        (q.typ === "multiple_choice" ? "Richtige Antwort: " : "Musterantwort: ") + (q.korrekte_antwort || "");
+    }
     box.appendChild(answerLine);
   }
 
@@ -2701,7 +3265,9 @@ function renderLearnArea(q, isRevealed) {
     q.optionen.forEach((opt, i) => {
       if (!erklaerungen[i]) return;
       const li = document.createElement("li");
-      const isCorrect = opt.trim() === (q.korrekte_antwort || "").trim();
+      // isCorrect ueber Index-Zugehoerigkeit (mcCorrectIndices nutzt fuer
+      // Single-Choice den Wortlaut-Fallback - alte Versuche laufen weiter).
+      const isCorrect = correct.has(i);
       li.className = isCorrect ? "exp-correct" : "exp-wrong";
       li.textContent = `${opt} – ${erklaerungen[i]}`;
       ul.appendChild(li);
@@ -2743,6 +3309,7 @@ function renderLearnArea(q, isRevealed) {
 function nextQuestion() {
   if (current < quiz.fragen.length - 1) {
     current++;
+    saveLearnSession();
     renderQuestion();
   } else if (reviewing) {
     // Bereits bewertet: zurueck zur gespeicherten Auswertung, keine neue Bewertung
@@ -2755,6 +3322,7 @@ function nextQuestion() {
 function prevQuestion() {
   if (current > 0) {
     current--;
+    saveLearnSession();
     renderQuestion();
   }
 }
@@ -2796,55 +3364,77 @@ async function runEvaluation() {
       "Fragen, die im Lernmodus vor dem Antworten aufgelöst wurden (aufgeloest: true), bewerte normal, " +
       "erwähne den Umstand aber kurz im Feedback. Antworte auf Deutsch.";
 
-    // Reihenfolge-Fragen werden lokal/deterministisch gescort und NICHT ans
-    // Modell geschickt (kostenneutral, kein Halluzinieren bei deterministischen
-    // Aufgaben). Erkennung defensiv: alte Versuche kennen den Typ nicht.
+    // Reihenfolge- und Mehrfach-MC-Fragen werden LOKAL/deterministisch gescort
+    // (Partial Credit) und NICHT ans Modell geschickt: spart Tokens, ist
+    // reproduzierbar und kostet im Hosted-Modus keinen Extra-Worker-Call.
+    // Single-Choice-MC und offene Fragen bleiben bewusst beim Modell (Verhalten
+    // bestehender Tests unveraendert). Erkennung defensiv: alte Versuche kennen
+    // die Typen nicht.
     const istReihenfolge = (q) =>
       q && q.typ === "reihenfolge" && Array.isArray(q.elemente) && q.elemente.length >= 2 &&
       Array.isArray(q.korrekte_reihenfolge) && q.korrekte_reihenfolge.length === q.elemente.length;
 
-    // Lokale Ergebniszeilen fuer alle Reihenfolge-Fragen (auch unbeantwortete).
+    // Lokale Ergebniszeilen (Reihenfolge + Mehrfach-MC, auch unbeantwortete) und
+    // kompakte Zusammenfassung fuer die Gesamteinschaetzung des Modells. modelFragen
+    // behaelt den Original-Index, damit answers[i]/revealed[i] korrekt bleiben.
     const localResults = [];
+    const localSummary = [];
+    const modelFragen = [];
     quiz.fragen.forEach((q, i) => {
-      if (!istReihenfolge(q)) return;
-      const musterantwort = q.korrekte_reihenfolge.map((idx) => q.elemente[idx]).join(" -> ");
-      const userOrder = parseOrder(answers[i] || "", q.elemente.length);
-      if (!userOrder) {
-        // nie sortiert / korrupt -> 0 Punkte wie eine uebersprungene Frage
+      if (istReihenfolge(q)) {
+        const musterantwort = q.korrekte_reihenfolge.map((idx) => q.elemente[idx]).join(" -> ");
+        const userOrder = parseOrder(answers[i] || "", q.elemente.length);
+        if (!userOrder) {
+          // nie sortiert / korrupt -> 0 Punkte wie eine uebersprungene Frage
+          localResults.push({
+            id: q.id,
+            punkte: 0,
+            feedback: "Nicht beantwortet: die Reihenfolge wurde nicht angeordnet.",
+            musterantwort,
+          });
+          localSummary.push({ frage: (q.frage || "").slice(0, 160), punkte: 0 });
+          return;
+        }
+        const punkte = scoreReihenfolge(userOrder, q.korrekte_reihenfolge);
+        const richtig = userOrder.reduce((acc, el, pos) => acc + (q.korrekte_reihenfolge[pos] === el ? 1 : 0), 0);
+        const prozentGeordnet = Math.round((punkte / 10) * 100);
         localResults.push({
           id: q.id,
-          punkte: 0,
-          feedback: "Nicht beantwortet: die Reihenfolge wurde nicht angeordnet.",
+          punkte,
+          feedback: `${richtig} von ${q.elemente.length} Elementen an der richtigen Position; Reihenfolge zu ${prozentGeordnet}% korrekt geordnet.`,
           musterantwort,
         });
-        return;
+        localSummary.push({ frage: (q.frage || "").slice(0, 160), punkte });
+      } else if (mcIsMulti(q)) {
+        const res = scoreMultiMc(q, answers[i]);
+        if (mode === "lernen" && revealed[i]) res.feedback += " (im Lernmodus aufgelöst)";
+        localResults.push(res);
+        localSummary.push({ frage: (q.frage || "").slice(0, 160), punkte: res.punkte });
+      } else {
+        modelFragen.push({ q, i });
       }
-      const punkte = scoreReihenfolge(userOrder, q.korrekte_reihenfolge);
-      const richtig = userOrder.reduce((acc, el, pos) => acc + (q.korrekte_reihenfolge[pos] === el ? 1 : 0), 0);
-      const prozentGeordnet = Math.round((punkte / 10) * 100);
-      localResults.push({
-        id: q.id,
-        punkte,
-        feedback: `${richtig} von ${q.elemente.length} Elementen an der richtigen Position; Reihenfolge zu ${prozentGeordnet}% korrekt geordnet.`,
-        musterantwort,
-      });
     });
 
-    // Modell-Payload nur aus Nicht-Reihenfolge-Fragen (Index erhalten, damit
-    // answers[i]/revealed[i] korrekt zugeordnet bleiben).
-    const payload = [];
-    quiz.fragen.forEach((q, i) => {
-      if (istReihenfolge(q)) return;
-      payload.push({
-        id: q.id,
-        frage: q.frage,
-        typ: q.typ,
-        optionen: q.optionen,
-        korrekte_antwort: q.korrekte_antwort,
-        antwort: answers[i] || "(keine Antwort)",
-        aufgeloest: mode === "lernen" ? revealed[i] : false,
-      });
-    });
+    // Hinweis-Block (gleicher Wortlaut wie im Worker, buildEvalMessages): nennt
+    // dem Modell die bereits bewerteten Fragen samt Punkten, mit der Anweisung,
+    // sie NICHT erneut als eigene Eintraege auszugeben.
+    const mcLokalHinweis = localSummary.length
+      ? "\n\nZusätzlich wurden " + localSummary.length + " Fragen (Mehrfachauswahl bzw. Reihenfolge) " +
+        "bereits separat und deterministisch bewertet. Bewerte sie NICHT erneut und gib fuer sie KEINE " +
+        "eigenen Ergebnis-Eintraege aus; beziehe ihre Ergebnisse aber in die Gesamteinschätzung " +
+        "(Zusammenfassung, Stärken, Verbesserungen) mit ein:\n" +
+        localSummary.map((m) => `- ${m.frage}: ${m.punkte}/10`).join("\n")
+      : "";
+
+    const payload = modelFragen.map(({ q, i }) => ({
+      id: q.id,
+      frage: q.frage,
+      typ: q.typ,
+      optionen: q.optionen,
+      korrekte_antwort: q.korrekte_antwort,
+      antwort: answers[i] || "(keine Antwort)",
+      aufgeloest: mode === "lernen" ? revealed[i] : false,
+    }));
 
     const minutesUsed = Math.max(1, Math.round(durationMs / 60000));
     const kontext =
@@ -2856,25 +3446,31 @@ async function runEvaluation() {
     const user =
       "Stellenausschreibung:\n" + quiz.jobText.slice(0, 15000) +
       "\n\nRahmen: " + kontext +
-      "\n\nBewerte diese Antworten des Kandidaten:\n" + JSON.stringify(payload, null, 2);
+      "\n\nBewerte diese Antworten des Kandidaten:\n" + JSON.stringify(payload, null, 2) +
+      mcLokalHinweis;
 
-    let result, evalCost = 0, evalTokens = 0;
+    let result;
+    let evalCost = 0;
+    let evalTokens;
 
     if (payload.length === 0) {
-      // Edge case: Quiz besteht NUR aus Reihenfolge-Fragen -> kein Modellcall
-      // (eine leere Eval-Payload wuerde der Worker mit 400 ablehnen). gesamt
-      // wird lokal gebaut.
-      result = normalizeEvalData({ ergebnisse: [], gesamt: {} });
+      // Sonderfall: das Quiz besteht nur aus lokal gescorten Fragen (Mehrfach-MC
+      // und/oder Reihenfolge). Kein Modell-/Worker-Call (eine leere Eval-Payload
+      // wuerde der Worker mit 400 ablehnen) - Auswertung komplett lokal. Der
+      // gesamt-Block wird unten aus den reconcileten Zeilen befuellt.
+      result = normalizeEvalData({
+        ergebnisse: localResults,
+        gesamt: { prozent: 0, zusammenfassung: "", staerken: [], verbesserungen: [] },
+      });
     } else {
-      // Progress zaehlt nur die Modell-Fragen (Reihenfolge laeuft nicht ueber den
-      // Stream) - sonst bliebe der Balken haengen, wenn Reihenfolge-Aufgaben dabei
-      // sind.
+      // Progress zaehlt nur die Modell-Fragen (lokal gescorte laufen nicht ueber
+      // den Stream) - sonst bliebe der Balken haengen.
       const total = payload.length;
       setLoadingProgress(0, total, "Das Modell prüft deine Antworten...");
       const evalHostedPayload = {
         jobText: quiz.jobText,
         payload,
-        kontext: { mode, limitMin: timer.limitMin, minutesUsed, overtime: timer.overtime },
+        kontext: { mode, limitMin: timer.limitMin, minutesUsed, overtime: timer.overtime, mcLokal: localSummary },
       };
       const { data: rawResult, cost, tokens } = await callLLM(system, user, EVAL_SCHEMA, (acc) => {
         const seen = (acc.match(/"feedback"\s*:/g) || []).length;
@@ -2882,47 +3478,71 @@ async function runEvaluation() {
           ? `Antwort ${Math.min(seen, total)} von ${total} wird bewertet...`
           : "Antworten werden ausgewertet...");
       }, { hosted: { action: "evaluate", payload: evalHostedPayload } });
+      evalCost = cost;
+      evalTokens = tokens;
       // Form absichern, bevor gespeichert/gerendert wird: ohne striktes Schema
       // (DeepSeek, lokale Modelle) koennte z. B. das gesamt-Objekt fehlen, was
       // beim Speichern (result.gesamt.prozent) sonst einen Absturz ausloest
       result = normalizeEvalData(rawResult);
-      evalCost = cost;
-      evalTokens = tokens;
+      // Lokale Ergebnisse (Mehrfach-MC + Reihenfolge) einmischen (das Modell hat
+      // sie nicht gesehen). Modell-Ergebnisse vorher auf die tatsaechlich gestellten
+      // (Payload-)IDs filtern: Erfindet das Modell trotz Anweisung einen Eintrag
+      // fuer eine lokal gescorte Frage, gewinnt sonst beim id-Lookup in renderResult
+      // ggf. der falsche (Modell-)Eintrag. Reihenfolge ist egal (Suche per id).
+      const modelIds = new Set(payload.map((p) => Number(p.id)));
+      result.ergebnisse = result.ergebnisse.filter((e) => modelIds.has(Number(e.id))).concat(localResults);
     }
 
-    // Lokale Reihenfolge-Ergebnisse einmischen.
-    result.ergebnisse = result.ergebnisse.concat(localResults);
+    // Ergebnisse gegen ALLE Quizfragen abgleichen: pro Frage genau eine Zeile, in
+    // Quiz-Reihenfolge. Fehlt eine Zeile (Modell laesst unter Truncation/Drift eine
+    // schwere/offene Frage weg, oder DeepSeek/lokal liefert unvollstaendig), zaehlt
+    // sie als 0 Punkte statt aus dem Nenner zu verschwinden - sonst wuerde der
+    // Score (und damit Historie/Abzeichen/Fortschritt) faelschlich geschoent.
+    {
+      const byId = new Map(
+        result.ergebnisse
+          .filter((e) => e && Number.isFinite(Number(e.id)))
+          .map((e) => [Number(e.id), e]),
+      );
+      // punkte pro Zeile hart auf eine Ganzzahl 0..10 klemmen und ZURUECK-
+      // schreiben: nicht-strikte Provider (DeepSeek/lokal) sind nicht schema-
+      // erzwungen und koennen z. B. 100 oder -5 liefern. Ohne Klemmen wuerde die
+      // Summe unten unmoegliche Gesamtprozente (>100 / negativ) in die Historie
+      // speichern (die Detail-Anzeige klemmt nur fuers Rendern, nicht den Stand).
+      const clampPunkte = (p) => {
+        const n = Math.round(Number(p));
+        return Number.isFinite(n) ? Math.max(0, Math.min(10, n)) : 0;
+      };
+      result.ergebnisse = quiz.fragen.map((q) => {
+        const e = byId.get(q.id);
+        if (!e) return { id: q.id, punkte: 0, feedback: "Keine Bewertung erhalten.", musterantwort: "" };
+        e.punkte = clampPunkte(e.punkte);
+        return e;
+      });
+    }
 
-    // Robustheit (B): pro Frage genau eine Ergebniszeile in Quiz-Reihenfolge.
-    // Fehlt eine (Truncation/Drift beim Modell), eine 0-Punkte-Zeile
-    // synthetisieren. Joins ueber Number-id, da Provider sie als String liefern.
-    const byId = new Map(result.ergebnisse.map((e) => [Number(e.id), e]));
-    const reconciled = quiz.fragen.map((q) => {
-      let e = byId.get(Number(q.id));
-      if (!e) {
-        e = { id: q.id, punkte: 0, feedback: "Keine Bewertung erhalten.", musterantwort: "" };
-      }
-      // Robustheit (C): punkte hart auf Ganzzahl 0..10 klemmen und zurueck-
-      // schreiben (nicht-strikte Provider liefern evtl. 100 oder -5).
-      let p = Math.round(Number(e.punkte));
-      if (!Number.isFinite(p)) p = 0;
-      p = Math.max(0, Math.min(10, p));
-      return { ...e, id: Number(q.id), punkte: p };
-    });
-    result.ergebnisse = reconciled;
-
-    // gesamt.prozent NEU aus der Summe aller Zeilen-punkte / (n*10), 0..100.
-    const summe = reconciled.reduce((a, e) => a + e.punkte, 0);
-    let prozent = quiz.fragen.length ? Math.round((summe / (quiz.fragen.length * 10)) * 100) : 0;
-    prozent = Math.max(0, Math.min(100, prozent));
-    result.gesamt.prozent = prozent;
+    // gesamt.prozent NEU aus ALLEN Fragen berechnen (Nenner = quiz.fragen.length,
+    // nicht die Zahl zurueckgelieferter Zeilen): das Modell kennt nur seine
+    // Teilmenge, sein prozent ist nicht mehr repraesentativ. Deckt sich mit der
+    // Punkte-Summe im Score-Ring (Summe Punkte / n*10).
+    {
+      const sum = result.ergebnisse.reduce((a, e) => a + (Number(e.punkte) || 0), 0);
+      const max = quiz.fragen.length * 10;
+      const prozent = max ? Math.round((sum / max) * 100) : 0;
+      result.gesamt.prozent = Math.max(0, Math.min(100, prozent));
+    }
     if (payload.length === 0) {
-      // Reines Reihenfolge-Quiz: gesamt lokal mit generischem Text fuellen.
+      // Rein lokal gescortes Quiz (nur Mehrfach-MC und/oder Reihenfolge): gesamt
+      // lokal mit generischem Text fuellen, da kein Modell eine Zusammenfassung lieferte.
       result.gesamt.zusammenfassung = result.gesamt.zusammenfassung ||
-        `Du hast ${prozent}% der Reihenfolge-Aufgaben korrekt geordnet.`;
+        `Du hast ${result.gesamt.prozent}% der automatisch bewerteten Aufgaben erreicht.`;
     }
 
-    saveAttempt(result, durationMs, evalCost, evalTokens);
+    const saved = saveAttempt(result, durationMs, evalCost, evalTokens);
+    // Den fortsetzbaren Lerntest erst verwerfen, wenn der Versuch WIRKLICH gespeichert
+    // wurde — sonst koennten bei vollem/blockiertem Speicher beide verloren gehen.
+    if (saved) clearLearnSession();
+    else showError("Dein Ergebnis konnte nicht dauerhaft gespeichert werden (Browser-Speicher voll?). Der offene Lerntest bleibt erhalten, du kannst es später erneut auswerten.");
     renderResult(result, durationMs);
     // Spielfortschritt dieser Stelle; frisch freigeschaltete Abzeichen und ein
     // Levelaufstieg werden gegen den Stand vor diesem Versuch hervorgehoben.
@@ -3050,11 +3670,19 @@ function renderResult(result, durationMs) {
       badge.textContent = difficultyLabel(q.schwierigkeit);
       div.querySelector(".q").appendChild(badge);
     }
-    // Reihenfolge-Antworten sind ein JSON-Index-Array - lesbar aufbereiten.
+    // Reihenfolge-Antworten sind ein JSON-Index-Array, Mehrfach-MC eine Index-
+    // Auswahl ("[0,2]") - beide fuer die Anzeige in lesbare Texte aufloesen. Alte
+    // Versuche ohne diese Typen fallen auf den rohen String zurueck (bei
+    // Single-Choice ohnehin der Optionstext). Keine Regression.
     let antwortText = answers[i] || "(keine Antwort)";
     if (q.typ === "reihenfolge" && Array.isArray(q.elemente)) {
       const uo = parseOrder(answers[i] || "", q.elemente.length);
       antwortText = uo ? uo.map((idx) => q.elemente[idx]).join(" -> ") : "(keine Antwort)";
+    } else if (mcIsMulti(q)) {
+      const sel = parseMultiSelection(answers[i] || "");
+      antwortText = sel.size
+        ? [...sel].sort((a, b) => a - b).map((k) => q.optionen[k]).filter((t) => t).join(", ")
+        : "(keine Antwort)";
     }
     div.querySelector(".a").textContent = "Deine Antwort: " + antwortText;
     div.querySelectorAll(".fb")[0].textContent = r.feedback || "";
@@ -3699,23 +4327,28 @@ function loadHistory() {
   }
 }
 
+// Gibt true zurueck, wenn der Verlauf wirklich geschrieben wurde, sonst false
+// (Speicher voll/blockiert, nichts mehr zum Verwerfen). Aufrufer, die etwas davon
+// abhaengig machen (z. B. eine offene Lern-Sitzung erst danach verwerfen), muessen
+// das Ergebnis pruefen.
 function saveHistory(h) {
   // Bei vollem Speicher aelteste Versuche verwerfen und erneut versuchen
   for (let i = 0; i < 5; i++) {
     try {
       localStorage.setItem("bewerbungstool.history", JSON.stringify(h));
-      return;
+      return true;
     } catch {
       let oldest = null;
       let oldestJob = null;
       h.jobs.forEach((j) => j.attempts.forEach((a) => {
         if (!oldest || (a.date || 0) < (oldest.date || 0)) { oldest = a; oldestJob = j; }
       }));
-      if (!oldest) return;
+      if (!oldest) return false;
       oldestJob.attempts = oldestJob.attempts.filter((a) => a !== oldest);
       h.jobs = h.jobs.filter((j) => j.attempts.length > 0);
     }
   }
+  return false;
 }
 
 // Dieselbe Anzeige (gleicher Text) landet immer bei derselben Stelle
@@ -3931,7 +4564,7 @@ function saveAttempt(result, durationMs, evalCost, evalTokens) {
 
   if (job.attempts.length > HISTORY_MAX_ATTEMPTS) job.attempts = job.attempts.slice(-HISTORY_MAX_ATTEMPTS);
   if (h.jobs.length > HISTORY_MAX_JOBS) h.jobs.length = HISTORY_MAX_JOBS;
-  saveHistory(h);
+  return saveHistory(h); // true, wenn der Versuch wirklich gespeichert wurde
 }
 
 function formatDate(ts) {
@@ -4164,6 +4797,12 @@ function renderHome() {
   $("home-empty").classList.toggle("hidden", jobs.length > 0);
   $("home-all-row").classList.toggle("hidden", jobs.length === 0);
   jobs.slice(0, HOME_MAX).forEach((job) => list.appendChild(buildHomeCard(job)));
+  // Laeuft/wartet ein Hintergrund-Job, dessen Karte nach der Navigation wieder
+  // herstellen (sie blendet den widerspruechlichen "Noch keine Stelle"-Hinweis aus).
+  const aj = loadActiveJob();
+  if (aj) renderActiveJobCard(aj.status === "ready" ? "ready" : "pending");
+  // Offenen Lerntest anbieten (blendet bei Bedarf den Leer-Hinweis aus).
+  renderResumeCard();
 }
 
 // Gueltiger Fragenzahl-Bereich - identisch zum Stepper im Eingabe-Bildschirm
@@ -4593,6 +5232,11 @@ function startTestForJob(job, testMode, cfg) {
 // Gespeicherten Versuch wieder oeffnen: Auswertung anzeigen, Fragebogen
 // laesst sich von dort im Lernmodus erneut durchgehen
 function openAttempt(job, att) {
+  // Ein historischer Versuch ist NICHT die laufende Lern-Sitzung: das Auto-Speichern
+  // deaktivieren, sonst wuerde ein visibilitychange/pagehide den (ggf. noch offenen)
+  // echten Lerntest mit den Daten dieses alten Versuchs ueberschreiben.
+  learnSessionActive = false;
+  reviewing = true;
   quiz = JSON.parse(JSON.stringify(att.quiz));
   enrichTried = new Set();
   enrichingIdx = -1;
@@ -5254,6 +5898,14 @@ $("btn-history-back").addEventListener("click", goReturn);
 
 // Startliste und Stellen-Subpage
 $("btn-new-job").addEventListener("click", () => showView("view-input"));
+$("active-job-start").addEventListener("click", startReadyJob);
+$("resume-continue").addEventListener("click", resumeLearnSession);
+$("resume-discard").addEventListener("click", discardLearnSession);
+
+// Lerntest sichern, wenn der Tab in den Hintergrund geht oder geschlossen wird —
+// auf Mobilgeraeten der zuverlaessigste Zeitpunkt (pagehide feuert dort nicht immer).
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") saveLearnSession(); });
+window.addEventListener("pagehide", saveLearnSession);
 $("btn-input-back").addEventListener("click", goHome);
 $("btn-job-back").addEventListener("click", goHome);
 $("btn-all-jobs").addEventListener("click", () => {
@@ -5316,6 +5968,31 @@ $("btn-confirm-eval").addEventListener("click", () => {
   runEvaluation();
 });
 $("btn-confirm-eval-cancel").addEventListener("click", cancelConfirmEval);
+
+// Rueckfrage vor dem Ueberschreiben eines offenen Lerntests (Punkt 3). Merkt sich
+// die Aktion, die bei Bestaetigung laufen soll, und gibt den Fokus sauber zurueck.
+let confirmReplaceLearnAction = null;
+let confirmReplaceLearnReturnFocus = null;
+function openConfirmReplaceLearn(onConfirm) {
+  confirmReplaceLearnAction = onConfirm;
+  confirmReplaceLearnReturnFocus = document.activeElement;
+  $("confirm-replace-learn-modal").classList.remove("hidden");
+  $("btn-confirm-replace-learn").focus();
+}
+function closeConfirmReplaceLearn() {
+  $("confirm-replace-learn-modal").classList.add("hidden");
+  confirmReplaceLearnAction = null;
+  if (confirmReplaceLearnReturnFocus && typeof confirmReplaceLearnReturnFocus.focus === "function") {
+    confirmReplaceLearnReturnFocus.focus();
+  }
+  confirmReplaceLearnReturnFocus = null;
+}
+$("btn-confirm-replace-learn").addEventListener("click", () => {
+  const action = confirmReplaceLearnAction;
+  closeConfirmReplaceLearn();
+  if (action) action();
+});
+$("btn-confirm-replace-learn-cancel").addEventListener("click", closeConfirmReplaceLearn);
 
 // Rueckfrage vor dem Loeschen einer Stelle (ersetzt das blockierende native
 // confirm()). Merkt sich die betroffene Stelle und was nach dem Loeschen
@@ -5489,6 +6166,7 @@ const ESCAPE_CLOSERS = [
   ["datenschutz-modal", closeDatenschutz],
   ["impressum-modal", closeImpressum],
   ["confirm-eval-modal", cancelConfirmEval],
+  ["confirm-replace-learn-modal", closeConfirmReplaceLearn],
   ["badge-modal", closeBadgeModal],
   ["confirm-delete-modal", closeConfirmDelete],
   ["levelup-overlay", closeLevelUp],
@@ -5517,6 +6195,9 @@ if (!isConfigured) {
 } else {
   goHome();
 }
+
+// Offenen/fertigen Hintergrund-Job (Punkt 1) nach App-Start wieder aufnehmen.
+resumeActiveJob();
 
 /* ---------- Service Worker (PWA) ---------- */
 

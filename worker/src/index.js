@@ -6,6 +6,7 @@
 //   → Prompt bauen → OpenRouter (stream) → Stream an Client tee'n, usage lesen → settle.
 
 import { BudgetDO } from "./budget-do.js";
+import { GenerationJobDO } from "./job-do.js";
 import { resolveTier, worstCaseCost } from "./tiers.js";
 import { corsHeaders, preflight } from "./cors.js";
 import { verifyTurnstile } from "./turnstile.js";
@@ -15,7 +16,7 @@ import {
   buildQuizMessages, buildEvalMessages, buildThemenfelderMessages,
 } from "./prompts.js";
 
-export { BudgetDO };
+export { BudgetDO, GenerationJobDO };
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const ROUTES = {
@@ -36,6 +37,12 @@ export default {
       const stub = budgetStub(env);
       const stats = await stub.fetch("https://do/stats").then((r) => r.json());
       return json(stats, 200, env, origin);
+    }
+
+    // Async-Generierung (Hintergrund-Job, Punkt 1): Start + Poll.
+    if (path === "/api/jobs" && req.method === "POST") return await startJob(req, env, ctx, origin);
+    if (path.startsWith("/api/jobs/") && req.method === "GET") {
+      return await pollJob(path.slice("/api/jobs/".length), env, origin);
     }
 
     const route = ROUTES[path];
@@ -65,9 +72,14 @@ export default {
     const hardCap = Number(env.HARD_CAP_TOKENS || 18000);
     const reserve = worstCaseCost(tier, hardCap);
     const stub = budgetStub(env);
-    const gate = await doCall(stub, "reserve", { amount: reserve, subject: ip, ip });
+    // Auch der (von aelteren, gecachten Clients noch genutzte) synchrone Generierungs-
+    // pfad nimmt am Pro-Nutzer-exclusive-Gate teil, sonst liesse sich die "nur ein Test
+    // gleichzeitig"-Regel durch Direktaufruf umgehen (Codex-Finding). evaluate/themenfelder
+    // bleiben nicht-exklusiv (kurze Aufrufe, kein Generierungs-Slot).
+    const exclusive = route.action === "generate-quiz";
+    const gate = await doCall(stub, "reserve", { amount: reserve, subject: ip, ip, exclusive });
     if (!gate.ok) {
-      const status = gate.reason === "budget" ? 503 : 429; // inflight/subject/ip → 429
+      const status = gate.reason === "budget" ? 503 : 429; // active-job/inflight/subject/ip → 429
       return json({ error: gate.reason }, status, env, origin);
     }
     const reserveId = gate.reserveId;
@@ -130,6 +142,70 @@ export default {
     }
   },
 };
+
+// --- Async-Generierung (Punkt 1) ------------------------------------------
+
+// Startet einen Hintergrund-Generierungsjob: Turnstile (einmal) → validieren → Stufe
+// → Budget reservieren (mit Pro-Nutzer-Gate exclusive) → Job-DO anstossen → jobId zurück.
+async function startJob(req, env, ctx, origin) {
+  const ip = req.headers.get("CF-Connecting-IP") || "0.0.0.0";
+
+  if (env.SKIP_TURNSTILE !== "1") {
+    const token = req.headers.get("CF-Turnstile-Token") || "";
+    const tv = await verifyTurnstile(token, { action: "generate-quiz", secret: env.TURNSTILE_SECRET, ip });
+    if (!tv.ok) return json({ error: "turnstile", reason: tv.reason }, 403, env, origin);
+  }
+
+  let body;
+  try { body = await req.json(); } catch { return json({ error: "bad-json" }, 400, env, origin); }
+  const vErr = validateQuiz(body);
+  if (vErr) return json({ error: "validation", field: vErr }, 400, env, origin);
+
+  const rt = resolveTier(body.tier, { allowPaid: env.ALLOW_PAID === "1" });
+  if (rt.error === 400) return json({ error: "unknown-tier" }, 400, env, origin);
+  if (rt.error === 402) return json({ error: "tier-locked" }, 402, env, origin);
+  const tier = rt.tier;
+
+  const reserve = worstCaseCost(tier, Number(env.HARD_CAP_TOKENS || 24000));
+  const stub = budgetStub(env);
+  const gate = await doCall(stub, "reserve", { amount: reserve, subject: ip, ip, exclusive: true });
+  if (!gate.ok) {
+    const status = gate.reason === "budget" ? 503 : 429; // active-job/inflight/subject/ip → 429
+    return json({ error: gate.reason }, status, env, origin);
+  }
+
+  const jobId = crypto.randomUUID();
+  const params = {
+    jobText: body.jobText,
+    numQuestions: body.numQuestions,
+    difficulty: body.difficulty,
+    vertiefung: body.vertiefung,
+  };
+  const jobStub = env.GENJOB_DO.get(env.GENJOB_DO.idFromName(jobId));
+  try {
+    await jobStub.fetch("https://do/start", {
+      method: "POST",
+      body: JSON.stringify({ params, tier, subject: ip, reserveId: gate.reserveId, reserveAmount: reserve }),
+    });
+  } catch {
+    await doCall(stub, "release", { reserveId: gate.reserveId }); // Slot wieder freigeben
+    return json({ error: "start-failed" }, 502, env, origin);
+  }
+  return json({ jobId }, 202, env, origin);
+}
+
+// Pollt den Status/Result eines Jobs (jobId ist eine nicht erratbare UUID).
+async function pollJob(jobId, env, origin) {
+  if (!jobId || jobId.length > 64) return json({ error: "bad-job" }, 400, env, origin);
+  const jobStub = env.GENJOB_DO.get(env.GENJOB_DO.idFromName(jobId));
+  let st;
+  try { st = await jobStub.fetch("https://do/status").then((r) => r.json()); }
+  catch { return json({ error: "poll-failed" }, 502, env, origin); }
+  if (st.status === "done") return json({ status: "done", quiz: st.result }, 200, env, origin);
+  if (st.status === "error") return json({ status: "error", code: st.errorCode || null }, 200, env, origin);
+  if (st.status === "unknown") return json({ status: "unknown" }, 404, env, origin);
+  return json({ status: "pending" }, 200, env, origin);
+}
 
 // --- Helfer ---------------------------------------------------------------
 

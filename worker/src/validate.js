@@ -38,7 +38,26 @@ export function validateEval(data) {
   if (data.jobText.length > MAX_JOBTEXT) return "jobText-zu-lang";
   if (!Array.isArray(data.payload) || data.payload.length === 0) return "payload";
   if (data.payload.length > MAX_EVAL_ITEMS) return "payload-zu-gross";
-  if (JSON.stringify(data.payload).length > MAX_PAYLOAD_JSON) return "payload-json-zu-gross";
+  // kontext ist frei strukturiert, aber kontext.mcLokal wird serverseitig in den
+  // Prompt injiziert (prompts.js buildEvalMessages). Daher hart begrenzen, damit
+  // ein direkter Aufrufer nicht ueber einen winzigen payload + riesiges mcLokal
+  // das Groessenlimit umgeht und Budget/Upstream-Prompt aufblaeht.
+  if (data.kontext != null) {
+    if (typeof data.kontext !== "object" || Array.isArray(data.kontext)) return "kontext";
+    const m = data.kontext.mcLokal;
+    if (m != null) {
+      if (!Array.isArray(m)) return "kontext.mcLokal";
+      if (m.length > MAX_EVAL_ITEMS) return "kontext.mcLokal-zu-gross";
+      for (const e of m) {
+        if (!e || typeof e !== "object") return "kontext.mcLokal.eintrag";
+        if (e.frage != null && (typeof e.frage !== "string" || e.frage.length > 400)) return "kontext.mcLokal.frage";
+        if (e.punkte != null && typeof e.punkte !== "number") return "kontext.mcLokal.punkte";
+      }
+    }
+  }
+  // Gesamtgroesse inkl. kontext begrenzen (nicht nur payload), da kontext jetzt
+  // ebenfalls in den Prompt fliesst.
+  if (JSON.stringify([data.payload, data.kontext || null]).length > MAX_PAYLOAD_JSON) return "payload-json-zu-gross";
   return null;
 }
 

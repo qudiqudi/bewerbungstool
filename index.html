@@ -176,6 +176,22 @@
         <button id="btn-new-job" class="primary">+ Neue Stelle</button>
       </div>
       <p class="hint hidden" id="home-empty">Noch keine Stelle. Lege mit &bdquo;Neue Stelle&ldquo; eine Stellenanzeige an und erstelle deinen ersten Test &ndash; danach erscheint die Stelle hier mit deinem Fortschritt.</p>
+      <!-- Hintergrund-Generierung (Punkt 1): laeuft serverseitig weiter, auch wenn man die Seite verlaesst. -->
+      <div id="active-job-card" class="active-job-card hidden">
+        <div class="active-job-row">
+          <div id="active-job-spinner" class="spinner spinner-sm"></div>
+          <p id="active-job-text" class="active-job-text"></p>
+        </div>
+        <button id="active-job-start" class="primary hidden">Loslegen</button>
+      </div>
+      <!-- Offener Lerntest (Punkt 3): verlassener Fragebogen, spaeter fortsetzbar. -->
+      <div id="resume-card" class="active-job-card hidden">
+        <p id="resume-text" class="active-job-text"></p>
+        <div class="resume-actions">
+          <button id="resume-discard" class="ghost">Verwerfen</button>
+          <button id="resume-continue" class="primary">Fortsetzen</button>
+        </div>
+      </div>
       <div id="home-list"></div>
       <div class="row" id="home-all-row">
         <button id="btn-all-jobs" class="ghost">Alle Stellen ansehen</button>
@@ -349,6 +365,18 @@
         <div class="row">
           <button id="btn-confirm-delete" class="danger">Endgültig löschen</button>
           <button id="btn-confirm-delete-cancel" class="ghost">Abbrechen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Rückfrage: offenen Lerntest durch einen neuen ersetzen (Punkt 3) -->
+    <div id="confirm-replace-learn-modal" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="confirm-replace-learn-title">
+      <div class="modal card">
+        <h2 id="confirm-replace-learn-title">Offener Lerntest</h2>
+        <p id="confirm-replace-learn-text">Du hast einen offenen Lerntest, den du fortsetzen könntest. Wenn du jetzt einen neuen Test startest, geht der bisherige Fortschritt verloren.</p>
+        <div class="row">
+          <button id="btn-confirm-replace-learn" class="primary">Neuen Test starten</button>
+          <button id="btn-confirm-replace-learn-cancel" class="ghost">Abbrechen</button>
         </div>
       </div>
     </div>
