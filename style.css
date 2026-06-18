@@ -1889,3 +1889,27 @@ button.danger:hover { background: var(--red-soft); border-color: var(--red); }
   bottom: 16px;
   z-index: 1000;
 }
+
+/* Aktiver Hintergrund-Job auf der Startliste (Punkt 1: Test wird serverseitig erstellt) */
+.active-job-card {
+  border: 1px solid var(--primary-soft-border);
+  background: var(--primary-soft);
+  border-radius: var(--radius);
+  padding: 0.9rem 1.1rem;
+  margin: 0.25rem 0 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.active-job-row { display: flex; align-items: center; gap: 0.7rem; min-width: 0; }
+.active-job-text { margin: 0; color: var(--text); font-size: 0.95rem; }
+.spinner-sm {
+  width: 20px;
+  height: 20px;
+  border-width: 3px;
+  border-color: var(--primary-soft-border);
+  border-top-color: var(--primary);
+  flex: none;
+}
