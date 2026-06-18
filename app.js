@@ -1630,7 +1630,13 @@ function normText(t) {
 }
 function fragenKey(q) {
   const optionen = Array.isArray(q.optionen) ? q.optionen : [];
-  return [q.frage, q.korrekte_antwort, ...optionen].map(normText).join(" | ");
+  // Optionen SORTIERT (und normalisiert) einbeziehen, damit der Schluessel
+  // unabhaengig von der Anzeige-Reihenfolge ist. normalizeQuizData mischt die
+  // Optionen jetzt zufaellig; ohne Sortierung bekaeme dieselbe MC-Frage aus zwei
+  // lokalen Batches unterschiedliche Schluessel und wuerde nicht mehr als
+  // Dublette erkannt. korrekte_antwort ist ohnehin shuffle-invariant.
+  const optsNorm = optionen.map(normText).sort();
+  return [normText(q.frage), normText(q.korrekte_antwort), ...optsNorm].join(" | ");
 }
 
 /* ---------- Multiple-Choice: ein vs. mehrere richtige Antworten ---------- */
