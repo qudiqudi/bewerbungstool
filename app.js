@@ -5356,10 +5356,12 @@ function renderJobBlock(job, opts) {
     score.textContent = att.prozent + " %";
     const openBtn = document.createElement("button");
     openBtn.textContent = "Ansehen";
-    // openAttempt klont att.quiz und liest quiz.fragen - fehlt das bei sehr
-    // alten Versuchen, wuerde "Ansehen" abstuerzen. Solche Versuche bleiben
-    // sichtbar, aber der Knopf wird deaktiviert (degradierter, kein Crash).
-    const canReview = att.quiz && Array.isArray(att.quiz.fragen);
+    // openAttempt klont att.quiz (liest quiz.fragen) und reicht att.result an
+    // renderResult, das result.gesamt liest. Fehlt eines davon bei sehr alten
+    // Versuchen, wuerde "Ansehen" abstuerzen. Solche Versuche bleiben sichtbar,
+    // aber der Knopf wird deaktiviert (degradierter Zustand statt Crash).
+    const canReview = att.quiz && Array.isArray(att.quiz.fragen) &&
+      att.result && typeof att.result === "object";
     if (canReview) {
       openBtn.addEventListener("click", () => openAttempt(job, att));
     } else {
