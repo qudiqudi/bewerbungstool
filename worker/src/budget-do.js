@@ -49,16 +49,25 @@ export class BudgetDO {
     const d = today();
     if (d === this.day) return;
     this.day = d;
-    // Echte Tageswerte zuruecksetzen: Ausgaben + Pro-Tag-Kontingente.
+    // Echte Tageswerte zuruecksetzen: Ausgaben starten bei 0.
     this.daySpent = 0;
-    this.perSubject = {};
-    this.perIp = {};
     // ABER offene Reservierungen NICHT verwerfen: ein Stream, der ueber Mitternacht
     // laeuft, muss seine Reserve behalten, sonst findet sein settle die Reservierung
     // nicht mehr und der echte usage.cost ginge verloren — und der In-flight-Zaehler
-    // wuerde mitten im Stream auf 0 gesetzt (kurzzeitige Ueber-Concurrency). dayReserved
-    // konsistent auf die Summe der noch offenen Reserven neu setzen; inflight bleibt.
-    this.dayReserved = Object.values(this.reservations).reduce((sum, r) => sum + r.amount, 0);
+    // wuerde mitten im Stream auf 0 gesetzt (kurzzeitige Ueber-Concurrency). Deshalb
+    // perSubject/perIp NICHT leeren, sondern aus den ueberlebenden Reserven NEU AUFBAUEN:
+    // settle/release/reconcile buchen spaeter r.amount bzw. 1 wieder ab — leerten wir die
+    // Buckets, ginge der Pro-Subjekt-/Pro-IP-Anteil dieses Calls am neuen Tag still
+    // verloren (Math.max-Clamp auf 0). dayReserved konsistent als Summe der offenen
+    // Reserven; inflight bleibt unveraendert.
+    this.perSubject = {};
+    this.perIp = {};
+    this.dayReserved = 0;
+    for (const r of Object.values(this.reservations)) {
+      this.perSubject[r.subject] = (this.perSubject[r.subject] || 0) + r.amount;
+      this.perIp[r.ip] = (this.perIp[r.ip] || 0) + 1;
+      this.dayReserved += r.amount;
+    }
   }
 
   // Abgelaufene Reserven ohne Settle konservativ runterbuchen (Hälfte des Worst-Case)
