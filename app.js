@@ -2239,6 +2239,11 @@ async function pollActiveJob() {
     // Ergebnis sichern und ruhen lassen — der Nutzer startet selbst (kein Wegreissen).
     saveActiveJob({ ...job, status: "ready", quiz: data.quiz });
     renderActiveJobCard("ready");
+  } else if (data.status === "done") {
+    // Defensiv: "done" ohne Quiz ist ein Serverfehler — nicht endlos weiter pollen.
+    clearActiveJob();
+    renderActiveJobCard("error");
+    showError(jobErrorMessage("unknown"));
   } else if (data.status === "error") {
     clearActiveJob();
     renderActiveJobCard("error");
@@ -2261,6 +2266,10 @@ function jobErrorMessage(code) {
 
 // Beim App-Start einen offenen/fertigen Job wieder aufnehmen (Punkt 1: zurueckkehren).
 function resumeActiveJob() {
+  // Nur im Hosted-Modus aufnehmen: ein Hintergrund-Job gehoert zu api.jobreif.de. Hat
+  // der Nutzer auf BYOK/lokal umgestellt, den Zeiger ruhen lassen (kein Hosted-Poll,
+  // keine Karte), bis wieder hosted aktiv ist.
+  if ((settings.provider || "hosted") !== "hosted") return;
   const job = loadActiveJob();
   if (!job) return;
   if (job.status === "ready" && job.quiz) { renderActiveJobCard("ready"); return; }
@@ -3889,6 +3898,10 @@ function renderHome() {
   $("home-empty").classList.toggle("hidden", jobs.length > 0);
   $("home-all-row").classList.toggle("hidden", jobs.length === 0);
   jobs.slice(0, HOME_MAX).forEach((job) => list.appendChild(buildHomeCard(job)));
+  // Laeuft/wartet ein Hintergrund-Job, dessen Karte nach der Navigation wieder
+  // herstellen (sie blendet den widerspruechlichen "Noch keine Stelle"-Hinweis aus).
+  const aj = loadActiveJob();
+  if (aj) renderActiveJobCard(aj.status === "ready" ? "ready" : "pending");
 }
 
 // Gueltiger Fragenzahl-Bereich - identisch zum Stepper im Eingabe-Bildschirm

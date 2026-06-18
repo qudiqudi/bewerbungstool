@@ -84,10 +84,11 @@ export class BudgetDO {
     const subjectShare = Number(this.env.PER_SUBJECT_SHARE) * dayBudget;
     const perIpDay = Number(this.env.PER_IP_DAY);
 
-    // Pro-Nutzer-Gate für Hintergrund-Jobs: nur EIN offener Job je Subjekt gleichzeitig
-    // (verhindert Parallel-Generierung und deckelt Kosten). Gilt nur für exclusive-Reserven
-    // (Async-Generierung), nicht für die kurzen synchronen Aufrufe (Auswertung).
-    if (exclusive && Object.values(this.reservations).some((r) => r.subject === subject)) {
+    // Pro-Nutzer-Gate für Generierungen: nur EIN offener Generierungs-Job je Subjekt
+    // gleichzeitig (verhindert Parallel-Generierung und deckelt Kosten). Es zaehlen NUR
+    // andere exclusive-Reserven (Generierung) — kurze nicht-exklusive Aufrufe (Auswertung,
+    // Themenfelder) duerfen waehrend einer Generierung laufen und blockieren sie nicht.
+    if (exclusive && Object.values(this.reservations).some((r) => r.subject === subject && r.exclusive)) {
       return { ok: false, reason: "active-job" };
     }
 
@@ -102,7 +103,7 @@ export class BudgetDO {
     this.inflight += 1;
     this.perSubject[subject] = (this.perSubject[subject] || 0) + amount;
     this.perIp[ip] = (this.perIp[ip] || 0) + 1;
-    this.reservations[reserveId] = { amount, subject, ip, ts: Date.now() };
+    this.reservations[reserveId] = { amount, subject, ip, ts: Date.now(), exclusive: !!exclusive };
     return { ok: true, reserveId };
   }
 

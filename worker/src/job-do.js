@@ -97,6 +97,17 @@ export class GenerationJobDO {
     const reserveAmount = await this.state.storage.get("reserveAmount");
     const hardCap = Number(this.env.HARD_CAP_TOKENS || 24000);
 
+    // Alarm-Idempotenz gegen Plattform-Retries: Cloudflare stellt einen abgebrochenen
+    // Alarm (Eviction/Kill mitten im fetch) erneut zu. Wurde der Upstream-Call beim
+    // ersten Versuch schon abgeschickt (durabler callStarted-Marker), den Call NICHT
+    // erneut absetzen (sonst doppelte Abrechnung) — terminal als Fehler markieren und
+    // konservativ den Worst-Case settlen. Das raeumt zugleich einen sonst verwaisten
+    // (nie gepollten) Job auf und loescht den jobText (Datenhaltung).
+    if (await this.state.storage.get("callStarted")) {
+      await this.finish("error", null, "timeout", reserveId, reserveAmount ?? null, reserveAmount == null);
+      return;
+    }
+
     // Beginn des Versuchs markieren → der Status-Timeout weiss, dass gerade ein Lauf
     // aktiv ist und raeumt ihn nicht weg (s. status-Handler).
     await this.state.storage.put("alarmStartedAt", Date.now());
