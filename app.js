@@ -5008,6 +5008,24 @@ function deleteJob(job) {
     !(job.key && j.key === job.key) &&
     !(job.urlKey && j.urlKey === job.urlKey));
   saveHistory(h);
+  // Zugehoerige Meldungen mitloeschen: Reports liegen in einem eigenen Key, der
+  // Quota-Trimmung der Historie ueberlebt - aber beim EXPLIZITEN Loeschen einer
+  // Stelle sollen ihre Meldungen (Fragetext, Notizen, ggf. Loesung) nicht als
+  // verwaiste sensible Daten zurueckbleiben (kein anderer UI-Weg, sie zu
+  // entfernen). Gegen alle moeglichen Stellen-Identitaeten matchen, unter denen
+  // ein Report gespeichert sein kann (urlKey / identityKey / Textschluessel).
+  const keys = new Set();
+  if (job.urlKey) keys.add(job.urlKey);
+  const iKey = identityKeyOf(job.titel, job.arbeitgeber, job.arbeitsort);
+  if (iKey) keys.add(iKey);
+  if (job.key) keys.add(job.key);
+  if (job.jobText) { try { keys.add(jobKey(job.jobText)); } catch { /* egal */ } }
+  if (keys.size) {
+    const r = loadReports();
+    const before = r.reports.length;
+    r.reports = r.reports.filter((rep) => !(rep && keys.has(rep.jobKey)));
+    if (r.reports.length !== before) saveReports(r);
+  }
   // Verweist activeJob noch auf die geloeschte Stelle, Bezug aufloesen, damit
   // Zurueck-Navigation nicht auf einen verwaisten Eintrag springt.
   if (activeJob && activeJob.key === job.key) activeJob = null;
@@ -5021,7 +5039,7 @@ function buildDeleteButton(job, afterDelete) {
   const btn = document.createElement("button");
   btn.className = "danger";
   btn.textContent = "Löschen";
-  btn.title = "Diese Stelle mit allen Versuchen aus der Historie entfernen";
+  btn.title = "Diese Stelle mit allen Versuchen und Meldungen aus der Historie entfernen";
   btn.addEventListener("click", () => openConfirmDelete(job, afterDelete));
   return btn;
 }
