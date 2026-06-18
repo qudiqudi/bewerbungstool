@@ -696,6 +696,142 @@ button.ghost {
   box-shadow: inset 0 0 0 4px var(--card);
 }
 
+/* Reihenfolge-Aufgaben (typ=reihenfolge) */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.sortable {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sort-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  padding: 0.45rem 0.6rem;
+  min-height: 52px;
+  box-sizing: border-box;
+  user-select: none;
+  touch-action: pan-y;
+}
+
+.sort-item.dragging {
+  opacity: 0.9;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16);
+  position: relative;
+  z-index: 2;
+}
+
+.sortable.is-dragging .sort-item:not(.dragging) {
+  transition: transform 0.12s ease;
+}
+
+.sort-placeholder {
+  border: 2px dashed var(--primary-soft-border);
+  border-radius: var(--radius);
+  background: var(--primary-soft);
+  list-style: none;
+  box-sizing: border-box;
+}
+
+.sort-grip {
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  line-height: 1;
+  color: var(--muted);
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: grab;
+  touch-action: none;
+}
+.sort-grip:active { cursor: grabbing; }
+.sort-grip:disabled { opacity: 0.4; cursor: default; }
+
+.sort-pos {
+  flex: 0 0 auto;
+  font-family: var(--display);
+  font-weight: 700;
+  color: var(--accent-text);
+  min-width: 1.6rem;
+  text-align: right;
+}
+
+.sort-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sort-moves {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 0.3rem;
+}
+
+.sort-up,
+.sort-down {
+  min-width: 44px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95rem;
+  line-height: 1;
+  color: var(--accent-text);
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.sort-up:hover:not(:disabled),
+.sort-down:hover:not(:disabled) { border-color: var(--primary); }
+.sort-up:disabled,
+.sort-down:disabled { opacity: 0.35; cursor: default; }
+
+.sortable.locked .sort-item { background: var(--card-2); }
+.sort-item.correct {
+  border-color: var(--green);
+  background: var(--green-soft);
+}
+.sort-item.wrong {
+  border-color: var(--red);
+  background: var(--red-soft);
+}
+
+.sort-note { color: var(--muted); font-style: italic; margin-top: 0.4rem; }
+
+.sort-solution {
+  margin: 0 0 0.6rem;
+  padding-left: 1.4rem;
+}
+.sort-solution li { margin-bottom: 0.2rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sortable.is-dragging .sort-item:not(.dragging) { transition: none; }
+}
+
 /* Lernmodus */
 #learn-area { margin-top: 0.7rem; }
 
@@ -1238,6 +1374,12 @@ button.danger:hover { background: var(--red-soft); border-color: var(--red); }
   button { padding: 0.7rem 1rem; }
   .option { padding: 0.95rem 1rem; }
   #question-text { font-size: 1.2rem; }
+
+  /* Reihenfolge: Tap-Targets gross genug, Buttons nicht zu eng */
+  .sort-item { gap: 0.4rem; padding: 0.4rem 0.45rem; }
+  .sort-grip { min-width: 46px; min-height: 46px; }
+  .sort-up, .sort-down { min-width: 46px; min-height: 46px; }
+  .sort-pos { min-width: 1.4rem; }
 
   .diff-row { flex-wrap: wrap; }
   .diff-option { flex: 1; justify-content: center; min-width: 90px; }

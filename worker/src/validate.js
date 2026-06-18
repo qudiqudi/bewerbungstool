@@ -26,6 +26,12 @@ export function validateQuiz(data) {
   return null;
 }
 
+// Reihenfolge-Aufgaben (typ='reihenfolge') werden clientseitig deterministisch
+// gescort und VOR dem Eval-Call aus der Payload entfernt (app.js runEvaluation),
+// daher enthaelt data.payload nie Reihenfolge-Items -> validateEval braucht keine
+// Reihenfolge-spezifische Pruefung. Ein Quiz NUR aus Reihenfolge-Fragen loest gar
+// keinen Eval-Call aus (Client baut gesamt lokal), kollidiert also nicht mit der
+// leere-Payload-Abweisung unten.
 export function validateEval(data) {
   if (typeof data !== "object" || data === null) return "body";
   if (typeof data.jobText !== "string") return "jobText";

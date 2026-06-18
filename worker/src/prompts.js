@@ -19,13 +19,23 @@ export const QUESTIONS_SCHEMA = {
         type: "object",
         properties: {
           id: { type: "integer" },
-          typ: { type: "string", enum: ["multiple_choice", "offen"] },
+          typ: { type: "string", enum: ["multiple_choice", "offen", "reihenfolge"] },
           kategorie: { type: "string" },
           schwierigkeit: { type: "string", enum: ["leicht", "mittel", "schwer"] },
           frage: { type: "string" },
           optionen: { type: "array", items: { type: "string" } },
           korrekte_antwort: { type: "string" },
           erklaerungen: { type: "array", items: { type: "string" } },
+          elemente: {
+            type: "array",
+            items: { type: "string" },
+            description: "Nur bei typ='reihenfolge': die zu ordnenden Elemente, bereits zufaellig gemischt (NICHT in korrekter Reihenfolge). Sonst leeres Array.",
+          },
+          korrekte_reihenfolge: {
+            type: "array",
+            items: { type: "integer" },
+            description: "Nur bei typ='reihenfolge': Permutation der Indizes von elemente. Erster Eintrag = Index des Elements, das an Position 1 gehoert. Sonst leeres Array.",
+          },
           lerninfo: { type: "string" },
           quellen: {
             type: "array",
@@ -37,7 +47,7 @@ export const QUESTIONS_SCHEMA = {
             },
           },
         },
-        required: ["id", "typ", "kategorie", "schwierigkeit", "frage", "optionen", "korrekte_antwort", "erklaerungen", "lerninfo", "quellen"],
+        required: ["id", "typ", "kategorie", "schwierigkeit", "frage", "optionen", "korrekte_antwort", "erklaerungen", "elemente", "korrekte_reihenfolge", "lerninfo", "quellen"],
         additionalProperties: false,
       },
     },
@@ -116,10 +126,24 @@ export function buildQuizMessages({ jobText, numQuestions, difficulty, vertiefun
     "Gib zu jeder Frage die korrekte Antwort an (bei Multiple-Choice exakt den Wortlaut der besten Option, " +
     "bei offenen Fragen eine knappe Musterantwort), bei Multiple-Choice zu jeder Option eine kurze Erklärung, " +
     "warum sie richtig oder falsch ist, einen lernrelevanten Hintergrund (lerninfo) sowie 1 bis 3 Quellen zur Vertiefung. " +
+    "Bei Reihenfolge-Aufgaben enthaelt korrekte_antwort die korrekte Reihenfolge als lesbaren Text (Elemente durch ' -> ' getrennt). " +
     "Nenne nur real existierende Quellen (Gesetze, Normen, Standardwerke, offizielle Dokumentation, etablierte Fachseiten). " +
     "Gib die URL einer Quelle nur an, wenn du dir sicher bist, dass sie existiert - bevorzugt Startseiten oder bekannte, " +
     "stabile Adressen, keine tief verschachtelten Links. Sonst lasse die URL leer und waehle einen praegnanten Titel, " +
     "der sich gut als Suchbegriff eignet. ";
+
+  // Hosted nutzt starke Cloud-Modelle -> Reihenfolge-Aufgaben werden hier (anders
+  // als im App-local-Pfad) NICHT unterdrueckt.
+  const reihenfolgeHinweis =
+    "Wenn sich ein Thema natuerlich als Abfolge, Ablauf, Verfahren, Prozesskette, " +
+    "Rangfolge oder Hierarchie darstellen laesst (z. B. Schritte eines Vorgangs, " +
+    "Eskalationsstufen, Phasen eines Projekts), erstelle gelegentlich statt einer " +
+    "Multiple-Choice- oder offenen Frage eine Reihenfolge-Aufgabe (typ='reihenfolge'): " +
+    "Gib 3 bis 6 Elemente in 'elemente' an und in 'korrekte_reihenfolge' die Indizes " +
+    "dieser Elemente in der fachlich korrekten Reihenfolge. Hoechstens etwa jede " +
+    "sechste Frage soll eine Reihenfolge-Aufgabe sein, und nur wenn es fachlich " +
+    "wirklich eine eindeutige korrekte Reihenfolge gibt. Bei allen anderen Fragen " +
+    "bleiben 'elemente' und 'korrekte_reihenfolge' leere Arrays. ";
 
   const mcMix = isVertiefung
     ? "Etwa ein Drittel der Fragen soll Multiple-Choice sein (4 Optionen, genau eine ist die beste; " +
@@ -145,6 +169,7 @@ export function buildQuizMessages({ jobText, numQuestions, difficulty, vertiefun
     "und stelle nicht mehrfach dieselbe Frage in anderer Formulierung. " +
     "Mische Fachfragen, situative Fragen und Soft-Skill-Fragen. " +
     mcMix +
+    reihenfolgeHinweis +
     "Ordne jeder Frage eine Schwierigkeit zu: 'schwer' sind Fragen, wie sie im echten Auswahlverfahren " +
     "oder Vorstellungsgespräch für genau diese Stelle am wahrscheinlichsten gestellt werden - realistisch, " +
     "spezifisch und anspruchsvoll. 'mittel' sind solide Fachfragen, 'leicht' sind Grundlagen- und Einstiegsfragen. " +
