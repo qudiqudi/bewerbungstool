@@ -4,9 +4,30 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.3.0";
 
 const CHANGELOG = [
+  {
+    version: "1.3.0",
+    date: "18.06.2026",
+    items: [
+      "Im Lernmodus kannst du einen Test jetzt verlassen und später fortsetzen: Deine Antworten und aufgelösten Fragen bleiben erhalten. Auf der Startseite erscheint dazu „Test fortsetzen“.",
+    ],
+  },
+  {
+    version: "1.2.0",
+    date: "18.06.2026",
+    items: [
+      "Im gehosteten Modus wird dein Test jetzt im Hintergrund erstellt: Du kannst die Seite verlassen, das Handy sperren oder wegklicken – die Erstellung läuft weiter. Sobald der Test fertig ist, erscheint er oben auf der Startseite und du startest ihn mit „Loslegen“.",
+    ],
+  },
+  {
+    version: "1.1.1",
+    date: "18.06.2026",
+    items: [
+      "Kleiner Fix: Im gehosteten Modus blendet sich das Sicherheits-Widget (Bot-Schutz) nach der Prüfung wieder aus und verdeckt keine Hinweise oder Fehlermeldungen mehr.",
+    ],
+  },
   {
     version: "1.1.0",
     date: "17.06.2026",
@@ -906,6 +927,13 @@ function turnstileSitekey() {
 let _tsWidgetId = null;
 let _tsPending = null;
 
+// Das Widget nur WÄHREND des Lösens einblenden; danach ausblenden, damit der kurze
+// Challenge-/Erfolgs-Status keine App-Meldung (z. B. die Fehlerkarte) verdeckt.
+function setTurnstileVisible(v) {
+  const el = document.getElementById("turnstile-container");
+  if (el) el.style.display = v ? "block" : "none";
+}
+
 // Wartet, bis das (async geladene) Turnstile-Script bereit ist.
 async function turnstileReady(ms = 4000) {
   const start = Date.now();
@@ -942,10 +970,11 @@ function ensureTurnstileWidget() {
 async function getTurnstileToken(action) {
   if (!turnstileSitekey()) return "";
   if (!(await turnstileReady())) return "";
-  if (!ensureTurnstileWidget()) return "";
+  setTurnstileVisible(true); // VOR render/execute einblenden (Render braucht sichtbaren Host)
+  if (!ensureTurnstileWidget()) { setTurnstileVisible(false); return ""; }
   return new Promise((resolve) => {
     let done = false;
-    const finish = (t) => { if (!done) { done = true; resolve(t || ""); } };
+    const finish = (t) => { if (!done) { done = true; setTurnstileVisible(false); resolve(t || ""); } };
     _tsPending = finish;
     try {
       window.turnstile.reset(_tsWidgetId); // vorheriges Token verwerfen → frisches erzwingen
@@ -1906,6 +1935,18 @@ async function generateQuiz(opts = {}) {
     difficulty = "schwer";
   }
 
+  // Punkt 3: einen offenen, noch nicht ausgewerteten Lerntest nicht stillschweigend
+  // ueberschreiben. Nur im Lernmodus relevant; bei Bestaetigung wird die alte Sitzung
+  // verworfen und die Generierung mit gesetztem Flag erneut angestossen.
+  if (mode === "lernen" && !opts._replaceConfirmed && loadLearnSession()) {
+    openConfirmReplaceLearn(() => {
+      clearLearnSession();
+      renderHome();
+      generateQuiz({ ...opts, _replaceConfirmed: true });
+    });
+    return;
+  }
+
   // "schwer" sind die Fragen, die im echten Auswahlverfahren am
   // wahrscheinlichsten drankommen; die Stufe steuert deren Anteil
   const DIFFICULTY_MIX = {
@@ -1918,6 +1959,29 @@ async function generateQuiz(opts = {}) {
   // entsprechend einen Prompt ohne die teuren Quellen-Anweisungen - beides wird
   // erst beim Aufloesen einer Frage nachgeladen.
   const isLocal = (settings.provider || "anthropic") === "local";
+  const isHosted = (settings.provider || "hosted") === "hosted";
+
+  // Stabile URL-Identitaet jetzt festhalten (lastFetch kann sich bis zur
+  // Fertigstellung aendern, v. a. im asynchronen Hosted-Flow).
+  let urlKey = null, jobUrl = null;
+  if (lastFetch.url && jobText === lastFetch.text) {
+    const uk = urlKeyOf(lastFetch.url);
+    if (uk) { urlKey = uk; jobUrl = lastFetch.url; }
+  }
+  const vertiefungFelder = vertiefung ? vertiefung.felder.map((f) => ({ id: f.id, label: f.label })) : null;
+
+  // Hosted (Punkt 1): Generierung laeuft serverseitig als Hintergrund-Job. Der Client
+  // startet den Job und pollt; der Test bricht NICHT ab, wenn der Tab in den Hintergrund
+  // geht, das Handy sperrt oder man die Seite verlaesst und spaeter zurueckkehrt.
+  if (isHosted) {
+    return startHostedGeneration({
+      jobText, difficulty, mode, urlKey, jobUrl, vertiefungFelder,
+      numQuestions: Number(numQuestions),
+      vertiefung: vertiefung
+        ? { felder: vertiefung.felder.map((f) => ({ label: f.label })), niveau: vertiefung.niveau || undefined }
+        : undefined,
+    });
+  }
 
   actionRunning = true;
   showLoading("Fragenkatalog wird erstellt...");
@@ -2027,68 +2091,341 @@ async function generateQuiz(opts = {}) {
       }, { hosted: { action: "generate-quiz", payload: hostedPayload } });
       result = out.data; genCost = out.cost; genTokens = out.tokens;
     }
-    // Defensiv gegen Modelle ohne striktes Schema (DeepSeek, lokale Modelle):
-    // Form pruefen und harmlose Luecken auffuellen, statt spaeter beim Rendern
-    // an einem fehlenden Feld zu scheitern
-    quiz = normalizeQuizData(result);
-    quiz.jobText = jobText;
-    // Stabile Stellen-Identität aus der Quell-URL mitführen, solange der geladene
-    // Text seit dem Laden nicht von Hand verändert wurde - sonst kann die URL
-    // nicht mehr für diesen Text bürgen (z. B. anderer Job manuell eingefügt).
-    if (lastFetch.url && jobText === lastFetch.text) {
-      const uk = urlKeyOf(lastFetch.url);
-      if (uk) {
-        quiz.urlKey = uk;
-        quiz.jobUrl = lastFetch.url;
-      }
-    }
-    quiz.schwierigkeitsgrad = difficulty;
-    // Vertiefungs-Felder am Quiz mitfuehren - saveAttempt schreibt sie als
-    // attempt.vertiefung raus. Nur id/label, kompakt.
-    if (vertiefung) {
-      quiz.vertiefungFelder = vertiefung.felder.map((f) => ({ id: f.id, label: f.label }));
-    }
-    // Kosten der Fragenerstellung (inkl. Verarbeitung der Stellenanzeige) bis
-    // zur Auswertung am Quiz mitfuehren, damit der Gesamtpreis je Fragebogen
-    // gespeichert werden kann
-    quiz.genCost = genCost;
-    // Token-Verbrauch der Erstellung mitfuehren - bei lokalen Modellen gibt es
-    // keinen Preis, dort dient die Token-Zahl als Verbrauchsanzeige
-    quiz.genTokens = genTokens;
-    answers = new Array(quiz.fragen.length).fill("");
-    revealed = new Array(quiz.fragen.length).fill(false);
-    current = 0;
-    reviewing = false;
-    startTime = Date.now();
-
-    if (mode === "pruefung") {
-      startTimer(computeTimeLimitMin(quiz));
-    } else {
-      // Lernmodus hat kein Zeitlimit - Timerzustand vollstaendig zuruecksetzen,
-      // damit kein „ueberzogen“ oder altes Limit aus einer frueheren Pruefung
-      // am Lern-Versuch haengen bleibt
-      stopTimer();
-      timer.overtime = false;
-      timer.limitMin = 0;
-      timer.deadline = 0;
-      $("quiz-timer").classList.add("hidden");
-    }
-
-    // Lokale Modelle liefern manchmal weniger Fragen als angefordert (kleine
-    // Modelle erschoepfen sich oder wiederholen sich nur noch). Das nicht
-    // stillschweigend hinnehmen, sondern offen anzeigen - ausser der Nutzer hat
-    // selbst gestoppt, dann ist die kleinere Zahl gewollt.
-    setQuizNotice(isLocal && !localAborted && quiz.fragen.length < total
-      ? `Das lokale Modell konnte nur ${quiz.fragen.length} von ${total} gewünschten Fragen erzeugen. Für mehr Fragen ein größeres Modell verwenden oder erneut starten.`
-      : "");
-    renderQuestion();
-    showView("view-quiz");
+    // Quiz-Session aus dem Ergebnis aufbauen (gemeinsam mit dem Hosted-Async-Pfad).
+    finalizeQuiz(result, {
+      jobText, difficulty, urlKey, jobUrl, vertiefungFelder, mode,
+      genCost, genTokens, isLocal, localAborted, total,
+    });
   } catch (e) {
     showError(e.message);
   } finally {
     actionRunning = false;
     hideLoading();
   }
+}
+
+// Baut die Quiz-Session aus dem Generierungsergebnis auf — gemeinsam genutzt vom
+// synchronen (BYOK/lokal) und vom asynchronen Hosted-Pfad. ctx traegt den zur
+// Fertigstellung noetigen Kontext (zur Startzeit festgehalten).
+function finalizeQuiz(result, ctx) {
+  quiz = normalizeQuizData(result);
+  quiz.jobText = ctx.jobText;
+  if (ctx.urlKey) { quiz.urlKey = ctx.urlKey; quiz.jobUrl = ctx.jobUrl; }
+  quiz.schwierigkeitsgrad = ctx.difficulty;
+  if (ctx.vertiefungFelder) quiz.vertiefungFelder = ctx.vertiefungFelder;
+  quiz.genCost = ctx.genCost ?? null;
+  quiz.genTokens = ctx.genTokens ?? null;
+  answers = new Array(quiz.fragen.length).fill("");
+  revealed = new Array(quiz.fragen.length).fill(false);
+  current = 0;
+  reviewing = false;
+  startTime = Date.now();
+  mode = ctx.mode || mode;
+  if (mode === "pruefung") {
+    startTimer(computeTimeLimitMin(quiz));
+  } else {
+    stopTimer();
+    timer.overtime = false;
+    timer.limitMin = 0;
+    timer.deadline = 0;
+    $("quiz-timer").classList.add("hidden");
+  }
+  setQuizNotice(ctx.isLocal && !ctx.localAborted && Number.isFinite(ctx.total) && quiz.fragen.length < ctx.total
+    ? `Das lokale Modell konnte nur ${quiz.fragen.length} von ${ctx.total} gewünschten Fragen erzeugen. Für mehr Fragen ein größeres Modell verwenden oder erneut starten.`
+    : "");
+  // Neuer Lerntest: als fortsetzbar markieren und sofort sichern; ein evtl. zuvor
+  // offener Lerntest wird durch den neuen ersetzt. Pruefungsmodus ist nicht fortsetzbar.
+  if (mode === "lernen") { learnSessionActive = true; saveLearnSession(); }
+  else { clearLearnSession(); }
+  renderQuestion();
+  showView("view-quiz");
+}
+
+/* ---------- Hosted-Hintergrund-Generierung (Punkt 1) ---------- */
+
+const ACTIVE_JOB_KEY = "bewerbungstool.activeJob";
+// In-Memory-Spiegel: faellt localStorage aus (voll/blockiert), geht der einzige Zeiger
+// auf den bereits serverseitig laufenden (ggf. kostenpflichtigen) Job nicht verloren —
+// Polling/Loslegen funktioniert dann zumindest im aktuellen Tab weiter.
+let _activeJobMem = null;
+function loadActiveJob() {
+  try { const raw = localStorage.getItem(ACTIVE_JOB_KEY); if (raw) return JSON.parse(raw); } catch {}
+  return _activeJobMem;
+}
+function saveActiveJob(j) {
+  _activeJobMem = j;
+  try { localStorage.setItem(ACTIVE_JOB_KEY, JSON.stringify(j)); return true; } catch { return false; }
+}
+function clearActiveJob() {
+  _activeJobMem = null;
+  try { localStorage.removeItem(ACTIVE_JOB_KEY); } catch {}
+}
+
+let _jobPollTimer = null;
+function scheduleJobPoll(delayMs) {
+  clearTimeout(_jobPollTimer);
+  _jobPollTimer = setTimeout(pollActiveJob, delayMs);
+}
+
+// Startet einen serverseitigen Generierungsjob (Turnstile einmal beim Start) und kehrt
+// sofort zurueck; die Erstellung laeuft im Hintergrund (Worker-DO), tab-unabhaengig.
+async function startHostedGeneration(ctx) {
+  if (actionRunning) return;
+  // Nur EIN Test in Erstellung zugleich (deckt sich mit dem serverseitigen
+  // exclusive-Gate). Ein bereits fertiger Job ("ready") blockiert nicht — er wird
+  // durch den neuen Start ersetzt (saveActiveJob ueberschreibt ihn).
+  const existing = loadActiveJob();
+  if (existing && existing.status !== "ready") {
+    showError("Es wird gerade schon ein Test erstellt. Bitte warte, bis er fertig ist.");
+    return;
+  }
+  actionRunning = true;
+  showLoading("Test wird gestartet...");
+  try {
+    const token = await getTurnstileToken("generate-quiz");
+    const headers = { "Content-Type": "application/json" };
+    if (token) headers["CF-Turnstile-Token"] = token;
+    const res = await fetch(hostedBase() + "/api/jobs", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        jobText: ctx.jobText,
+        numQuestions: ctx.numQuestions,
+        difficulty: ctx.difficulty,
+        vertiefung: ctx.vertiefung,
+        tier: settings.tier || "standard",
+      }),
+    });
+    if (!res.ok) throw new Error(hostedErrorMessage(res.status));
+    const data = await res.json();
+    if (!data.jobId) throw new Error("Der Test konnte nicht gestartet werden. Bitte erneut versuchen.");
+    // Nur den fuer die Fertigstellung noetigen Kontext sichern (keine Prompts/Tokens).
+    const persisted = saveActiveJob({
+      jobId: data.jobId,
+      status: "pending",
+      createdAt: Date.now(),
+      ctx: {
+        jobText: ctx.jobText, difficulty: ctx.difficulty, mode: ctx.mode,
+        urlKey: ctx.urlKey, jobUrl: ctx.jobUrl, vertiefungFelder: ctx.vertiefungFelder,
+      },
+    });
+    hideLoading();
+    showView("view-home");
+    renderActiveJobCard("pending");
+    // Konnte der Zeiger nicht dauerhaft gespeichert werden (Speicher voll/blockiert),
+    // laeuft der Job dank In-Memory-Spiegel im aktuellen Tab weiter — ein Reload oder
+    // Tabwechsel wuerde ihn aber verlieren. Den Nutzer darauf hinweisen.
+    if (!persisted) {
+      showError("Dein Test wird erstellt, kann aber nicht dauerhaft gesichert werden (Browser-Speicher voll?). Bitte diesen Tab geöffnet lassen, bis der Test fertig ist.");
+    }
+    scheduleJobPoll(0);
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    actionRunning = false;
+    hideLoading();
+  }
+}
+
+async function pollActiveJob() {
+  const job = loadActiveJob();
+  if (!job || job.status === "ready") return; // fertig: wartet auf "Loslegen"
+
+  // WICHTIG: der Client raeumt einen Job nie nach lokal verstrichener Zeit weg — das
+  // koennte einen serverseitig noch laufenden (ggf. bezahlten) Job verwerfen und einen
+  // Doppellauf ausloesen (Codex-Review). Die Staleness ist server-eigen: der Status-
+  // Endpunkt markiert einen zu lange "pending" Job selbst terminal (status "timeout")
+  // und gibt die Reserve frei. Der Client wartet auf genau diese Server-Aussage (bzw.
+  // 404, wenn der Job nicht mehr existiert) und pollt bei Netzfehlern nur weiter.
+  let r;
+  try {
+    r = await fetch(hostedBase() + "/api/jobs/" + encodeURIComponent(job.jobId));
+  } catch {
+    scheduleJobPoll(5000); // Netzfehler/Offline: spaeter erneut versuchen, Job behalten
+    return;
+  }
+  if (r.status === 404) {
+    clearActiveJob();
+    renderActiveJobCard(null);
+    showError("Der erstellte Test ist nicht mehr verfügbar. Bitte starte ihn neu.");
+    return;
+  }
+  if (!r.ok) {
+    // Server-/Gateway-Fehler (5xx/403/…): voruebergehend, mit Abstand erneut versuchen.
+    scheduleJobPoll(5000);
+    return;
+  }
+  let data;
+  try { data = await r.json(); } catch { scheduleJobPoll(5000); return; }
+
+  if (data.status === "done" && data.quiz) {
+    // Ergebnis sichern und ruhen lassen — der Nutzer startet selbst (kein Wegreissen).
+    saveActiveJob({ ...job, status: "ready", quiz: data.quiz });
+    renderActiveJobCard("ready");
+  } else if (data.status === "done") {
+    // Defensiv: "done" ohne Quiz ist ein Serverfehler — nicht endlos weiter pollen.
+    clearActiveJob();
+    renderActiveJobCard("error");
+    showError(jobErrorMessage("unknown"));
+  } else if (data.status === "error") {
+    clearActiveJob();
+    renderActiveJobCard("error");
+    showError(jobErrorMessage(data.code));
+  } else {
+    renderActiveJobCard("pending");
+    scheduleJobPoll(3000);
+  }
+}
+
+function jobErrorMessage(code) {
+  if (code === "parse" || code === "upstream") {
+    return "Bei der Erstellung ist ein Fehler aufgetreten. Bitte erneut versuchen, ggf. mit weniger Fragen.";
+  }
+  if (code === "timeout") {
+    return "Die Erstellung hat zu lange gedauert und wurde abgebrochen. Bitte starte den Test neu.";
+  }
+  return "Der Test konnte nicht erstellt werden. Bitte erneut versuchen.";
+}
+
+// Beim App-Start einen offenen/fertigen Job wieder aufnehmen (Punkt 1: zurueckkehren).
+function resumeActiveJob() {
+  // Nur im Hosted-Modus aufnehmen: ein Hintergrund-Job gehoert zu api.jobreif.de. Hat
+  // der Nutzer auf BYOK/lokal umgestellt, den Zeiger ruhen lassen (kein Hosted-Poll,
+  // keine Karte), bis wieder hosted aktiv ist.
+  if ((settings.provider || "hosted") !== "hosted") return;
+  const job = loadActiveJob();
+  if (!job) return;
+  if (job.status === "ready" && job.quiz) { renderActiveJobCard("ready"); return; }
+  renderActiveJobCard("pending");
+  scheduleJobPoll(0);
+}
+
+function startReadyJob() {
+  const job = loadActiveJob();
+  if (!job || !job.quiz) return;
+  clearActiveJob();
+  renderActiveJobCard(null);
+  finalizeQuiz(job.quiz, { ...job.ctx, genCost: null, genTokens: null, isLocal: false });
+}
+
+// Status-Karte fuer den Hintergrund-Job auf der Startliste. state: "pending"|"ready"|"error"|null.
+function renderActiveJobCard(state) {
+  const card = $("active-job-card");
+  if (!card) return;
+  if (!state) {
+    card.classList.add("hidden");
+    renderHome(); // Empty-Hinweis/Liste wieder korrekt herstellen
+    return;
+  }
+  // Solange ein Job laeuft/fertig ist, den "Noch keine Stelle"-Hinweis nicht zeigen
+  // (er wuerde dem Karten-Status widersprechen).
+  $("home-empty").classList.add("hidden");
+  const textEl = $("active-job-text");
+  const spin = $("active-job-spinner");
+  const startBtn = $("active-job-start");
+  const ready = state === "ready";
+  if (textEl) {
+    textEl.textContent = state === "error"
+      ? "Die Erstellung ist fehlgeschlagen. Bitte erneut starten."
+      : ready
+      ? "Dein Test ist fertig."
+      : "Dein Test wird erstellt … du kannst die Seite verlassen und später zurückkehren.";
+  }
+  if (spin) spin.classList.toggle("hidden", state !== "pending");
+  if (startBtn) startBtn.classList.toggle("hidden", !ready);
+  card.classList.remove("hidden");
+}
+
+/* ---------- Lernmodus: Test verlassen und spaeter fortsetzen (Punkt 3) ---------- */
+
+// Ein im Lernmodus begonnener, noch nicht ausgewerteter Fragebogen wird lokal
+// gesichert, damit man die Seite verlassen und spaeter zurueckkehren kann. Nur
+// Lernmodus (im Pruefungsmodus laeuft ein Zeitlimit, das ein Pausieren ausschliesst).
+const LEARN_SESSION_KEY = "bewerbungstool.learnSession";
+// Markiert, dass der aktuelle Quiz-Zustand ein speicherbarer, laufender Lerntest ist.
+// Verhindert, dass ein bereits ausgewerteter oder nur durchgesehener (reviewing)
+// Fragebogen versehentlich (z. B. via visibilitychange) wieder gespeichert wird.
+let learnSessionActive = false;
+
+function loadLearnSession() {
+  try { const raw = localStorage.getItem(LEARN_SESSION_KEY); if (raw) return JSON.parse(raw); } catch {}
+  return null;
+}
+let _learnSaveWarned = false;
+function saveLearnSession() {
+  if (!learnSessionActive || mode !== "lernen" || !quiz || reviewing) return false;
+  try {
+    localStorage.setItem(LEARN_SESSION_KEY, JSON.stringify({
+      quiz, answers, revealed, current, savedAt: Date.now(),
+    }));
+    _learnSaveWarned = false; // wieder ok → kuenftige Fehler duerfen erneut warnen
+    return true;
+  } catch {
+    // Nicht stumm schlucken: das Feature verspricht "spaeter fortsetzen". Einmal
+    // sichtbar warnen, damit der Nutzer nicht ahnungslos die Seite schliesst.
+    if (!_learnSaveWarned) {
+      _learnSaveWarned = true;
+      showError("Dein Lernfortschritt kann gerade nicht gespeichert werden (Browser-Speicher voll?). Wenn du die Seite jetzt verlässt, lässt sich der Test eventuell nicht fortsetzen.");
+    }
+    return false;
+  }
+}
+function clearLearnSession() {
+  learnSessionActive = false;
+  try { localStorage.removeItem(LEARN_SESSION_KEY); } catch {}
+}
+// Beim Tippen nicht bei jedem Anschlag das ganze Quiz serialisieren — kurz buendeln.
+let _learnSaveTimer = null;
+function saveLearnSessionDebounced() {
+  clearTimeout(_learnSaveTimer);
+  _learnSaveTimer = setTimeout(saveLearnSession, 800);
+}
+
+// Gesicherten Lerntest wiederherstellen und in die Frageansicht springen.
+function resumeLearnSession() {
+  const s = loadLearnSession();
+  if (!s || !s.quiz || !Array.isArray(s.quiz.fragen) || !s.quiz.fragen.length) { clearLearnSession(); renderHome(); return; }
+  quiz = s.quiz;
+  // Defensiv gegen unvollstaendige/aeltere Staende: Laengen an die Fragen angleichen.
+  const n = quiz.fragen.length;
+  answers = Array.isArray(s.answers) ? s.answers.slice(0, n) : [];
+  while (answers.length < n) answers.push("");
+  revealed = Array.isArray(s.revealed) ? s.revealed.slice(0, n) : [];
+  while (revealed.length < n) revealed.push(false);
+  current = Number.isInteger(s.current) ? Math.min(Math.max(0, s.current), n - 1) : 0;
+  mode = "lernen";
+  reviewing = false;
+  startTime = Date.now();
+  learnSessionActive = true;
+  stopTimer();
+  timer.overtime = false; timer.limitMin = 0; timer.deadline = 0;
+  $("quiz-timer").classList.add("hidden");
+  setQuizNotice("");
+  renderQuestion();
+  showView("view-quiz");
+}
+
+function discardLearnSession() {
+  clearLearnSession();
+  renderHome(); // Karte ausblenden und Leer-Hinweis/Liste korrekt wiederherstellen
+}
+
+// "Test fortsetzen"-Karte auf der Startliste, wenn ein offener Lerntest existiert.
+function renderResumeCard() {
+  const card = $("resume-card");
+  if (!card) return;
+  const s = loadLearnSession();
+  if (!s || !s.quiz || !Array.isArray(s.quiz.fragen) || !s.quiz.fragen.length) {
+    card.classList.add("hidden");
+    return;
+  }
+  const total = s.quiz.fragen.length;
+  const pos = Math.min((Number.isInteger(s.current) ? s.current : 0) + 1, total);
+  const titel = (s.quiz.titel || "Lerntest").trim();
+  $("resume-text").textContent = `Offener Lerntest „${titel}“ – Frage ${pos} von ${total}. Du kannst hier fortsetzen.`;
+  // Widerspricht dem Leer-Hinweis; diesen ausblenden, solange die Karte sichtbar ist.
+  $("home-empty").classList.add("hidden");
+  card.classList.remove("hidden");
 }
 
 /* ---------- Timer (Prüfungsmodus) ---------- */
@@ -2213,6 +2550,7 @@ function renderQuestion() {
       if (!locked) {
         btn.addEventListener("click", () => {
           answers[current] = opt;
+          saveLearnSession();
           renderQuestion();
           // Das Neuzeichnen ersetzt alle Buttons - den Fokus auf die gewaehlte
           // Option zurueckgeben, sonst landet er auf <body> (Tastaturbedienung)
@@ -2230,7 +2568,9 @@ function renderQuestion() {
     ta.placeholder = "Deine Antwort...";
     ta.value = answers[current] || "";
     ta.readOnly = locked;
-    ta.addEventListener("input", () => (answers[current] = ta.value));
+    ta.addEventListener("input", () => { answers[current] = ta.value; saveLearnSessionDebounced(); });
+    // Beim Verlassen des Feldes (z. B. vor dem Wegklicken) sofort sichern.
+    ta.addEventListener("blur", saveLearnSession);
     area.appendChild(ta);
   }
 
@@ -2274,6 +2614,7 @@ function renderLearnArea(q, isRevealed) {
     btn.textContent = "Auflösen und erklären";
     btn.addEventListener("click", () => {
       revealed[current] = true;
+      saveLearnSession();
       renderQuestion();
       // Lokaler Lernmodus: Lernhintergrund und Quellen jetzt einzeln nachladen
       // (zeichnet die Box bei Erfolg neu). Bei Cloud-Fragen ist beides schon da.
@@ -2348,6 +2689,7 @@ function renderLearnArea(q, isRevealed) {
 function nextQuestion() {
   if (current < quiz.fragen.length - 1) {
     current++;
+    saveLearnSession();
     renderQuestion();
   } else if (reviewing) {
     // Bereits bewertet: zurueck zur gespeicherten Auswertung, keine neue Bewertung
@@ -2360,6 +2702,7 @@ function nextQuestion() {
 function prevQuestion() {
   if (current > 0) {
     current--;
+    saveLearnSession();
     renderQuestion();
   }
 }
@@ -2440,7 +2783,11 @@ async function runEvaluation() {
     // (DeepSeek, lokale Modelle) koennte z. B. das gesamt-Objekt fehlen, was
     // beim Speichern (result.gesamt.prozent) sonst einen Absturz ausloest
     const result = normalizeEvalData(rawResult);
-    saveAttempt(result, durationMs, evalCost, evalTokens);
+    const saved = saveAttempt(result, durationMs, evalCost, evalTokens);
+    // Den fortsetzbaren Lerntest erst verwerfen, wenn der Versuch WIRKLICH gespeichert
+    // wurde — sonst koennten bei vollem/blockiertem Speicher beide verloren gehen.
+    if (saved) clearLearnSession();
+    else showError("Dein Ergebnis konnte nicht dauerhaft gespeichert werden (Browser-Speicher voll?). Der offene Lerntest bleibt erhalten, du kannst es später erneut auswerten.");
     renderResult(result, durationMs);
     // Spielfortschritt dieser Stelle; frisch freigeschaltete Abzeichen und ein
     // Levelaufstieg werden gegen den Stand vor diesem Versuch hervorgehoben.
@@ -3211,23 +3558,28 @@ function loadHistory() {
   }
 }
 
+// Gibt true zurueck, wenn der Verlauf wirklich geschrieben wurde, sonst false
+// (Speicher voll/blockiert, nichts mehr zum Verwerfen). Aufrufer, die etwas davon
+// abhaengig machen (z. B. eine offene Lern-Sitzung erst danach verwerfen), muessen
+// das Ergebnis pruefen.
 function saveHistory(h) {
   // Bei vollem Speicher aelteste Versuche verwerfen und erneut versuchen
   for (let i = 0; i < 5; i++) {
     try {
       localStorage.setItem("bewerbungstool.history", JSON.stringify(h));
-      return;
+      return true;
     } catch {
       let oldest = null;
       let oldestJob = null;
       h.jobs.forEach((j) => j.attempts.forEach((a) => {
         if (!oldest || (a.date || 0) < (oldest.date || 0)) { oldest = a; oldestJob = j; }
       }));
-      if (!oldest) return;
+      if (!oldest) return false;
       oldestJob.attempts = oldestJob.attempts.filter((a) => a !== oldest);
       h.jobs = h.jobs.filter((j) => j.attempts.length > 0);
     }
   }
+  return false;
 }
 
 // Dieselbe Anzeige (gleicher Text) landet immer bei derselben Stelle
@@ -3443,7 +3795,7 @@ function saveAttempt(result, durationMs, evalCost, evalTokens) {
 
   if (job.attempts.length > HISTORY_MAX_ATTEMPTS) job.attempts = job.attempts.slice(-HISTORY_MAX_ATTEMPTS);
   if (h.jobs.length > HISTORY_MAX_JOBS) h.jobs.length = HISTORY_MAX_JOBS;
-  saveHistory(h);
+  return saveHistory(h); // true, wenn der Versuch wirklich gespeichert wurde
 }
 
 function formatDate(ts) {
@@ -3676,6 +4028,12 @@ function renderHome() {
   $("home-empty").classList.toggle("hidden", jobs.length > 0);
   $("home-all-row").classList.toggle("hidden", jobs.length === 0);
   jobs.slice(0, HOME_MAX).forEach((job) => list.appendChild(buildHomeCard(job)));
+  // Laeuft/wartet ein Hintergrund-Job, dessen Karte nach der Navigation wieder
+  // herstellen (sie blendet den widerspruechlichen "Noch keine Stelle"-Hinweis aus).
+  const aj = loadActiveJob();
+  if (aj) renderActiveJobCard(aj.status === "ready" ? "ready" : "pending");
+  // Offenen Lerntest anbieten (blendet bei Bedarf den Leer-Hinweis aus).
+  renderResumeCard();
 }
 
 // Gueltiger Fragenzahl-Bereich - identisch zum Stepper im Eingabe-Bildschirm
@@ -4105,6 +4463,11 @@ function startTestForJob(job, testMode, cfg) {
 // Gespeicherten Versuch wieder oeffnen: Auswertung anzeigen, Fragebogen
 // laesst sich von dort im Lernmodus erneut durchgehen
 function openAttempt(job, att) {
+  // Ein historischer Versuch ist NICHT die laufende Lern-Sitzung: das Auto-Speichern
+  // deaktivieren, sonst wuerde ein visibilitychange/pagehide den (ggf. noch offenen)
+  // echten Lerntest mit den Daten dieses alten Versuchs ueberschreiben.
+  learnSessionActive = false;
+  reviewing = true;
   quiz = JSON.parse(JSON.stringify(att.quiz));
   enrichTried = new Set();
   enrichingIdx = -1;
@@ -4762,6 +5125,14 @@ $("btn-history-back").addEventListener("click", goReturn);
 
 // Startliste und Stellen-Subpage
 $("btn-new-job").addEventListener("click", () => showView("view-input"));
+$("active-job-start").addEventListener("click", startReadyJob);
+$("resume-continue").addEventListener("click", resumeLearnSession);
+$("resume-discard").addEventListener("click", discardLearnSession);
+
+// Lerntest sichern, wenn der Tab in den Hintergrund geht oder geschlossen wird —
+// auf Mobilgeraeten der zuverlaessigste Zeitpunkt (pagehide feuert dort nicht immer).
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") saveLearnSession(); });
+window.addEventListener("pagehide", saveLearnSession);
 $("btn-input-back").addEventListener("click", goHome);
 $("btn-job-back").addEventListener("click", goHome);
 $("btn-all-jobs").addEventListener("click", () => {
@@ -4824,6 +5195,31 @@ $("btn-confirm-eval").addEventListener("click", () => {
   runEvaluation();
 });
 $("btn-confirm-eval-cancel").addEventListener("click", cancelConfirmEval);
+
+// Rueckfrage vor dem Ueberschreiben eines offenen Lerntests (Punkt 3). Merkt sich
+// die Aktion, die bei Bestaetigung laufen soll, und gibt den Fokus sauber zurueck.
+let confirmReplaceLearnAction = null;
+let confirmReplaceLearnReturnFocus = null;
+function openConfirmReplaceLearn(onConfirm) {
+  confirmReplaceLearnAction = onConfirm;
+  confirmReplaceLearnReturnFocus = document.activeElement;
+  $("confirm-replace-learn-modal").classList.remove("hidden");
+  $("btn-confirm-replace-learn").focus();
+}
+function closeConfirmReplaceLearn() {
+  $("confirm-replace-learn-modal").classList.add("hidden");
+  confirmReplaceLearnAction = null;
+  if (confirmReplaceLearnReturnFocus && typeof confirmReplaceLearnReturnFocus.focus === "function") {
+    confirmReplaceLearnReturnFocus.focus();
+  }
+  confirmReplaceLearnReturnFocus = null;
+}
+$("btn-confirm-replace-learn").addEventListener("click", () => {
+  const action = confirmReplaceLearnAction;
+  closeConfirmReplaceLearn();
+  if (action) action();
+});
+$("btn-confirm-replace-learn-cancel").addEventListener("click", closeConfirmReplaceLearn);
 
 // Rueckfrage vor dem Loeschen einer Stelle (ersetzt das blockierende native
 // confirm()). Merkt sich die betroffene Stelle und was nach dem Loeschen
@@ -4997,6 +5393,7 @@ const ESCAPE_CLOSERS = [
   ["datenschutz-modal", closeDatenschutz],
   ["impressum-modal", closeImpressum],
   ["confirm-eval-modal", cancelConfirmEval],
+  ["confirm-replace-learn-modal", closeConfirmReplaceLearn],
   ["badge-modal", closeBadgeModal],
   ["confirm-delete-modal", closeConfirmDelete],
   ["levelup-overlay", closeLevelUp],
@@ -5025,6 +5422,9 @@ if (!isConfigured) {
 } else {
   goHome();
 }
+
+// Offenen/fertigen Hintergrund-Job (Punkt 1) nach App-Start wieder aufnehmen.
+resumeActiveJob();
 
 /* ---------- Service Worker (PWA) ---------- */
 

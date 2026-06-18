@@ -27,12 +27,13 @@ HARD_CAP_TOKENS = "24000"     # Output-Cap je Call; bestimmt die Worst-Case-Rese
                               # 24k statt 18k: Puffer für reasoning-schwere Vertiefungs-
                               # Läufe (Golden-Set 17.06.2026 zeigte seltene Truncation bei 18k).
 MAX_INFLIGHT = "4"            # globaler Concurrency-Cap (Parallel-Durchbruch begrenzen)
-RESERVE_TTL_S = "600"         # erst nach dieser Zeit ohne Settle gilt eine Reserve als
-                              # verwaist und wird reconciled. BEWUSST deutlich über jeder
-                              # realistischen Stream-Dauer (reasoning ~150s beobachtet),
-                              # sonst räumt ein paralleler Request eine noch laufende
-                              # Reservierung weg und der echte usage.cost geht verloren
-                              # (Codex-Review). Greift nur noch bei echtem Worker-Abbruch.
+RESERVE_TTL_S = "1200"        # erst nach dieser Zeit ohne Settle gilt eine Reserve als
+                              # verwaist und wird reconciled. BEWUSST über JEDER moeglichen
+                              # Server-Ausfuehrungsdauer (Async-Alarm-Wall 15 min, Stream-
+                              # reasoning ~150s), sonst räumt ein paralleler Request eine
+                              # noch laufende Reservierung weg und der echte usage.cost geht
+                              # verloren bzw. das Pro-Nutzer-Gate gibt einen aktiven Job frei
+                              # (Codex-Review R2). Greift nur noch bei echtem Worker-Abbruch.
 ALERT_AT = "0.7"             # nur Benachrichtigung (KEIN stilles Modell-Downgrade, s. Plan A.7)
 PER_SUBJECT_SHARE = "0.15"    # kein Subjekt (IP/ASN/Device) > 15 % des Tagesbudgets
 PER_IP_DAY = "8"             # harte Obergrenze Durchläufe/Tag/IP
@@ -43,6 +44,14 @@ ALLOW_PAID = "0"            # Phase A: "Beste"/Opus hinter der Paywall → 402
 name = "BUDGET_DO"
 class_name = "BudgetDO"
 
+[[durable_objects.bindings]]
+name = "GENJOB_DO"
+class_name = "GenerationJobDO"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["BudgetDO"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["GenerationJobDO"]
