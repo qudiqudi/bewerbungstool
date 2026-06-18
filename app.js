@@ -5955,11 +5955,15 @@ $("btn-cancel-settings").addEventListener("click", goReturn);
 
 // Sichert beide localStorage-Bestaende in eine versionierte JSON-Datei
 function exportData() {
+  // authToken (Live-Session-Bearer) NIE exportieren: er landet sonst im Backup-JSON und
+  // koennte von jedem, der die Datei liest, bis zum Logout/Ablauf als Bearer replayt werden
+  // (Codex-Review R8). Beim Import wird ein fremdes Token ohnehin nicht uebernommen.
+  const { authToken, ...exportedSettings } = loadSettings();
   const data = {
     app: "bewerbungstool",
     version: 1,
     exportedAt: new Date().toISOString(),
-    settings: loadSettings(),
+    settings: exportedSettings,
     history: loadHistory(),
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
