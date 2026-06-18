@@ -5,14 +5,16 @@
 export function corsHeaders(env, origin) {
   const allowed = String(env.ALLOWED_ORIGINS || "")
     .split(",").map((s) => s.trim()).filter(Boolean);
-  const allow = allowed.includes(origin) ? origin : (allowed[0] || "");
   const h = {
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, CF-Turnstile-Token",
     "Access-Control-Max-Age": "86400",
     "Vary": "Origin",
   };
-  if (allow) h["Access-Control-Allow-Origin"] = allow;
+  // Access-Control-Allow-Origin NUR fuer tatsaechlich erlaubte Origins spiegeln. Frueher
+  // wurde fuer fremde Origins faelschlich allowed[0] zurueckgegeben — der Browser blockt
+  // das zwar (Mismatch), aber korrekt ist, den Header fuer Nicht-erlaubte wegzulassen.
+  if (origin && allowed.includes(origin)) h["Access-Control-Allow-Origin"] = origin;
   return h;
 }
 
