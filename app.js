@@ -2384,7 +2384,7 @@ function saveLearnSessionDebounced() {
 // Gesicherten Lerntest wiederherstellen und in die Frageansicht springen.
 function resumeLearnSession() {
   const s = loadLearnSession();
-  if (!s || !s.quiz || !Array.isArray(s.quiz.fragen)) { clearLearnSession(); renderHome(); return; }
+  if (!s || !s.quiz || !Array.isArray(s.quiz.fragen) || !s.quiz.fragen.length) { clearLearnSession(); renderHome(); return; }
   quiz = s.quiz;
   // Defensiv gegen unvollstaendige/aeltere Staende: Laengen an die Fragen angleichen.
   const n = quiz.fragen.length;
@@ -4463,6 +4463,11 @@ function startTestForJob(job, testMode, cfg) {
 // Gespeicherten Versuch wieder oeffnen: Auswertung anzeigen, Fragebogen
 // laesst sich von dort im Lernmodus erneut durchgehen
 function openAttempt(job, att) {
+  // Ein historischer Versuch ist NICHT die laufende Lern-Sitzung: das Auto-Speichern
+  // deaktivieren, sonst wuerde ein visibilitychange/pagehide den (ggf. noch offenen)
+  // echten Lerntest mit den Daten dieses alten Versuchs ueberschreiben.
+  learnSessionActive = false;
+  reviewing = true;
   quiz = JSON.parse(JSON.stringify(att.quiz));
   enrichTried = new Set();
   enrichingIdx = -1;
