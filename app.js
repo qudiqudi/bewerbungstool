@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.1.1";
 
 const CHANGELOG = [
+  {
+    version: "1.1.1",
+    date: "18.06.2026",
+    items: [
+      "Kleiner Fix: Im gehosteten Modus blendet sich das Sicherheits-Widget (Bot-Schutz) nach der Prüfung wieder aus und verdeckt keine Hinweise oder Fehlermeldungen mehr.",
+    ],
+  },
   {
     version: "1.1.0",
     date: "17.06.2026",
@@ -906,6 +913,13 @@ function turnstileSitekey() {
 let _tsWidgetId = null;
 let _tsPending = null;
 
+// Das Widget nur WÄHREND des Lösens einblenden; danach ausblenden, damit der kurze
+// Challenge-/Erfolgs-Status keine App-Meldung (z. B. die Fehlerkarte) verdeckt.
+function setTurnstileVisible(v) {
+  const el = document.getElementById("turnstile-container");
+  if (el) el.style.display = v ? "block" : "none";
+}
+
 // Wartet, bis das (async geladene) Turnstile-Script bereit ist.
 async function turnstileReady(ms = 4000) {
   const start = Date.now();
@@ -942,10 +956,11 @@ function ensureTurnstileWidget() {
 async function getTurnstileToken(action) {
   if (!turnstileSitekey()) return "";
   if (!(await turnstileReady())) return "";
-  if (!ensureTurnstileWidget()) return "";
+  setTurnstileVisible(true); // VOR render/execute einblenden (Render braucht sichtbaren Host)
+  if (!ensureTurnstileWidget()) { setTurnstileVisible(false); return ""; }
   return new Promise((resolve) => {
     let done = false;
-    const finish = (t) => { if (!done) { done = true; resolve(t || ""); } };
+    const finish = (t) => { if (!done) { done = true; setTurnstileVisible(false); resolve(t || ""); } };
     _tsPending = finish;
     try {
       window.turnstile.reset(_tsWidgetId); // vorheriges Token verwerfen → frisches erzwingen
