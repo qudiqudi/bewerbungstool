@@ -241,15 +241,15 @@ export function buildEvalMessages({ jobText, payload, kontext }) {
     "erwähne den Umstand aber kurz im Feedback. Antworte auf Deutsch.";
 
   const rahmen = buildKontext(kontext);
-  // Mehrfach-MC-Fragen werden clientseitig deterministisch gescort und nicht im
-  // payload mitgeschickt. Damit die Gesamtbewertung sie trotzdem beruecksichtigt,
-  // nennt der Client sie kompakt in kontext.mcLokal ([{ frage, punkte }]).
-  // Gleicher Wortlaut wie der Client-Pfad in app.js (runEvaluation).
-  // Defensiv begrenzen, obwohl validateEval mcLokal bereits prueft: hoechstens
-  // 60 Eintraege, punkte hart auf 0-10 geklemmt, Fragetext gekuerzt.
+  // Mehrfach-MC- und Reihenfolge-Fragen werden clientseitig deterministisch
+  // gescort und nicht im payload mitgeschickt. Damit die Gesamtbewertung sie
+  // trotzdem beruecksichtigt, nennt der Client sie kompakt in kontext.mcLokal
+  // ([{ frage, punkte }]). Gleicher Wortlaut wie der Client-Pfad in app.js
+  // (runEvaluation). Defensiv begrenzen, obwohl validateEval mcLokal bereits
+  // prueft: hoechstens 60 Eintraege, punkte hart auf 0-10 geklemmt, Fragetext gekuerzt.
   const mcLokal = (kontext && Array.isArray(kontext.mcLokal) ? kontext.mcLokal : []).slice(0, 60);
   const mcLokalHinweis = mcLokal.length
-    ? "\n\nZusätzlich wurden " + mcLokal.length + " Multiple-Choice-Fragen mit Mehrfachauswahl " +
+    ? "\n\nZusätzlich wurden " + mcLokal.length + " Fragen (Mehrfachauswahl bzw. Reihenfolge) " +
       "bereits separat und deterministisch bewertet. Bewerte sie NICHT erneut und gib fuer sie KEINE " +
       "eigenen Ergebnis-Eintraege aus; beziehe ihre Ergebnisse aber in die Gesamteinschätzung " +
       "(Zusammenfassung, Stärken, Verbesserungen) mit ein:\n" +
