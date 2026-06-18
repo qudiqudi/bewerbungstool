@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.6.0";
+const APP_VERSION = "1.6.1";
 
 const CHANGELOG = [
+  {
+    version: "1.6.1",
+    date: "18.06.2026",
+    items: [
+      "Fehler behoben: Im Lernmodus konnte das Auflösen von Multiple-Choice-Fragen fehlschlagen. Auflösung und Erklärungen werden jetzt wieder zuverlässig angezeigt.",
+    ],
+  },
   {
     version: "1.6.0",
     date: "18.06.2026",
@@ -3265,6 +3272,11 @@ function renderLearnArea(q, isRevealed) {
     q.korrekte_reihenfolge.length === q.elemente.length &&
     q.elemente.length >= 2;
 
+  // Richtige Optionen einmal bestimmen - sowohl die Antwortzeile (Mehrfach-MC)
+  // als auch die Optionserklaerungen weiter unten greifen darauf zu. Muss daher
+  // VOR dem reihenfolge/MC-Zweig stehen (fuer reihenfolge/offen leeres Set).
+  const correct = mcCorrectIndices(q);
+
   if (korrektReihenfolge) {
     // Korrekte Reihenfolge als nummerierte Liste (robuster als der Klartext).
     const label = document.createElement("p");
@@ -3280,7 +3292,6 @@ function renderLearnArea(q, isRevealed) {
     });
     box.appendChild(ol);
   } else {
-    const correct = mcCorrectIndices(q);
     const answerLine = document.createElement("p");
     answerLine.className = "learn-answer";
     if (mcIsMulti(q)) {
