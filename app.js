@@ -1043,8 +1043,13 @@ function normalizeKernpunkte(k, jobText) {
     // "Homeoffice" aus dem Beleg "Kein Homeoffice vorgesehen". Das Zitat bewahrt den
     // Sinn (inkl. Verneinungen) und ist nachweislich aus der Anzeige.
     const nb = norm(beleg);
-    if (nb.length < 8 || !hay.includes(nb)) return "";
-    return beleg.length > 200 ? beleg.slice(0, 200).trim() + "…" : beleg;
+    // Mindestlaenge gegen triviale Schnipsel; Hoechstlaenge, damit ein FOKUSSIERTES
+    // Zitat erzwungen wird, statt es mitten im Satz zu kuerzen: eine blinde Kuerzung
+    // koennte einen nachgestellten Qualifier oder eine Verneinung abschneiden und
+    // so die Aussage verfaelschen. Zu lange Belege werden verworfen (kein Card),
+    // nie gekuerzt. Angezeigt wird das vollstaendige, verifizierte Zitat.
+    if (nb.length < 8 || nb.length > 240 || !hay.includes(nb)) return "";
+    return beleg;
   };
   const verArr = (v) =>
     (Array.isArray(v) ? v.map(verified).filter(Boolean) : []);
@@ -5056,12 +5061,17 @@ function saveAttempt(result, durationMs, evalCost, evalTokens) {
     // Kernpunkte NICHT loeschen - der Guard laesst sie unberuehrt. Versionswrapper
     // wie bei themenfelder, erleichtert spaetere Migrationen.
     if (quiz.kernpunkte && typeof quiz.kernpunkte === "object") {
-      // Kernpunkte an ihre Quelle binden: srcKey = Textschluessel der Anzeige, aus
-      // der sie extrahiert wurden. Beim Merge per identityKey kann der Job einen
-      // ANDEREN (alten) jobText tragen als das aktuelle Quiz - dann zeigt das Panel
-      // sie nicht an (Guard in buildKernpunktePanel), statt fremde Fakten zu mischen.
+      // Kernpunkte und ihre Quelle ATOMAR zusammen aktualisieren: Beim Merge per
+      // urlKey/identityKey kann der Job einen aelteren jobText tragen als das
+      // aktuelle Quiz. Wir frischen job.jobText hier auf die Anzeige auf, aus der
+      // die Kernpunkte stammen (wie titel/arbeitgeber/arbeitsort oben) - dann
+      // passt srcKey zum jobText und das Panel zeigt die frisch erzeugten
+      // Kernpunkte, statt sie wegen eines veralteten Textes dauerhaft zu
+      // verbergen. Der Merge laeuft ueber die stabilen Anker (urlKey/identityKey),
+      // daher ist die jobText-Auffrischung unkritisch fuer die Wiederfindung.
+      if (typeof quiz.jobText === "string" && quiz.jobText.trim()) job.jobText = quiz.jobText;
       let srcKey = null;
-      try { srcKey = jobKey(quiz.jobText); } catch { /* egal */ }
+      try { srcKey = jobKey(job.jobText); } catch { /* egal */ }
       job.kernpunkte = { v: 1, generatedAt: Date.now(), srcKey, data: quiz.kernpunkte };
     }
   }
