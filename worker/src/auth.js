@@ -152,29 +152,26 @@ async function magicStart(req, env, ctx, origin) {
   const email = normEmail(body && body.email);
   if (!email) return json({ error: "email" }, 400, env, origin);
 
-  // Throttle gegen Mail-Bombing: pro Empfaenger UND global (bounds das Gesamt-Mailvolumen,
-  // selbst wenn der Bot-Schutz umgangen wuerde). Bei Ueberschreitung still verwerfen
-  // (trotzdem 202, keine Enumeration/Auskunft); Unterdrueckung loggen.
+  // Throttle gegen Mail-Bombing: pro Empfaenger UND global. ATOMAR als bedingter INSERT
+  // (Codex-Review R6) — ein reines read-then-insert liesse parallele Requests alle unter
+  // dem Cap sehen und dann alle senden. SQLite serialisiert Schreib-Transaktionen, daher
+  // wertet dieses eine Statement COUNT + INSERT unter Schreibsperre aus: nur einfuegen,
+  // wenn UNTER beiden Caps. Gemailt wird NUR, wenn der INSERT tatsaechlich griff.
   const since = now() - 3600;
-  const emailCnt = await env.DB.prepare(
-    "SELECT COUNT(*) AS n FROM magic_tokens WHERE email = ? AND created_at > ?"
-  ).bind(email, since).first();
-  const globalCnt = await env.DB.prepare(
-    "SELECT COUNT(*) AS n FROM magic_tokens WHERE created_at > ?"
-  ).bind(since).first();
-  const emailN = emailCnt ? emailCnt.n : 0;
-  const globalN = globalCnt ? globalCnt.n : 0;
-  if (emailN < MAGIC_RATE_MAX && globalN < MAGIC_GLOBAL_MAX) {
-    const raw = randomToken();
-    const hash = await sha256hex(raw);
-    const ttl = Number(env.MAGIC_TTL_S || MAGIC_TTL_DEFAULT);
-    await env.DB.prepare(
-      "INSERT INTO magic_tokens (token_hash, email, created_at, expires_at, consumed) VALUES (?, ?, ?, ?, 0)"
-    ).bind(hash, email, now(), now() + ttl).run();
+  const raw = randomToken();
+  const hash = await sha256hex(raw);
+  const ttl = Number(env.MAGIC_TTL_S || MAGIC_TTL_DEFAULT);
+  const ins = await env.DB.prepare(
+    `INSERT INTO magic_tokens (token_hash, email, created_at, expires_at, consumed)
+     SELECT ?, ?, ?, ?, 0
+     WHERE (SELECT COUNT(*) FROM magic_tokens WHERE email = ? AND created_at > ?) < ?
+       AND (SELECT COUNT(*) FROM magic_tokens WHERE created_at > ?) < ?`
+  ).bind(hash, email, now(), now() + ttl, email, since, MAGIC_RATE_MAX, since, MAGIC_GLOBAL_MAX).run();
+  if (ins.meta && ins.meta.changes === 1) {
     const link = `${env.APP_ORIGIN || "https://jobreif.de"}/?auth=${raw}`;
     ctx.waitUntil(sendMagicMail(env, email, link));
   } else {
-    console.log(JSON.stringify({ ev: "magic-suppressed", reason: emailN >= MAGIC_RATE_MAX ? "email" : "global" }));
+    console.log(JSON.stringify({ ev: "magic-suppressed" }));
   }
   // IMMER 202 – verrät nicht, ob die Adresse existiert/zugestellt wurde.
   return json({ ok: true }, 202, env, origin);

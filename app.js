@@ -1264,10 +1264,11 @@ async function consumeAuthRedirect() {
   cleanAuthParamsFromUrl(params); // IMMER zuerst scrubben, egal welcher Pfad
   if (err) { _authRedirectMsg = "Die Anmeldung wurde abgebrochen."; return true; }
   if (sess) {
-    // Kompatibilitaetsfenster: ein noch laufender Alt-Worker liefert ?session=<bearer>.
-    // Das Token ist bereits in der URL (oben schon gescrubbt) → sofort uebernehmen, statt
-    // es liegen zu lassen. Der neue Worker stellt ?session nicht mehr aus (nur ?code).
-    setAuthToken(sess); _authRedirectMsg = "Erfolgreich angemeldet."; return true;
+    // Ein ?session=<bearer> in der URL wird NUR gescrubbt, NICHT uebernommen: ein
+    // fremdes Token zu speichern waere Session-Fixation (Codex-Review R6). Der neue Worker
+    // stellt ?session ohnehin nicht mehr aus (nur den verifier-gebundenen ?code). Falls
+    // ein noch laufender Alt-Worker es beim Deploy-Skew liefert, hier bewusst ignorieren.
+    if (!code && !magic) { _authRedirectMsg = "Bitte melde dich erneut an."; return true; }
   }
   if (code) {
     let verifier = "";
@@ -5810,13 +5811,23 @@ $("login-magic-form").addEventListener("submit", async (e) => {
     const tkn = await getTurnstileToken("magic-link");
     const headers = { "Content-Type": "application/json" };
     if (tkn) headers["CF-Turnstile-Token"] = tkn;
-    await fetch(hostedBase() + "/auth/magic/start", {
+    const res = await fetch(hostedBase() + "/auth/magic/start", {
       method: "POST",
       headers,
       body: JSON.stringify({ email }),
     });
-    // Bewusst neutrale Meldung (keine Auskunft, ob die Adresse existiert).
-    $("login-msg").textContent = "Wenn alles passt, haben wir dir einen Anmeldelink geschickt. Bitte dein Postfach prüfen (auch Spam).";
+    // Auf den Status verzweigen (Codex-Review R6): nur 202 ist „gesendet". Sonst klare
+    // Rueckmeldung, statt den Nutzer auf eine nie gesendete Mail warten zu lassen.
+    if (res.status === 202) {
+      // Bewusst neutrale Meldung (keine Auskunft, ob die Adresse existiert).
+      $("login-msg").textContent = "Wenn alles passt, haben wir dir einen Anmeldelink geschickt. Bitte dein Postfach prüfen (auch Spam).";
+    } else if (res.status === 403) {
+      $("login-msg").textContent = "Sicherheitsprüfung fehlgeschlagen. Bitte die Seite neu laden und erneut versuchen.";
+    } else if (res.status === 400) {
+      $("login-msg").textContent = "Bitte eine gültige E-Mail-Adresse eingeben.";
+    } else {
+      $("login-msg").textContent = "Der Dienst ist momentan nicht erreichbar. Bitte später erneut versuchen.";
+    }
   } catch {
     $("login-msg").textContent = "Senden fehlgeschlagen. Bitte Internetverbindung prüfen und erneut versuchen.";
   } finally {
