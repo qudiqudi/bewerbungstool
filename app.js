@@ -1053,7 +1053,11 @@ function normalizeKernpunkte(k, jobText) {
   // dass ein triviales Schnipsel ("und", "m/w/d") als Beleg durchgeht.
   const verified = (item) => {
     if (!item || typeof item !== "object") return "";
+    const text = typeof item.text === "string" ? item.text.trim() : "";
     const beleg = typeof item.beleg === "string" ? item.beleg.trim() : "";
+    // Das Modell muss den Punkt kategorisiert haben (text nicht leer) - sonst
+    // verwerfen.
+    if (!text) return "";
     // Der Beleg muss ein hinreichend langes, im Anzeigentext WOERTLICH auffindbares
     // Zitat sein (Mindestlaenge gegen triviale Schnipsel). Angezeigt wird IMMER das
     // verifizierte Zitat selbst (gekuerzt), NIE die kondensierte Modell-Formulierung
@@ -1071,12 +1075,30 @@ function normalizeKernpunkte(k, jobText) {
   };
   const verArr = (v) =>
     (Array.isArray(v) ? v.map(verified).filter(Boolean) : []);
+  // Kategorie-Plausibilitaet fuer die hochsensiblen, FAKTISCHEN Felder Gehalt und
+  // Arbeitsmodell: das verifizierte Zitat muss kategorietypische Begriffe
+  // enthalten. Die Erdung beweist nur, dass der Text aus der Anzeige stammt - nicht,
+  // dass er zur Kategorie gehoert. So wird ein reales, aber falsch einsortiertes
+  // Zitat (z. B. "Vollzeit" unter Gehalt) unter diesen Labels verhindert. Die
+  // offenen Kategorien (Aufgaben, Anforderungen, Benefits, Besonderheiten) sind zu
+  // vielfaeltig fuer eine zuverlaessige Stichwortpruefung und stuetzen sich auf
+  // Erdung + Prompt.
+  const CAT = {
+    gehalt: /(€|\beur\b|euro|gehalt|verg[üu]tung|entgelt|\blohn\b|brutto|netto|jahresgehalt|tarif|bezahlung|verdienst|\d[\d.,]*\s*(€|eur|euro|tsd|k\b))/i,
+    arbeitsmodell: /(vollzeit|teilzeit|remote|home\s*-?\s*office|hybrid|schicht|gleitzeit|(un)?befristet|wochenstunden|arbeitszeit|\d+\s*(std|stunden|h\b))/i,
+  };
+  const verifiedCat = (item, cat) => {
+    const v = verified(item);
+    if (!v) return "";
+    const pat = CAT[cat];
+    return pat && !pat.test(v) ? "" : v;
+  };
   const out = {
     aufgaben: verArr(k.aufgaben),
     anforderungen_muss: verArr(k.anforderungen_muss),
     anforderungen_optional: verArr(k.anforderungen_optional),
-    arbeitsmodell: verified(k.arbeitsmodell),
-    gehalt: verified(k.gehalt),
+    arbeitsmodell: verifiedCat(k.arbeitsmodell, "arbeitsmodell"),
+    gehalt: verifiedCat(k.gehalt, "gehalt"),
     benefits: verArr(k.benefits),
     besonderheiten: verArr(k.besonderheiten),
   };
