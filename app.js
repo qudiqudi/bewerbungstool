@@ -2655,6 +2655,9 @@ async function generateQuiz(opts = {}) {
     finalizeQuiz(result, {
       jobText, difficulty, urlKey, jobUrl, vertiefungFelder, mode,
       genCost, genTokens, isLocal, localAborted, total,
+      provider: settings.provider || "hosted",
+      tier: settings.tier || null,
+      model: settings.model || null,
     });
   } catch (e) {
     showError(e.message);
@@ -2675,6 +2678,15 @@ function finalizeQuiz(result, ctx) {
   if (ctx.vertiefungFelder) quiz.vertiefungFelder = ctx.vertiefungFelder;
   quiz.genCost = ctx.genCost ?? null;
   quiz.genTokens = ctx.genTokens ?? null;
+  // Generierungs-Provenienz festhalten (Anbieter/Tier/Modell, mit dem dieses
+  // Quiz erstellt wurde). Reports nutzen sie statt der aktuellen Einstellungen,
+  // damit eine spaeter geaenderte Anbieterwahl oder das Melden aus der Review die
+  // Herkunft nicht verfaelscht. Alte/aktive Jobs ohne diese Felder -> null.
+  quiz.provenance = {
+    provider: ctx.provider || null,
+    tier: ctx.tier || null,
+    model: ctx.model || null,
+  };
   answers = new Array(quiz.fragen.length).fill("");
   revealed = new Array(quiz.fragen.length).fill(false);
   sortDisplay = {};
@@ -2770,6 +2782,8 @@ async function startHostedGeneration(ctx) {
       ctx: {
         jobText: ctx.jobText, difficulty: ctx.difficulty, mode: ctx.mode,
         urlKey: ctx.urlKey, jobUrl: ctx.jobUrl, vertiefungFelder: ctx.vertiefungFelder,
+        // Provenienz fuer Reports (Hosted-Pfad): Modell baut der Server -> model null.
+        provider: "hosted", tier: settings.tier || "standard", model: null,
       },
     });
     hideLoading();
@@ -6705,15 +6719,27 @@ $("report-modal").addEventListener("click", (e) => {
 // quiz). Hosted hat kein Nutzer-Modell -> model bleibt leer, provider/tier
 // zaehlen. Defensiv: alle Felder optional.
 function reportKontextAktiv() {
-  const s = loadSettings();
-  const ctx = {
-    provider: s.provider || "hosted",
-    tier: s.tier || null,
-    model: s.model || null,
-  };
+  // Provenienz aus dem QUIZ (zur Generierungszeit festgehalten), nicht aus den
+  // aktuellen Einstellungen: der Nutzer kann den Anbieter nach der Generierung
+  // gewechselt haben oder einen alten Versuch in der Review melden. Alte Quizze
+  // ohne provenance bleiben unbekannt (null) statt faelschlich aktuelle Settings.
+  const ctx = { provider: null, tier: null, model: null };
   if (quiz) {
+    if (quiz.provenance) {
+      ctx.provider = quiz.provenance.provider || null;
+      ctx.tier = quiz.provenance.tier || null;
+      ctx.model = quiz.provenance.model || null;
+    }
     if (quiz.titel) ctx.stellenTitel = quiz.titel;
-    if (quiz.jobText) { try { ctx.jobKey = jobKey(quiz.jobText); } catch { /* egal */ } }
+    // Kanonische Stellen-Identitaet wie in saveAttempt (urlKey -> identityKey ->
+    // Textschluessel), damit Reports im selben Bucket landen wie die Versuche und
+    // nicht ueber Textvarianten/Refetch derselben Stelle aufgesplittet werden.
+    try {
+      ctx.jobKey =
+        quiz.urlKey ||
+        identityKeyOf(quiz.titel, quiz.arbeitgeber, quiz.arbeitsort) ||
+        (quiz.jobText ? jobKey(quiz.jobText) : null);
+    } catch { /* egal */ }
   }
   return ctx;
 }
