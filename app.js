@@ -2204,33 +2204,21 @@ async function startHostedGeneration(ctx) {
   }
 }
 
-// Obergrenze fuer die Wartezeit auf einen Job. Bewusst etwas ueber der server-
-// Reiner Client-BACKSTOP fuer den Fall, dass der Server gar nicht erreichbar ist.
-// Im Normalfall entscheidet der Server ueber die Staleness: sein Status-Endpunkt
-// markiert einen zu lange "pending" Job selbst terminal (timeout) und gibt die
-// Reserve frei. Dieser Wert liegt daher ueber dem server-seitigen JOB_TIMEOUT
-// (16 min) und unter/auf RESERVE_TTL_S (1200 s = 20 min), damit beim Aufgeben der
-// Slot serverseitig schon (fast) frei ist.
-const MAX_JOB_MS = 18 * 60 * 1000;
-
 async function pollActiveJob() {
   const job = loadActiveJob();
   if (!job || job.status === "ready") return; // fertig: wartet auf "Loslegen"
 
-  // Backstop nur fuer "Server dauerhaft nicht erreichbar": sonst kommt das terminale
-  // Aus vom Server (status "error"/"timeout", s. unten) und nicht aus lokalem Alter.
-  if (Date.now() - (job.createdAt || 0) > MAX_JOB_MS) {
-    clearActiveJob();
-    renderActiveJobCard("error");
-    showError("Die Erstellung dauert ungewöhnlich lange und wurde abgebrochen. Bitte starte den Test neu.");
-    return;
-  }
-
+  // WICHTIG: der Client raeumt einen Job nie nach lokal verstrichener Zeit weg — das
+  // koennte einen serverseitig noch laufenden (ggf. bezahlten) Job verwerfen und einen
+  // Doppellauf ausloesen (Codex-Review). Die Staleness ist server-eigen: der Status-
+  // Endpunkt markiert einen zu lange "pending" Job selbst terminal (status "timeout")
+  // und gibt die Reserve frei. Der Client wartet auf genau diese Server-Aussage (bzw.
+  // 404, wenn der Job nicht mehr existiert) und pollt bei Netzfehlern nur weiter.
   let r;
   try {
     r = await fetch(hostedBase() + "/api/jobs/" + encodeURIComponent(job.jobId));
   } catch {
-    scheduleJobPoll(5000); // Netzfehler/Offline: spaeter erneut versuchen
+    scheduleJobPoll(5000); // Netzfehler/Offline: spaeter erneut versuchen, Job behalten
     return;
   }
   if (r.status === 404) {
@@ -2240,8 +2228,7 @@ async function pollActiveJob() {
     return;
   }
   if (!r.ok) {
-    // Server-/Gateway-Fehler (5xx/403/…): als voruebergehend behandeln, mit Abstand
-    // erneut versuchen. Der Max-Alter-Schutz oben beendet hartnaeckige Faelle.
+    // Server-/Gateway-Fehler (5xx/403/…): voruebergehend, mit Abstand erneut versuchen.
     scheduleJobPoll(5000);
     return;
   }
