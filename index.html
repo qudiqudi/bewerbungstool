@@ -327,6 +327,7 @@
 
       <div id="answer-area"></div>
       <div id="learn-area"></div>
+      <div id="report-area"></div>
 
       <div class="row space-between">
         <button id="btn-prev" class="ghost">Zurück</button>
@@ -405,6 +406,30 @@
         <div class="row">
           <button id="btn-confirm-delete" class="danger">Endgültig löschen</button>
           <button id="btn-confirm-delete-cancel" class="ghost">Abbrechen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Frage melden: Auswahl-Kategorien + optionaler Freitext (rein lokal) -->
+    <div id="report-modal" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="report-title">
+      <div class="modal card report-modal">
+        <h2 id="report-title">Frage melden</h2>
+        <p id="report-question" class="hint"></p>
+        <fieldset class="report-cats">
+          <legend>Was stimmt mit der Frage nicht?</legend>
+          <label><input type="checkbox" id="report-cat-fachlich_falsch" value="fachlich_falsch"> Antwort fachlich falsch</label>
+          <label><input type="checkbox" id="report-cat-irrelevant" value="irrelevant"> Thematisch irrelevant für die Stelle</label>
+          <label><input type="checkbox" id="report-cat-sprachliche_qualitaet" value="sprachliche_qualitaet"> Sprachliche Qualität / unverständlich</label>
+          <label><input type="checkbox" id="report-cat-dublette" value="dublette"> Wiederholung / schon gestellt</label>
+          <label><input type="checkbox" id="report-cat-sonstiges" value="sonstiges"> Sonstiges</label>
+        </fieldset>
+        <label for="report-note">Anmerkung (optional)</label>
+        <textarea id="report-note" rows="3" maxlength="500" placeholder="Optional: kurz beschreiben, was nicht passt ..."></textarea>
+        <p class="hint">Deine Meldung wird nur lokal in diesem Browser gespeichert und nicht automatisch versendet.</p>
+        <p id="report-error" class="hint hidden" role="alert">Speichern fehlgeschlagen (Speicher voll oder gesperrt). Bitte Speicher freigeben und erneut versuchen.</p>
+        <div class="row">
+          <button id="btn-report-submit" class="primary" disabled>Melden</button>
+          <button id="btn-report-cancel" class="ghost">Abbrechen</button>
         </div>
       </div>
     </div>

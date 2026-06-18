@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.8.2";
+const APP_VERSION = "1.8.3";
 
 const CHANGELOG = [
+  {
+    version: "1.8.3",
+    date: "18.06.2026",
+    items: [
+      "Neu: Du kannst unpassende Fragen jetzt direkt melden – im Lern- und Prüfungsmodus sowie beim Durchsehen einer Auswertung. Wähle, was nicht stimmt (z. B. fachlich falsch oder thematisch irrelevant), optional mit einer kurzen Anmerkung. Die Meldung wird nur lokal in deinem Browser gespeichert.",
+    ],
+  },
   {
     version: "1.8.2",
     date: "18.06.2026",
@@ -2087,6 +2094,16 @@ function scoreMultiMc(q, answerStr) {
   };
 }
 
+// Antwortfreier Identitaetsschluessel fuer Reports - bewusst OHNE korrekte_antwort
+// (anders als fragenKey). Sonst koennte eine im aktiven Pruefungsmodus gemeldete
+// Frage die Loesung ueber den persistierten/exportierten Report-Schluessel
+// verraten. Frage + Typ + (sortierte) Optionen reichen zur Frage-Identitaet fuer
+// das Dedup pro Stelle; Optionen sortiert = reihenfolge-unabhaengig.
+function reportFrageKey(q) {
+  const optionen = Array.isArray(q.optionen) ? q.optionen.map(normText).sort() : [];
+  return [normText(q.frage), q.typ === "multiple_choice" ? "mc" : "offen", ...optionen].join(" | ");
+}
+
 // Der exakte Schluessel oben faengt nur wortgleiche Wiederholungen. Schwache
 // Modelle stellen aber auch dieselbe Frage leicht umformuliert ("zum
 // Tagesgeschaeft gehoert..." vs. "primaer im Tagesgeschaeft enthalten...").
@@ -2648,6 +2665,9 @@ async function generateQuiz(opts = {}) {
     finalizeQuiz(result, {
       jobText, difficulty, urlKey, jobUrl, vertiefungFelder, mode,
       genCost, genTokens, isLocal, localAborted, total,
+      provider: settings.provider || "hosted",
+      tier: settings.tier || null,
+      model: settings.model || null,
     });
   } catch (e) {
     showError(e.message);
@@ -2668,6 +2688,15 @@ function finalizeQuiz(result, ctx) {
   if (ctx.vertiefungFelder) quiz.vertiefungFelder = ctx.vertiefungFelder;
   quiz.genCost = ctx.genCost ?? null;
   quiz.genTokens = ctx.genTokens ?? null;
+  // Generierungs-Provenienz festhalten (Anbieter/Tier/Modell, mit dem dieses
+  // Quiz erstellt wurde). Reports nutzen sie statt der aktuellen Einstellungen,
+  // damit eine spaeter geaenderte Anbieterwahl oder das Melden aus der Review die
+  // Herkunft nicht verfaelscht. Alte/aktive Jobs ohne diese Felder -> null.
+  quiz.provenance = {
+    provider: ctx.provider || null,
+    tier: ctx.tier || null,
+    model: ctx.model || null,
+  };
   answers = new Array(quiz.fragen.length).fill("");
   revealed = new Array(quiz.fragen.length).fill(false);
   sortDisplay = {};
@@ -2763,6 +2792,8 @@ async function startHostedGeneration(ctx) {
       ctx: {
         jobText: ctx.jobText, difficulty: ctx.difficulty, mode: ctx.mode,
         urlKey: ctx.urlKey, jobUrl: ctx.jobUrl, vertiefungFelder: ctx.vertiefungFelder,
+        // Provenienz fuer Reports (Hosted-Pfad): Modell baut der Server -> model null.
+        provider: "hosted", tier: settings.tier || "standard", model: null,
       },
     });
     hideLoading();
@@ -3199,6 +3230,16 @@ function renderQuestion() {
   }
 
   renderLearnArea(q, isRevealed);
+
+  // "Frage melden" in einem eigenen, stets befuellten Slot - so erscheint der
+  // Knopf in Lern- UND Pruefungsmodus (renderLearnArea steigt im Pruefungsmodus
+  // frueh aus). Rein lokal, loest keinen API-Call aus.
+  const reportArea = $("report-area");
+  reportArea.innerHTML = "";
+  // answersSecret: im aktiven Pruefungsmodus (vor der Auswertung) darf die
+  // Meldung die korrekte Antwort NICHT mitspeichern - sonst koennte man eine Frage
+  // melden und die Loesung ueber Export/localStorage vor der Bewertung auslesen.
+  appendReportButton(reportArea, q, { ...reportKontextAktiv(), answersSecret: mode === "pruefung" && !reviewing });
 
   $("btn-prev").disabled = current === 0;
   $("btn-next").textContent =
@@ -3952,6 +3993,12 @@ function renderResult(result, durationMs) {
         srcEl.appendChild(sourceAnchor(src));
       });
     }
+    // "Frage melden" auch beim Durchsehen eines (gespeicherten) Versuchs - rein
+    // lokal, loest keine neue Bewertung/Generierung aus. Eigene Zeile im Detail.
+    const reportRow = document.createElement("p");
+    reportRow.className = "report-row";
+    appendReportButton(reportRow, q, reportKontextAktiv());
+    div.appendChild(reportRow);
     details.appendChild(div);
   });
 }
@@ -4608,6 +4655,111 @@ function saveHistory(h) {
   return false;
 }
 
+/* ---------- Gemeldete Fragen (rein lokal) ---------- */
+// Eigener, additiver localStorage-Key, bewusst getrennt von der Historie:
+// Reports sollen das Verwerfen alter Versuche (Quota) und das Loeschen einer
+// Stelle ueberleben. Rein lokal - keine Meldung loest je einen API-Call aus.
+const REPORTS_KEY = "bewerbungstool.reports";
+const REPORTS_MAX = 100;
+
+function loadReports() {
+  try {
+    const r = JSON.parse(localStorage.getItem(REPORTS_KEY));
+    // Defensiv: nur eine plausible Form akzeptieren, sonst Default. Alte
+    // Daten/fehlender Key sind voellig in Ordnung.
+    if (r && typeof r === "object" && Array.isArray(r.reports)) {
+      return { version: 1, reports: r.reports };
+    }
+  } catch {
+    /* ignorieren -> Default */
+  }
+  return { version: 1, reports: [] };
+}
+
+function saveReports(r) {
+  // Reports sind klein, trotzdem capen (FIFO: aelteste zuerst verwerfen) und bei
+  // vollem Speicher nicht crashen. Report-Speicherung ist von der Historie
+  // getrennt und darf deren Speichern nie stoeren.
+  if (r.reports.length > REPORTS_MAX) r.reports = r.reports.slice(-REPORTS_MAX);
+  for (let i = 0; i < 5; i++) {
+    try {
+      localStorage.setItem(REPORTS_KEY, JSON.stringify(r));
+      return true;
+    } catch {
+      if (!r.reports.length) return false;
+      r.reports.shift(); // aeltesten Report verwerfen und erneut versuchen
+    }
+  }
+  return false;
+}
+
+// Hilfstexte fuer Reports hart kuerzen, damit sie keinen Quota-Druck erzeugen.
+function clip(str, max) {
+  const s = typeof str === "string" ? str : "";
+  return s.length > max ? s.slice(0, max) : s;
+}
+
+// Importierten Report auf die gebundene, erwartete Form bringen (gleiche Grenzen
+// wie beim eigenen Melden). Verhindert, dass fremde/riesige Felder aus einem
+// Backup den Speicher sprengen und beim Import bestehende Reports verdraengen.
+// Gibt null bei unbrauchbarem Eintrag.
+function sanitizeReport(rep) {
+  if (!rep || typeof rep !== "object" || rep.id == null) return null;
+  const orNull = (v, max) => (typeof v === "string" ? clip(v, max) : null);
+  return {
+    id: clip(String(rep.id), 64),
+    date: Number.isFinite(Number(rep.date)) ? Number(rep.date) : Date.now(),
+    fragenKey: typeof rep.fragenKey === "string" ? clip(rep.fragenKey, 2000) : "",
+    frage: clip(rep.frage, 600),
+    typ: rep.typ === "multiple_choice" ? "multiple_choice" : "offen",
+    kategorie_fachlich: clip(rep.kategorie_fachlich, 200),
+    korrekte_antwort: clip(rep.korrekte_antwort, 300),
+    optionen: Array.isArray(rep.optionen) ? rep.optionen.slice(0, 8).map((o) => clip(o, 200)) : [],
+    gruende: Array.isArray(rep.gruende)
+      ? rep.gruende.slice(0, 10).map((g) => clip(g, 40)).filter(Boolean)
+      : [],
+    notiz: clip(rep.notiz, 500),
+    jobKey: orNull(rep.jobKey, 200),
+    stellenTitel: orNull(rep.stellenTitel, 200),
+    provider: orNull(rep.provider, 40),
+    tier: orNull(rep.tier, 40),
+    model: orNull(rep.model, 80),
+  };
+}
+
+// Schreibt einen Report (fuellt id/date). Gibt das gespeicherte Objekt zurueck,
+// oder null, wenn das Speichern fehlschlug (localStorage voll/gesperrt). Der
+// Aufrufer darf eine Meldung nur dann als erfolgt ausgeben, wenn != null.
+function addReport(partial) {
+  const r = loadReports();
+  const report = {
+    id: (Date.now().toString(36) + Math.random().toString(36).slice(2, 8)),
+    date: Date.now(),
+    ...partial,
+  };
+  r.reports.push(report);
+  if (!saveReports(r)) return null;
+  // saveReports verwirft unter Speicherdruck FIFO-Eintraege - im Extremfall auch
+  // den gerade angehaengten - und kann danach ein (leeres) Objekt erfolgreich
+  // schreiben und true zurueckgeben. Erfolg daher daran festmachen, dass der neue
+  // Report tatsaechlich persistiert wurde, sonst null (kein falsches "Gemeldet").
+  const persisted = loadReports().reports.some((x) => x && x.id === report.id);
+  return persisted ? report : null;
+}
+
+// Wurde diese Frage in DIESEM Stellen-Kontext schon gemeldet? Der Status ist pro
+// (fragenKey, jobKey)-Paar: dieselbe generische Frage kann in einer Stelle
+// passen und in einer anderen unpassend sein ("thematisch irrelevant"), daher
+// darf eine Meldung in Stelle A das Melden in Stelle B nicht sperren. Ohne
+// jobKey (kein Stellenbezug) bildet null einen eigenen Bucket.
+function reportStatusForFrage(key, jobKey) {
+  if (!key) return false;
+  const jk = jobKey || null;
+  return loadReports().reports.some(
+    (r) => r && r.fragenKey === key && (r.jobKey || null) === jk,
+  );
+}
+
 // Dieselbe Anzeige (gleicher Text) landet immer bei derselben Stelle
 // djb2 -> vorzeichenlose Base36-Zeichenkette
 function hashStr(s) {
@@ -4856,6 +5008,24 @@ function deleteJob(job) {
     !(job.key && j.key === job.key) &&
     !(job.urlKey && j.urlKey === job.urlKey));
   saveHistory(h);
+  // Zugehoerige Meldungen mitloeschen: Reports liegen in einem eigenen Key, der
+  // Quota-Trimmung der Historie ueberlebt - aber beim EXPLIZITEN Loeschen einer
+  // Stelle sollen ihre Meldungen (Fragetext, Notizen, ggf. Loesung) nicht als
+  // verwaiste sensible Daten zurueckbleiben (kein anderer UI-Weg, sie zu
+  // entfernen). Gegen alle moeglichen Stellen-Identitaeten matchen, unter denen
+  // ein Report gespeichert sein kann (urlKey / identityKey / Textschluessel).
+  const keys = new Set();
+  if (job.urlKey) keys.add(job.urlKey);
+  const iKey = identityKeyOf(job.titel, job.arbeitgeber, job.arbeitsort);
+  if (iKey) keys.add(iKey);
+  if (job.key) keys.add(job.key);
+  if (job.jobText) { try { keys.add(jobKey(job.jobText)); } catch { /* egal */ } }
+  if (keys.size) {
+    const r = loadReports();
+    const before = r.reports.length;
+    r.reports = r.reports.filter((rep) => !(rep && keys.has(rep.jobKey)));
+    if (r.reports.length !== before) saveReports(r);
+  }
   // Verweist activeJob noch auf die geloeschte Stelle, Bezug aufloesen, damit
   // Zurueck-Navigation nicht auf einen verwaisten Eintrag springt.
   if (activeJob && activeJob.key === job.key) activeJob = null;
@@ -4869,7 +5039,7 @@ function buildDeleteButton(job, afterDelete) {
   const btn = document.createElement("button");
   btn.className = "danger";
   btn.textContent = "Löschen";
-  btn.title = "Diese Stelle mit allen Versuchen aus der Historie entfernen";
+  btn.title = "Diese Stelle mit allen Versuchen und Meldungen aus der Historie entfernen";
   btn.addEventListener("click", () => openConfirmDelete(job, afterDelete));
   return btn;
 }
@@ -5994,6 +6164,7 @@ function exportData() {
     exportedAt: new Date().toISOString(),
     settings: exportedSettings,
     history: loadHistory(),
+    reports: loadReports(),
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -6016,7 +6187,7 @@ function importData(text) {
   } catch {
     throw new Error("Die Datei ist kein gültiges JSON.");
   }
-  if (!data || typeof data !== "object" || (!data.settings && !data.history)) {
+  if (!data || typeof data !== "object" || (!data.settings && !data.history && !data.reports)) {
     throw new Error("Die Datei enthält keine erkennbaren Bewerbungstool-Daten.");
   }
 
@@ -6136,6 +6307,47 @@ function importData(text) {
     saveHistory(h);
   }
 
+  // Gemeldete Fragen defensiv und STRENG nicht-destruktiv mergen: importierte
+  // Reports auf die gebundene Form kappen (sonst koennte ein einzelner riesiger
+  // Eintrag ueber den FIFO-Retry in saveReports bestehende Reports verdraengen),
+  // per id dedupen, nie bestehende Reports verlieren, den Import nie abbrechen.
+  let newReports = 0;
+  let reportsDropped = 0;
+  if (data.reports && Array.isArray(data.reports.reports)) {
+    const existing = loadReports();
+    const ids = new Set(existing.reports.map((x) => x && x.id).filter(Boolean));
+    const sanitizedNew = [];
+    data.reports.reports.forEach((rep) => {
+      const s = sanitizeReport(rep);
+      if (!s || ids.has(s.id)) return;
+      ids.add(s.id);
+      sanitizedNew.push(s);
+    });
+    if (sanitizedNew.length) {
+      // Nie bestehende Reports verdraengen: nur so viele neue uebernehmen, wie
+      // unter REPORTS_MAX Platz ist (Rest gilt als verworfen).
+      const available = Math.max(0, REPORTS_MAX - existing.reports.length);
+      const toAdd = sanitizedNew.slice(0, available);
+      reportsDropped = sanitizedNew.length - toAdd.length;
+      if (toAdd.length) {
+        saveReports({ version: 1, reports: existing.reports.concat(toAdd) });
+        const after = new Set(loadReports().reports.map((x) => x && x.id).filter(Boolean));
+        // Wurde unter Speicherdruck ein BESTEHENDER Report verdraengt, verletzt das
+        // das nicht-destruktive Versprechen -> alten Stand wiederherstellen (er hat
+        // vorher gepasst) und den Import komplett als verworfen ausweisen.
+        const existingLost = existing.reports.some((x) => x && x.id && !after.has(x.id));
+        if (existingLost) {
+          saveReports({ version: 1, reports: existing.reports.slice() });
+          newReports = 0;
+          reportsDropped = sanitizedNew.length;
+        } else {
+          newReports = toAdd.filter((s) => after.has(s.id)).length;
+          reportsDropped = sanitizedNew.length - newReports;
+        }
+      }
+    }
+  }
+
   const parts = [];
   if (settingsImported) parts.push("Einstellungen übernommen");
   parts.push(
@@ -6143,6 +6355,14 @@ function importData(text) {
       ", " +
       (newAttempts === 1 ? "1 neuer Versuch" : newAttempts + " neue Versuche")
   );
+  if (newReports) {
+    parts.push(newReports === 1 ? "1 neue Meldung" : newReports + " neue Meldungen");
+  }
+  if (reportsDropped) {
+    parts.push(reportsDropped === 1
+      ? "1 Meldung nicht gespeichert (Speicher voll)"
+      : reportsDropped + " Meldungen nicht gespeichert (Speicher voll)");
+  }
   return parts.join("; ") + ".";
 }
 
@@ -6441,6 +6661,163 @@ function focusVisibleViewHeading() {
 }
 $("btn-confirm-delete-cancel").addEventListener("click", closeConfirmDelete);
 
+/* ---------- Frage melden (rein lokal, kein API-Call) ---------- */
+// Auswahl-Modal nach dem confirm-delete-Muster: classList-Toggle, Fokus in den
+// Dialog, beim Schliessen zurueck auf den ausloesenden Knopf. Escape und
+// Overlay-Klick schliessen (siehe ESCAPE_CLOSERS und den Klick-Handler unten).
+const REPORT_KATEGORIEN = [
+  ["fachlich_falsch", "Antwort fachlich falsch"],
+  ["irrelevant", "Thematisch irrelevant für die Stelle"],
+  ["sprachliche_qualitaet", "Sprachliche Qualität / unverständlich"],
+  ["dublette", "Wiederholung / schon gestellt"],
+  ["sonstiges", "Sonstiges"],
+];
+let reportReturnFocus = null;
+let reportCtx = null; // { q, kontext, button }
+
+// Knopf an einen Container haengen: dezenter ghost-Link "Frage melden". Wurde
+// die Frage schon gemeldet (aus den Reports abgeleitet), zeigt er "Gemeldet"
+// und ist deaktiviert - keine Doppelmeldung. kontext traegt jobKey/Titel/
+// provider/tier/model fuer den spaeteren Report.
+function appendReportButton(container, q, kontext) {
+  if (!container || !q) return;
+  const key = reportFrageKey(q);
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "report-btn ghost";
+  const gemeldet = reportStatusForFrage(key, kontext && kontext.jobKey);
+  if (gemeldet) {
+    btn.textContent = "Gemeldet";
+    btn.disabled = true;
+  } else {
+    btn.textContent = "Frage melden";
+    btn.addEventListener("click", () => openReportModal(q, kontext || {}, btn));
+  }
+  container.appendChild(btn);
+}
+
+function updateReportSubmitState() {
+  const anyCat = REPORT_KATEGORIEN.some(([code]) => {
+    const cb = $("report-cat-" + code);
+    return cb && cb.checked;
+  });
+  const note = ($("report-note").value || "").trim();
+  $("btn-report-submit").disabled = !(anyCat || note);
+}
+
+function openReportModal(q, kontext, button) {
+  reportCtx = { q, kontext: kontext || {}, button: button || null };
+  reportReturnFocus = document.activeElement;
+  // Felder zuruecksetzen
+  REPORT_KATEGORIEN.forEach(([code]) => {
+    const cb = $("report-cat-" + code);
+    if (cb) cb.checked = false;
+  });
+  $("report-note").value = "";
+  $("report-question").textContent = clip(q.frage || "", 200);
+  $("report-error").classList.add("hidden");
+  updateReportSubmitState();
+  $("report-modal").classList.remove("hidden");
+  const first = $("report-cat-fachlich_falsch");
+  if (first) first.focus();
+}
+
+function closeReportModal() {
+  $("report-modal").classList.add("hidden");
+  reportCtx = null;
+  if (reportReturnFocus && typeof reportReturnFocus.focus === "function") {
+    reportReturnFocus.focus();
+  }
+  reportReturnFocus = null;
+}
+
+REPORT_KATEGORIEN.forEach(([code]) => {
+  const cb = $("report-cat-" + code);
+  if (cb) cb.addEventListener("change", updateReportSubmitState);
+});
+$("report-note").addEventListener("input", updateReportSubmitState);
+
+$("btn-report-submit").addEventListener("click", () => {
+  if (!reportCtx) return;
+  const { q, kontext, button } = reportCtx;
+  const gruende = REPORT_KATEGORIEN
+    .filter(([code]) => { const cb = $("report-cat-" + code); return cb && cb.checked; })
+    .map(([code]) => code);
+  const note = clip(($("report-note").value || "").trim(), 500);
+  if (!gruende.length && !note) return; // Sicherheitsnetz: leeres Melden verhindern
+
+  // Fragetext/Antworten koennen lang sein -> hart kuerzen (Quota). Optionen
+  // limitiert. provider/tier/model defensiv aus dem Kontext (loadSettings()).
+  const optionen = Array.isArray(q.optionen)
+    ? q.optionen.slice(0, 8).map((o) => clip(o, 200))
+    : [];
+  const saved = addReport({
+    fragenKey: reportFrageKey(q),
+    frage: clip(q.frage || "", 600),
+    typ: q.typ === "multiple_choice" ? "multiple_choice" : "offen",
+    kategorie_fachlich: clip(q.kategorie || "", 200),
+    korrekte_antwort: kontext.answersSecret ? "" : clip(q.korrekte_antwort || "", 300),
+    optionen,
+    gruende,
+    notiz: note,
+    jobKey: kontext.jobKey || null,
+    stellenTitel: kontext.stellenTitel ? clip(kontext.stellenTitel, 200) : null,
+    provider: kontext.provider || null,
+    tier: kontext.tier || null,
+    model: kontext.model || null,
+  });
+
+  // Speichern fehlgeschlagen (localStorage voll/gesperrt): Meldung NICHT als
+  // erfolgt ausgeben. Modal/Knopf bleiben nutzbar, Fehlerhinweis einblenden.
+  if (!saved) {
+    $("report-error").classList.remove("hidden");
+    return;
+  }
+
+  // Knopf der gemeldeten Frage wird zu "Gemeldet" (disabled) - keine
+  // Doppelmeldung. Bei erneutem Render leitet appendReportButton denselben
+  // Zustand aus reportStatusForFrage ab.
+  if (button) {
+    button.textContent = "Gemeldet";
+    button.disabled = true;
+  }
+  closeReportModal();
+});
+
+$("btn-report-cancel").addEventListener("click", closeReportModal);
+$("report-modal").addEventListener("click", (e) => {
+  if (e.target === $("report-modal")) closeReportModal();
+});
+
+// Kontext fuer einen Report aus der gerade aktiven Stelle ableiten (Settings +
+// quiz). Hosted hat kein Nutzer-Modell -> model bleibt leer, provider/tier
+// zaehlen. Defensiv: alle Felder optional.
+function reportKontextAktiv() {
+  // Provenienz aus dem QUIZ (zur Generierungszeit festgehalten), nicht aus den
+  // aktuellen Einstellungen: der Nutzer kann den Anbieter nach der Generierung
+  // gewechselt haben oder einen alten Versuch in der Review melden. Alte Quizze
+  // ohne provenance bleiben unbekannt (null) statt faelschlich aktuelle Settings.
+  const ctx = { provider: null, tier: null, model: null };
+  if (quiz) {
+    if (quiz.provenance) {
+      ctx.provider = quiz.provenance.provider || null;
+      ctx.tier = quiz.provenance.tier || null;
+      ctx.model = quiz.provenance.model || null;
+    }
+    if (quiz.titel) ctx.stellenTitel = quiz.titel;
+    // Kanonische Stellen-Identitaet wie in saveAttempt (urlKey -> identityKey ->
+    // Textschluessel), damit Reports im selben Bucket landen wie die Versuche und
+    // nicht ueber Textvarianten/Refetch derselben Stelle aufgesplittet werden.
+    try {
+      ctx.jobKey =
+        quiz.urlKey ||
+        identityKeyOf(quiz.titel, quiz.arbeitgeber, quiz.arbeitsort) ||
+        (quiz.jobText ? jobKey(quiz.jobText) : null);
+    } catch { /* egal */ }
+  }
+  return ctx;
+}
+
 // Versionsanzeige im Footer und Changelog-Fenster
 function renderChangelog() {
   const list = $("changelog-list");
@@ -6561,6 +6938,7 @@ const ESCAPE_CLOSERS = [
   ["confirm-replace-learn-modal", closeConfirmReplaceLearn],
   ["badge-modal", closeBadgeModal],
   ["confirm-delete-modal", closeConfirmDelete],
+  ["report-modal", closeReportModal],
   ["levelup-overlay", closeLevelUp],
 ];
 document.addEventListener("keydown", (e) => {

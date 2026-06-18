@@ -1095,6 +1095,29 @@ button.ghost {
   color: var(--text);
 }
 
+/* "Frage melden": dezenter ghost-Knopf, der nie mit Antworten/Auflösen/Weiter
+   konkurriert. Auf schmalen Screens volle Trefferfläche. */
+.report-btn {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 0.35rem 0.6rem;
+}
+.report-btn:hover:not(:disabled) { color: var(--primary); }
+.report-btn:disabled { opacity: 0.7; cursor: default; }
+#report-area { margin-top: 0.6rem; }
+/* Im Review-Detail eine eigene Zeile unter dem Feedback. */
+.detail-item .report-row { margin: 0.5rem 0 0; clear: both; }
+
+/* Melden-Modal: scrollbar auf schmalen Screens (Kategorien + Freitext). */
+.report-modal { max-height: 86vh; overflow-y: auto; }
+.report-cats { border: 1px solid var(--border); border-radius: var(--radius); padding: 0.6rem 0.8rem; margin: 0.6rem 0; }
+.report-cats legend { font-size: 0.85rem; font-weight: 600; padding: 0 0.3rem; }
+.report-cats label { display: flex; align-items: flex-start; gap: 0.5rem; padding: 0.35rem 0; font-size: 0.92rem; cursor: pointer; }
+.report-cats input { margin-top: 0.15rem; }
+#report-question { font-style: italic; margin-bottom: 0.4rem; }
+#report-note { width: 100%; box-sizing: border-box; }
+
 /* Changelog */
 .changelog-modal {
   max-width: 480px;
@@ -1412,6 +1435,10 @@ button.danger:hover { background: var(--red-soft); border-color: var(--red); }
   .sort-grip { min-width: 46px; min-height: 46px; }
   .sort-up, .sort-down { min-width: 46px; min-height: 46px; }
   .sort-pos { min-width: 1.4rem; }
+
+  /* Melden-Knopf voll antippbar und etwas Abstand zu primären Aktionen. */
+  .report-btn { min-height: 44px; padding: 0.6rem 0.9rem; }
+  .report-cats label { padding: 0.5rem 0; }
 
   .diff-row { flex-wrap: wrap; }
   .diff-option { flex: 1; justify-content: center; min-width: 90px; }
