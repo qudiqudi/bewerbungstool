@@ -1036,12 +1036,18 @@ function normalizeKernpunkte(k, jobText) {
   const verified = (item) => {
     if (!item || typeof item !== "object") return "";
     const text = typeof item.text === "string" ? item.text.trim() : "";
-    const beleg = typeof item.beleg === "string" ? item.beleg : "";
-    if (!text) return "";
+    const beleg = typeof item.beleg === "string" ? item.beleg.trim() : "";
+    // 1) Der Beleg muss ein hinreichend langes, im Anzeigentext WOERTLICH
+    //    auffindbares Zitat sein (Mindestlaenge gegen triviale Schnipsel).
     const nb = norm(beleg);
-    if (nb.length < 8) return "";
-    if (!hay.includes(nb)) return "";
-    return text;
+    if (nb.length < 8 || !hay.includes(nb)) return "";
+    // 2) Der ANGEZEIGTE Wert muss durch genau diesen Beleg gedeckt sein - sonst
+    //    koennte das Modell ein echtes Zitat mit einer erfundenen Aussage paaren
+    //    (z. B. text "100% remote, 80k" + beleg "Vollzeitstelle"). Bevorzugt der
+    //    knappe text, ABER nur wenn er woertlich im Beleg steckt; andernfalls der
+    //    (gekuerzte) Beleg selbst. Nie die ungedeckte Modell-Formulierung.
+    if (text && nb.includes(norm(text))) return text;
+    return beleg.length > 200 ? beleg.slice(0, 200).trim() + "…" : beleg;
   };
   const verArr = (v) =>
     (Array.isArray(v) ? v.map(verified).filter(Boolean) : []);
