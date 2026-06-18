@@ -2094,6 +2094,16 @@ function scoreMultiMc(q, answerStr) {
   };
 }
 
+// Antwortfreier Identitaetsschluessel fuer Reports - bewusst OHNE korrekte_antwort
+// (anders als fragenKey). Sonst koennte eine im aktiven Pruefungsmodus gemeldete
+// Frage die Loesung ueber den persistierten/exportierten Report-Schluessel
+// verraten. Frage + Typ + (sortierte) Optionen reichen zur Frage-Identitaet fuer
+// das Dedup pro Stelle; Optionen sortiert = reihenfolge-unabhaengig.
+function reportFrageKey(q) {
+  const optionen = Array.isArray(q.optionen) ? q.optionen.map(normText).sort() : [];
+  return [normText(q.frage), q.typ === "multiple_choice" ? "mc" : "offen", ...optionen].join(" | ");
+}
+
 // Der exakte Schluessel oben faengt nur wortgleiche Wiederholungen. Schwache
 // Modelle stellen aber auch dieselbe Frage leicht umformuliert ("zum
 // Tagesgeschaeft gehoert..." vs. "primaer im Tagesgeschaeft enthalten...").
@@ -6653,7 +6663,7 @@ let reportCtx = null; // { q, kontext, button }
 // provider/tier/model fuer den spaeteren Report.
 function appendReportButton(container, q, kontext) {
   if (!container || !q) return;
-  const key = fragenKey(q);
+  const key = reportFrageKey(q);
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "report-btn ghost";
@@ -6724,7 +6734,7 @@ $("btn-report-submit").addEventListener("click", () => {
     ? q.optionen.slice(0, 8).map((o) => clip(o, 200))
     : [];
   const saved = addReport({
-    fragenKey: fragenKey(q),
+    fragenKey: reportFrageKey(q),
     frage: clip(q.frage || "", 600),
     typ: q.typ === "multiple_choice" ? "multiple_choice" : "offen",
     kategorie_fachlich: clip(q.kategorie || "", 200),
