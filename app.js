@@ -3151,8 +3151,13 @@ function attachSortDrag(grip, li, ol, order, commit) {
 
       const o = order.slice();
       const [moved] = o.splice(startIdx, 1);
+      // targetIdx wird in onMove aus `others` bestimmt - der Liste OHNE das
+      // gezogene Element. Nach dem o.splice(startIdx, 1) ist `o` exakt dasselbe
+      // Koordinatensystem (gleiche Reihenfolge ohne moved), also ist targetIdx
+      // direkt die Einfuegeposition. KEINE zusaetzliche -1-Korrektur (die wuerde
+      // Abwaertsbewegungen falsch einfuegen: Drop nach unten landet eine Position
+      // zu hoch oder wird zum No-op).
       let insertAt = targetIdx;
-      if (insertAt > startIdx) insertAt -= 1; // Korrektur, weil moved entfernt wurde
       if (insertAt < 0) insertAt = 0;
       if (insertAt > o.length) insertAt = o.length;
       o.splice(insertAt, 0, moved);
