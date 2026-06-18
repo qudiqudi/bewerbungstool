@@ -6,6 +6,19 @@
 // WICHTIG (Dual-Maintenance, Plan A.3.1): Ändert sich ein Prompt in app.js, MUSS er
 // hier mitgezogen werden. Vor Go-Live mit dem Golden-Set gegen den App-Pfad prüfen (A.6).
 
+// Ein einzelner Kernpunkt: knapper text plus woertliches Beleg-Zitat aus dem
+// Anzeigentext. Identisch zu KERNPUNKT_ITEM_SCHEMA in app.js; der beleg ist die
+// Grundlage der Grounding-Pruefung in normalizeKernpunkte (app.js).
+const KERNPUNKT_ITEM_SCHEMA = {
+  type: "object",
+  properties: {
+    text: { type: "string", description: "Der knappe Kernpunkt" },
+    beleg: { type: "string", description: "Woertliches, exakt aus dem Anzeigentext kopiertes Zitat, das den Punkt stuetzt" },
+  },
+  required: ["text", "beleg"],
+  additionalProperties: false,
+};
+
 export const QUESTIONS_SCHEMA = {
   type: "object",
   properties: {
@@ -66,41 +79,55 @@ export const QUESTIONS_SCHEMA = {
       type: "object",
       description:
         "Die wichtigsten Kernpunkte der Stelle, ausschliesslich aus dem Anzeigentext " +
-        "extrahiert. Nichts erfinden: was nicht im Text steht, bleibt leerer String " +
-        "bzw. leeres Array.",
+        "extrahiert. Nichts erfinden: was nicht im Text steht, bleibt leer. Zu JEDEM " +
+        "Kernpunkt gehoert ein beleg = ein woertliches, exakt aus dem Anzeigentext " +
+        "kopiertes Zitat, das den Punkt stuetzt. Gibt es kein solches Zitat, bleibt die " +
+        "Kategorie leer (leeres Array bzw. text und beleg leer).",
       properties: {
         aufgaben: {
           type: "array",
-          items: { type: "string" },
-          description: "Wichtigste Aufgaben/Taetigkeiten, je ein knapper Punkt; leer wenn nicht genannt",
+          items: KERNPUNKT_ITEM_SCHEMA,
+          description: "Wichtigste Aufgaben/Taetigkeiten, je ein knapper Punkt mit Beleg-Zitat; leer wenn nicht genannt",
         },
         anforderungen_muss: {
           type: "array",
-          items: { type: "string" },
-          description: "Zwingende Anforderungen / Muss-Skills; leer wenn nicht genannt",
+          items: KERNPUNKT_ITEM_SCHEMA,
+          description: "Zwingende Anforderungen / Muss-Skills mit Beleg-Zitat; leer wenn nicht genannt",
         },
         anforderungen_optional: {
           type: "array",
-          items: { type: "string" },
-          description: "Nice-to-have / wuenschenswerte Anforderungen; leer wenn nicht genannt",
+          items: KERNPUNKT_ITEM_SCHEMA,
+          description: "Nice-to-have / wuenschenswerte Anforderungen mit Beleg-Zitat; leer wenn nicht genannt",
         },
         arbeitsmodell: {
-          type: "string",
-          description: "Arbeitszeit/Modell (Vollzeit/Teilzeit, Schicht, Remote/Hybrid, Befristung); leerer String wenn nicht genannt",
+          type: "object",
+          properties: {
+            text: { type: "string", description: "Arbeitszeit/Modell (Vollzeit/Teilzeit, Schicht, Remote/Hybrid, Befristung); leer wenn nicht genannt" },
+            beleg: { type: "string", description: "Woertliches, exakt aus dem Anzeigentext kopiertes Zitat, das den Punkt stuetzt; leer wenn nicht genannt" },
+          },
+          required: ["text", "beleg"],
+          additionalProperties: false,
+          description: "Arbeitszeit/Modell mit Beleg-Zitat; text und beleg leer wenn nicht genannt",
         },
         gehalt: {
-          type: "string",
-          description: "Gehalt/Verguetung wortgetreu wie genannt (Spanne, Tarif); leerer String wenn nicht genannt",
+          type: "object",
+          properties: {
+            text: { type: "string", description: "Gehalt/Verguetung wortgetreu wie genannt (Spanne, Tarif); leer wenn nicht genannt" },
+            beleg: { type: "string", description: "Woertliches, exakt aus dem Anzeigentext kopiertes Zitat, das den Punkt stuetzt; leer wenn nicht genannt" },
+          },
+          required: ["text", "beleg"],
+          additionalProperties: false,
+          description: "Gehalt/Verguetung mit Beleg-Zitat; text und beleg leer wenn nicht genannt",
         },
         benefits: {
           type: "array",
-          items: { type: "string" },
-          description: "Benefits/Zusatzleistungen; leer wenn nicht genannt",
+          items: KERNPUNKT_ITEM_SCHEMA,
+          description: "Benefits/Zusatzleistungen mit Beleg-Zitat; leer wenn nicht genannt",
         },
         besonderheiten: {
           type: "array",
-          items: { type: "string" },
-          description: "Sonstige relevante Besonderheiten der Stelle; leer wenn nicht genannt",
+          items: KERNPUNKT_ITEM_SCHEMA,
+          description: "Sonstige relevante Besonderheiten der Stelle mit Beleg-Zitat; leer wenn nicht genannt",
         },
       },
       required: ["aufgaben", "anforderungen_muss", "anforderungen_optional", "arbeitsmodell", "gehalt", "benefits", "besonderheiten"],
@@ -192,7 +219,10 @@ export function buildQuizMessages({ jobText, numQuestions, difficulty, vertiefun
     "Extrahiere zusätzlich die wichtigsten Kernpunkte der Stelle (Aufgaben, zwingende und optionale Anforderungen, " +
     "Arbeitsmodell, Gehalt, Benefits, Besonderheiten) ausschliesslich aus dem Anzeigentext. Erfinde nichts und leite " +
     "nichts her - was nicht ausdrücklich im Text steht, lässt du leer (leerer String bzw. leeres Array). Formuliere " +
-    "jeden Punkt knapp; Gehalt möglichst wortgetreu. ";
+    "jeden Punkt knapp; Gehalt möglichst wortgetreu. Zu JEDEM Kernpunkt gehört ein beleg = ein WÖRTLICHES, exakt " +
+    "aus dem Anzeigentext kopiertes Zitat (kein paraphrasiertes), das die Aussage stützt. Nimm einen Kernpunkt NUR " +
+    "auf, wenn es ein solches wörtliches Zitat im Text gibt; sonst lass die Kategorie leer. Gehalt, Benefits und " +
+    "Anforderungen nur bei wörtlicher Deckung. ";
 
   // Hosted nutzt starke Cloud-Modelle -> Reihenfolge-Aufgaben werden hier (anders
   // als im App-local-Pfad) NICHT unterdrueckt.

@@ -767,6 +767,19 @@ function setQuizNotice(msg) {
 
 /* ---------- JSON-Schemata ---------- */
 
+// Ein einzelner Kernpunkt: knapper text plus woertliches Beleg-Zitat aus dem
+// Anzeigentext. Der beleg ist die Grundlage der Grounding-Pruefung in
+// normalizeKernpunkte (Punkte ohne im Text auffindbares Zitat werden verworfen).
+const KERNPUNKT_ITEM_SCHEMA = {
+  type: "object",
+  properties: {
+    text: { type: "string", description: "Der knappe Kernpunkt" },
+    beleg: { type: "string", description: "Woertliches, exakt aus dem Anzeigentext kopiertes Zitat, das den Punkt stuetzt" },
+  },
+  required: ["text", "beleg"],
+  additionalProperties: false,
+};
+
 const QUESTIONS_SCHEMA = {
   type: "object",
   properties: {
@@ -855,41 +868,55 @@ const QUESTIONS_SCHEMA = {
       type: "object",
       description:
         "Die wichtigsten Kernpunkte der Stelle, ausschliesslich aus dem Anzeigentext " +
-        "extrahiert. Nichts erfinden: was nicht im Text steht, bleibt leerer String " +
-        "bzw. leeres Array.",
+        "extrahiert. Nichts erfinden: was nicht im Text steht, bleibt leer. Zu JEDEM " +
+        "Kernpunkt gehoert ein beleg = ein woertliches, exakt aus dem Anzeigentext " +
+        "kopiertes Zitat, das den Punkt stuetzt. Gibt es kein solches Zitat, bleibt die " +
+        "Kategorie leer (leeres Array bzw. text und beleg leer).",
       properties: {
         aufgaben: {
           type: "array",
-          items: { type: "string" },
-          description: "Wichtigste Aufgaben/Taetigkeiten, je ein knapper Punkt; leer wenn nicht genannt",
+          items: KERNPUNKT_ITEM_SCHEMA,
+          description: "Wichtigste Aufgaben/Taetigkeiten, je ein knapper Punkt mit Beleg-Zitat; leer wenn nicht genannt",
         },
         anforderungen_muss: {
           type: "array",
-          items: { type: "string" },
-          description: "Zwingende Anforderungen / Muss-Skills; leer wenn nicht genannt",
+          items: KERNPUNKT_ITEM_SCHEMA,
+          description: "Zwingende Anforderungen / Muss-Skills mit Beleg-Zitat; leer wenn nicht genannt",
         },
         anforderungen_optional: {
           type: "array",
-          items: { type: "string" },
-          description: "Nice-to-have / wuenschenswerte Anforderungen; leer wenn nicht genannt",
+          items: KERNPUNKT_ITEM_SCHEMA,
+          description: "Nice-to-have / wuenschenswerte Anforderungen mit Beleg-Zitat; leer wenn nicht genannt",
         },
         arbeitsmodell: {
-          type: "string",
-          description: "Arbeitszeit/Modell (Vollzeit/Teilzeit, Schicht, Remote/Hybrid, Befristung); leerer String wenn nicht genannt",
+          type: "object",
+          properties: {
+            text: { type: "string", description: "Arbeitszeit/Modell (Vollzeit/Teilzeit, Schicht, Remote/Hybrid, Befristung); leer wenn nicht genannt" },
+            beleg: { type: "string", description: "Woertliches, exakt aus dem Anzeigentext kopiertes Zitat, das den Punkt stuetzt; leer wenn nicht genannt" },
+          },
+          required: ["text", "beleg"],
+          additionalProperties: false,
+          description: "Arbeitszeit/Modell mit Beleg-Zitat; text und beleg leer wenn nicht genannt",
         },
         gehalt: {
-          type: "string",
-          description: "Gehalt/Verguetung wortgetreu wie genannt (Spanne, Tarif); leerer String wenn nicht genannt",
+          type: "object",
+          properties: {
+            text: { type: "string", description: "Gehalt/Verguetung wortgetreu wie genannt (Spanne, Tarif); leer wenn nicht genannt" },
+            beleg: { type: "string", description: "Woertliches, exakt aus dem Anzeigentext kopiertes Zitat, das den Punkt stuetzt; leer wenn nicht genannt" },
+          },
+          required: ["text", "beleg"],
+          additionalProperties: false,
+          description: "Gehalt/Verguetung mit Beleg-Zitat; text und beleg leer wenn nicht genannt",
         },
         benefits: {
           type: "array",
-          items: { type: "string" },
-          description: "Benefits/Zusatzleistungen; leer wenn nicht genannt",
+          items: KERNPUNKT_ITEM_SCHEMA,
+          description: "Benefits/Zusatzleistungen mit Beleg-Zitat; leer wenn nicht genannt",
         },
         besonderheiten: {
           type: "array",
-          items: { type: "string" },
-          description: "Sonstige relevante Besonderheiten der Stelle; leer wenn nicht genannt",
+          items: KERNPUNKT_ITEM_SCHEMA,
+          description: "Sonstige relevante Besonderheiten der Stelle mit Beleg-Zitat; leer wenn nicht genannt",
         },
       },
       required: ["aufgaben", "anforderungen_muss", "anforderungen_optional", "arbeitsmodell", "gehalt", "benefits", "besonderheiten"],
@@ -987,24 +1014,45 @@ const EVAL_SCHEMA = {
 // nutzbar (harmlose Luecken auffuellen) und werfen nur, wenn das Ergebnis
 // grundsaetzlich unbrauchbar ist.
 
-// Kernpunkte der Stelle defensiv aufbereiten. Gibt null zurueck, wenn keine
-// Kategorie befuellt ist (nicht-extrahierende Provider/lokal sollen keinen
-// leeren Block speichern). Tolerant gegen Fehlen und Teilbefuellung.
-function normalizeKernpunkte(k) {
+// Kernpunkte der Stelle defensiv aufbereiten und GEGEN DEN ANZEIGENTEXT
+// VERIFIZIEREN. Jeder Kernpunkt liefert vom Modell { text, beleg }; der beleg
+// muss ein woertliches Zitat aus dem Anzeigentext sein. Punkte, deren beleg sich
+// nicht (normalisiert) im jobText finden laesst, werden verworfen - so wird ein
+// halluziniertes Ergebnis nicht als "vertrauenswuerdige" Stellen-Info gespeichert
+// oder angezeigt. Die Ausgabe bleibt absichtlich TEXT-ONLY (string[] bzw. string),
+// damit Panel (buildKernpunktePanel) und Persistenz (saveAttempt) unveraendert
+// bleiben. Gibt null zurueck, wenn nach der Pruefung keine Kategorie uebrig ist
+// (nicht-extrahierende Provider/lokal sollen keinen leeren Block speichern).
+// Tolerant gegen Fehlen und Teilbefuellung. Ohne jobText kann nichts verifiziert
+// werden -> alles wird verworfen (sichere Default).
+function normalizeKernpunkte(k, jobText) {
   if (!k || typeof k !== "object") return null;
-  const strArr = (v) =>
-    (Array.isArray(v)
-      ? v.map((x) => (typeof x === "string" ? x.trim() : "")).filter(Boolean)
-      : []);
-  const str = (v) => (typeof v === "string" ? v.trim() : "");
+  const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+  const hay = norm(jobText);
+  // item ist { text, beleg }. Gibt den getrimmten text zurueck, wenn text nicht
+  // leer ist UND der beleg ein hinreichend langes, im Anzeigentext woertlich
+  // auffindbares Zitat ist; sonst "" (verwerfen). Die Mindestlaenge schliesst aus,
+  // dass ein triviales Schnipsel ("und", "m/w/d") als Beleg durchgeht.
+  const verified = (item) => {
+    if (!item || typeof item !== "object") return "";
+    const text = typeof item.text === "string" ? item.text.trim() : "";
+    const beleg = typeof item.beleg === "string" ? item.beleg : "";
+    if (!text) return "";
+    const nb = norm(beleg);
+    if (nb.length < 8) return "";
+    if (!hay.includes(nb)) return "";
+    return text;
+  };
+  const verArr = (v) =>
+    (Array.isArray(v) ? v.map(verified).filter(Boolean) : []);
   const out = {
-    aufgaben: strArr(k.aufgaben),
-    anforderungen_muss: strArr(k.anforderungen_muss),
-    anforderungen_optional: strArr(k.anforderungen_optional),
-    arbeitsmodell: str(k.arbeitsmodell),
-    gehalt: str(k.gehalt),
-    benefits: strArr(k.benefits),
-    besonderheiten: strArr(k.besonderheiten),
+    aufgaben: verArr(k.aufgaben),
+    anforderungen_muss: verArr(k.anforderungen_muss),
+    anforderungen_optional: verArr(k.anforderungen_optional),
+    arbeitsmodell: verified(k.arbeitsmodell),
+    gehalt: verified(k.gehalt),
+    benefits: verArr(k.benefits),
+    besonderheiten: verArr(k.besonderheiten),
   };
   const hasAny =
     out.aufgaben.length ||
@@ -1017,7 +1065,7 @@ function normalizeKernpunkte(k) {
   return hasAny ? out : null;
 }
 
-function normalizeQuizData(result) {
+function normalizeQuizData(result, jobText = "") {
   if (!result || typeof result !== "object" || !Array.isArray(result.fragen)) {
     throw new Error("Die Modellantwort hatte nicht die erwartete Form (keine Fragenliste).");
   }
@@ -1148,7 +1196,7 @@ function normalizeQuizData(result) {
     throw new Error("Die Modellantwort enthielt keine verwertbaren Fragen.");
   }
   const zeit = Math.round(Number(result.empfohlene_zeit_minuten));
-  const kp = normalizeKernpunkte(result.kernpunkte);
+  const kp = normalizeKernpunkte(result.kernpunkte, jobText);
   return {
     titel: typeof result.titel === "string" && result.titel.trim() ? result.titel.trim() : "Einstellungstest",
     arbeitgeber: typeof result.arbeitgeber === "string" ? result.arbeitgeber.trim() : "",
@@ -2303,7 +2351,7 @@ async function generateLocalBatches(system, jobText, total, onProgress) {
 
       let norm;
       try {
-        norm = normalizeQuizData(out.data);
+        norm = normalizeQuizData(out.data, jobText);
       } catch (e) {
         if (collected.length) break;
         throw e;
@@ -2654,7 +2702,10 @@ async function generateQuiz(opts = {}) {
         "Extrahiere zusätzlich die wichtigsten Kernpunkte der Stelle (Aufgaben, zwingende und optionale Anforderungen, " +
         "Arbeitsmodell, Gehalt, Benefits, Besonderheiten) ausschliesslich aus dem Anzeigentext. Erfinde nichts und leite " +
         "nichts her - was nicht ausdrücklich im Text steht, lässt du leer (leerer String bzw. leeres Array). Formuliere " +
-        "jeden Punkt knapp; Gehalt möglichst wortgetreu. ";
+        "jeden Punkt knapp; Gehalt möglichst wortgetreu. Zu JEDEM Kernpunkt gehört ein beleg = ein WÖRTLICHES, exakt " +
+        "aus dem Anzeigentext kopiertes Zitat (kein paraphrasiertes), das die Aussage stützt. Nimm einen Kernpunkt NUR " +
+        "auf, wenn es ein solches wörtliches Zitat im Text gibt; sonst lass die Kategorie leer. Gehalt, Benefits und " +
+        "Anforderungen nur bei wörtlicher Deckung. ";
 
     // Vertiefungen tragen Tiefe ueber offene Fragen besser als ueber MC, und die
     // Distraktoren muessen anspruchsvoll sein. Normale Tests behalten exakt die
@@ -2774,7 +2825,7 @@ async function generateQuiz(opts = {}) {
 // synchronen (BYOK/lokal) und vom asynchronen Hosted-Pfad. ctx traegt den zur
 // Fertigstellung noetigen Kontext (zur Startzeit festgehalten).
 function finalizeQuiz(result, ctx) {
-  quiz = normalizeQuizData(result);
+  quiz = normalizeQuizData(result, ctx.jobText);
   quiz.jobText = ctx.jobText;
   if (ctx.urlKey) { quiz.urlKey = ctx.urlKey; quiz.jobUrl = ctx.jobUrl; }
   quiz.schwierigkeitsgrad = ctx.difficulty;
