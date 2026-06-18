@@ -130,6 +130,40 @@ async function run() {
     assert((bd.perIp["5.5.5.5"] || 0) === 0, "perIp bleibt bei 0 (Math.max-Clamp)");
   }
 
+  console.log("Test 4: Vortags-release nach neuer Reserve derselben IP verfaelscht perIp NICHT");
+  {
+    FAKE_NOW = RealDate.parse("2026-06-19T23:59:00.000Z");
+    const bd = new BudgetDO(makeState(), makeEnv());
+    await bd.load();
+    // Vortags-Reserve, die ueber Mitternacht offen bleibt.
+    const old = bd.reserve({ amount: 1, subject: "alt", ip: "7.7.7.7", exclusive: true });
+    assert(old.ok, "Vortags-Reserve akzeptiert");
+
+    // Rollover: perIp wird geleert.
+    FAKE_NOW = RealDate.parse("2026-06-20T00:01:00.000Z");
+    bd.rolloverIfNeeded();
+    assert(!("7.7.7.7" in bd.perIp), "perIp am neuen Tag geleert");
+
+    // Neue, erfolgreiche Reserve derselben IP am neuen Tag.
+    const fresh = bd.reserve({ amount: 0.5, subject: "neu", ip: "7.7.7.7", exclusive: false });
+    assert(fresh.ok, "neue Reserve derselben IP akzeptiert");
+    eq(bd.perIp["7.7.7.7"], 1, "perIp am neuen Tag = 1 (nur der neue Call)");
+
+    // Jetzt loest sich die ALTE (Vortags-)Reserve per release auf — darf den perIp des
+    // neuen Tages NICHT herunterziehen.
+    bd.release({ reserveId: old.reserveId });
+    eq(bd.perIp["7.7.7.7"], 1, "Vortags-release laesst perIp des neuen Tages unveraendert");
+
+    // Harte Pruefung: das Pro-IP-Tageslimit (8) bleibt scharf — nach diesem 1 Call
+    // duerfen genau 7 weitere durch, der 9. wird geblockt.
+    for (let i = 0; i < 7; i++) {
+      const r = bd.reserve({ amount: 0.1, subject: "x" + i, ip: "7.7.7.7", exclusive: false });
+      assert(r.ok, `Folge-Reserve ${i} akzeptiert (innerhalb des Limits)`);
+    }
+    const over = bd.reserve({ amount: 0.1, subject: "zuviel", ip: "7.7.7.7", exclusive: false });
+    eq(over.reason, "ip", "9. Call derselben IP korrekt durch 'ip' geblockt");
+  }
+
   globalThis.Date = RealDate;
   if (failures) { console.error(`\n${failures} Assertion(s) fehlgeschlagen.`); process.exit(1); }
   console.log("\nAlle Cross-Midnight-Budget-Asserts gruen.");

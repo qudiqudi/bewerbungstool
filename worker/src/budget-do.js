@@ -68,8 +68,10 @@ export class BudgetDO {
     // ueberlebenden Reserven neu aufbauen, bliebe der Eintrag nach dem settle den
     // ganzen neuen Tag stehen (settle entfernt ihn nicht) — der ueber Mitternacht
     // laufende Call zaehlte dann gegen alten UND neuen Tag und koennte das Pro-IP-
-    // Tageslimit faelschlich erschoepfen. Also bewusst leeren: das spaetere release
-    // dekrementiert dann gegen 0 (Math.max-Clamp, harmloser No-op).
+    // Tageslimit faelschlich erschoepfen. Also bewusst leeren. Damit ein spaeteres
+    // release einer Vortags-Reserve nicht den neu belegten perIp-Eintrag des heutigen
+    // Tages herunterreisst, traegt jede Reserve ihren Belegungs-Tag (r.day); release
+    // dekrementiert perIp nur fuer Reserven des aktuellen Tages (siehe release()).
     this.perSubject = {};
     this.perIp = {};
     this.dayReserved = 0;
@@ -121,7 +123,11 @@ export class BudgetDO {
     this.inflight += 1;
     this.perSubject[subject] = (this.perSubject[subject] || 0) + amount;
     this.perIp[ip] = (this.perIp[ip] || 0) + 1;
-    this.reservations[reserveId] = { amount, subject, ip, ts: Date.now(), exclusive: !!exclusive };
+    // day = Tag, dessen perIp-Zaehler diese Reserve belegt hat. release darf perIp nur
+    // dann dekrementieren, wenn die Reserve noch zum aktuellen Zaehler-Tag gehoert — sonst
+    // wuerde eine ueber Mitternacht laufende Reserve beim release den (geleerten und
+    // moeglicherweise schon neu belegten) perIp-Zaehler des NEUEN Tages verfaelschen.
+    this.reservations[reserveId] = { amount, subject, ip, day: this.day, ts: Date.now(), exclusive: !!exclusive };
     return { ok: true, reserveId };
   }
 
@@ -143,7 +149,15 @@ export class BudgetDO {
     if (!r) return { ok: true };
     this.dayReserved = Math.max(0, this.dayReserved - r.amount);
     this.perSubject[r.subject] = Math.max(0, (this.perSubject[r.subject] || 0) - r.amount);
-    this.perIp[r.ip] = Math.max(0, (this.perIp[r.ip] || 0) - 1);
+    // perIp nur dekrementieren, wenn die Reserve zum aktuellen Zaehler-Tag gehoert.
+    // Eine ueber Mitternacht laufende Reserve hat ihren IP-Slot am Vortag belegt (der
+    // beim Rollover geleert wurde) — wuerde sie hier dekrementieren, riss sie den
+    // perIp-Eintrag eines inzwischen neu eingebuchten Calls vom heutigen Tag faelschlich
+    // herunter und das Pro-IP-Tageslimit liesse sich umgehen. Legacy-Reserven ohne day
+    // (transient waehrend eines Deploys) verhalten sich wie zuvor.
+    if (r.day === undefined || r.day === this.day) {
+      this.perIp[r.ip] = Math.max(0, (this.perIp[r.ip] || 0) - 1);
+    }
     this.inflight = Math.max(0, this.inflight - 1);
     delete this.reservations[reserveId];
     return { ok: true };
