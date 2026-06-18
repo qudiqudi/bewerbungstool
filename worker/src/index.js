@@ -93,9 +93,10 @@ export default {
     // gleichzeitig"-Regel durch Direktaufruf umgehen (Codex-Finding). evaluate/themenfelder
     // bleiben nicht-exklusiv (kurze Aufrufe, kein Generierungs-Slot).
     const exclusive = route.action === "generate-quiz";
-    // Subjekt = Konto (Phase-B-Ausrichtung): Per-Subjekt-Share + exclusive-Gate gelten pro
-    // Nutzer; ip bleibt separat fuer den Tagescap PER_IP_DAY.
-    const gate = await doCall(stub, "reserve", { amount: reserve, subject: user.id, ip, exclusive });
+    // Subjekt = Konto, wenn angemeldet (Per-Subjekt-Share + exclusive-Gate pro Nutzer);
+    // im Cutover-Fenster (anonym erlaubt) faellt es auf die IP zurueck. ip bleibt separat
+    // fuer den Tagescap PER_IP_DAY.
+    const gate = await doCall(stub, "reserve", { amount: reserve, subject: user ? user.id : ip, ip, exclusive });
     if (!gate.ok) {
       const status = gate.reason === "budget" ? 503 : 429; // active-job/inflight/subject/ip → 429
       // Gate-Ablehnung in Workers Logs festhalten, damit der Grund im Dashboard/per
@@ -194,8 +195,10 @@ async function startJob(req, env, ctx, origin) {
 
   const reserve = worstCaseCost(tier, Number(env.HARD_CAP_TOKENS || 24000));
   const stub = budgetStub(env);
-  // Subjekt = Konto (Phase B): exclusive-Gate + Per-Subjekt-Share pro Nutzer; ip separat.
-  const gate = await doCall(stub, "reserve", { amount: reserve, subject: user.id, ip, exclusive: true });
+  // Subjekt = Konto, wenn angemeldet; im Cutover-Fenster anonym → IP. ip separat fuer Cap.
+  const subject = user ? user.id : ip;
+  const subjectKind = user ? "user" : null; // nur User-Jobs unterliegen der Ownership-Pruefung
+  const gate = await doCall(stub, "reserve", { amount: reserve, subject, ip, exclusive: true });
   if (!gate.ok) {
     const status = gate.reason === "budget" ? 503 : 429; // active-job/inflight/subject/ip → 429
     console.log(JSON.stringify({ ev: "gate-deny", action: "jobs", reason: gate.reason, status }));
@@ -213,7 +216,7 @@ async function startJob(req, env, ctx, origin) {
   try {
     await jobStub.fetch("https://do/start", {
       method: "POST",
-      body: JSON.stringify({ params, tier, subject: user.id, reserveId: gate.reserveId, reserveAmount: reserve }),
+      body: JSON.stringify({ params, tier, subject, subjectKind, reserveId: gate.reserveId, reserveAmount: reserve }),
     });
   } catch {
     await doCall(stub, "release", { reserveId: gate.reserveId }); // Slot wieder freigeben
@@ -232,8 +235,10 @@ async function pollJob(jobId, req, env, origin) {
   const jobStub = env.GENJOB_DO.get(env.GENJOB_DO.idFromName(jobId));
   let st;
   try {
-    // user.id als X-Subject durchreichen → das DO prueft die Job-Ownership.
-    st = await jobStub.fetch("https://do/status", { headers: { "X-Subject": user.id } }).then((r) => r.json());
+    // user.id als X-Subject durchreichen → das DO prueft die Job-Ownership (nur fuer
+    // User-Jobs, subjectKind="user"). Im Cutover-Fenster (anonym) ohne X-Subject.
+    const headers = user ? { "X-Subject": user.id } : {};
+    st = await jobStub.fetch("https://do/status", { headers }).then((r) => r.json());
   }
   catch { return json({ error: "poll-failed" }, 502, env, origin); }
   if (st.status === "forbidden") return json({ error: "forbidden" }, 403, env, origin);
@@ -249,16 +254,19 @@ function budgetStub(env) {
   return env.BUDGET_DO.get(env.BUDGET_DO.idFromName("global"));
 }
 
-// Auth-Gate mit kontrolliertem Fehlerpfad: getSessionUser kann bei fehlender/nachhinkender
-// D1-Migration (Schema-Drift) werfen — das wuerde sonst auf ALLEN Hosted-Endpoints einen
-// 500 statt einer kontrollierten Antwort ausloesen (Codex-Review R2: Outage-Risiko). Daher
-// Store-Fehler abfangen → 503 (auth-unavailable), fehlende Session → 401.
+// Auth-Gate mit kontrolliertem Fehlerpfad UND Rollout-Flag (Codex-Review R2 + R9):
+// - getSessionUser kann bei Schema-Drift werfen → 503 (auth-unavailable) statt 500-Outage.
+// - REQUIRE_AUTH="1": harte Pflicht (kein User → 401). REQUIRE_AUTH!="1" (Cutover-Fenster):
+//   anonyme Hosted-Calls bleiben erlaubt (user = null), damit bereits geladene/gecachte
+//   Alt-Clients beim Skew nicht abbrechen. Erst nach dem Auslaufen alter App-Shells per
+//   Var auf "1" schalten (Rollback = zurueck auf "0", reiner Var-Wechsel). Der neue Client
+//   verlangt clientseitig ohnehin Login; das Flag steuert nur die SERVER-Durchsetzung.
 async function gateUser(req, env, origin, opts) {
-  let user;
+  let user = null;
   try { user = await getSessionUser(req, env, opts); }
   catch { return { resp: json({ error: "auth-unavailable" }, 503, env, origin) }; }
-  if (!user) return { resp: json({ error: "auth-required" }, 401, env, origin) };
-  return { user };
+  if (!user && env.REQUIRE_AUTH === "1") return { resp: json({ error: "auth-required" }, 401, env, origin) };
+  return { user }; // user kann null sein, solange REQUIRE_AUTH != "1"
 }
 
 async function doCall(stub, op, payload) {

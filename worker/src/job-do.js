@@ -42,7 +42,8 @@ export class GenerationJobDO {
         params: body.params,     // { jobText, numQuestions, difficulty, vertiefung }
         tier: body.tier,         // aufgeloestes Tier-Objekt (model/reasoning/strictSchema)
         subject: body.subject,
-        subjectKind: "user",     // markiert Jobs aus dem Auth-Pflicht-Code (Ownership-Check)
+        subjectKind: body.subjectKind || null, // "user" → Ownership-Check; null (anonym im Cutover) → alte Capability
+
         reserveId: body.reserveId,
         reserveAmount: body.reserveAmount, // Worst-Case-Reserve → konservativer Settle-Estimate
         createdAt: Date.now(),

@@ -1263,12 +1263,17 @@ async function consumeAuthRedirect() {
   if (!code && !magic && !sess && !err) return false;
   cleanAuthParamsFromUrl(params); // IMMER zuerst scrubben, egal welcher Pfad
   if (err) { _authRedirectMsg = "Die Anmeldung wurde abgebrochen."; return true; }
-  if (sess) {
-    // Ein ?session=<bearer> in der URL wird NUR gescrubbt, NICHT uebernommen: ein
-    // fremdes Token zu speichern waere Session-Fixation (Codex-Review R6). Der neue Worker
-    // stellt ?session ohnehin nicht mehr aus (nur den verifier-gebundenen ?code). Falls
-    // ein noch laufender Alt-Worker es beim Deploy-Skew liefert, hier bewusst ignorieren.
-    if (!code && !magic) { _authRedirectMsg = "Bitte melde dich erneut an."; return true; }
+  if (sess && !code && !magic) {
+    // ?session=<bearer> vom Alt-Worker (Deploy-Skew, Codex-Review R9): NUR akzeptieren,
+    // wenn DIESER Tab den Google-Login gestartet hat (Verifier in sessionStorage). Das
+    // bindet es an den initiierenden Browser und verhindert Session-Fixation (R6): ein
+    // untergeschobener ?session-Link hat keinen passenden Verifier → wird nur gescrubbt.
+    let startedHere = "";
+    try { startedHere = sessionStorage.getItem(OAUTH_VERIFIER_KEY) || ""; } catch { /* egal */ }
+    try { sessionStorage.removeItem(OAUTH_VERIFIER_KEY); } catch { /* egal */ }
+    if (startedHere) { setAuthToken(sess); _authRedirectMsg = "Erfolgreich angemeldet."; }
+    else { _authRedirectMsg = "Bitte melde dich erneut an."; }
+    return true;
   }
   if (code) {
     let verifier = "";
