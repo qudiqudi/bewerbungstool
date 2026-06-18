@@ -5274,11 +5274,14 @@ function renderJobBlock(job, opts) {
 
   // Defensiv: eine gespeicherte Stelle koennte (theoretisch) keine Versuche
   // tragen - dann nicht ueber ein leeres Array Math.max (-> -Infinity) bilden.
-  // Letzter Versuch kann aus aelteren Versionen ohne prozent stammen.
+  // Versuche aus aelteren Versionen koennen ohne prozent kommen - einmal auf
+  // eine Zahl normalisieren, damit Trend, Tooltip und Score nicht "undefined %"
+  // bzw. "NaNpx" zeigen.
   const attempts = Array.isArray(job.attempts) ? job.attempts : [];
+  const pctOf = (a) => (a && Number.isFinite(Number(a.prozent)) ? Number(a.prozent) : 0);
   const lastAtt = attempts[attempts.length - 1];
-  const best = attempts.length ? Math.max(...attempts.map((a) => a.prozent || 0)) : 0;
-  const last = lastAtt && typeof lastAtt.prozent === "number" ? lastAtt.prozent : 0;
+  const best = attempts.length ? Math.max(...attempts.map(pctOf)) : 0;
+  const last = pctOf(lastAtt);
 
   const head = document.createElement("div");
   head.className = "job-head";
@@ -5317,10 +5320,11 @@ function renderJobBlock(job, opts) {
   const trend = document.createElement("div");
   trend.className = "trend";
   attempts.slice(-12).forEach((a) => {
+    const pct = pctOf(a);
     const bar = document.createElement("div");
-    bar.className = "trend-bar " + scoreClass(a.prozent);
-    bar.style.height = Math.max(4, Math.round(a.prozent * 0.44)) + "px";
-    bar.title = `${formatDate(a.date)}: ${a.prozent} %`;
+    bar.className = "trend-bar " + scoreClass(pct);
+    bar.style.height = Math.max(4, Math.round(pct * 0.44)) + "px";
+    bar.title = `${formatDate(a.date)}: ${pct} %`;
     trend.appendChild(bar);
   });
   block.appendChild(trend);
@@ -5351,9 +5355,10 @@ function renderJobBlock(job, opts) {
         : att.tokens && typeof att.tokens.total === "number" && att.tokens.total > 0
         ? ` · ${formatTokens(att.tokens.total)}`
         : "");
+    const attPct = pctOf(att);
     const score = document.createElement("span");
-    score.className = "attempt-score " + scoreClass(att.prozent);
-    score.textContent = att.prozent + " %";
+    score.className = "attempt-score " + scoreClass(attPct);
+    score.textContent = attPct + " %";
     const openBtn = document.createElement("button");
     openBtn.textContent = "Ansehen";
     // openAttempt klont att.quiz (liest quiz.fragen) und reicht att.result an
