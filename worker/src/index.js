@@ -151,12 +151,20 @@ function isSSE(res) {
   return (res.headers.get("Content-Type") || "").includes("text/event-stream");
 }
 
-// OpenRouter-Fehler → stabile Client-Codes (Plan A.2.7).
+// OpenRouter-Fehler → stabile Client-Codes (Plan A.2.7). Der Fehlerbody wird BEWUSST
+// NICHT gelesen: (1) der Client mappt ohnehin per Status, nicht per Body; (2) Body-Lesen
+// auf dem Fehlerpfad ist eine unnoetige Angriffsflaeche (grosse/langsame Bodies, kein
+// harter Peak-Memory-Bound bei runtime-materialisierten Chunks, Inhalts-Leak-Risiko).
+// Diagnose bei Bedarf ueber `wrangler tail`. Status-Mapping: 400→400, 408→504, 429→429,
+// alles andere (inkl. nicht-SSE-200, 401/403/5xx) → 502. reason unterscheidet einen
+// echten HTTP-Fehler von einer unerwartet nicht-gestreamten 200-Antwort, damit
+// "upstream: 200" nicht mehr irrefuehrend nach Erfolg aussieht.
 function mapUpstreamError(res, env, origin) {
-  const s = res && res.status;
-  const map = { 400: 400, 401: 502, 403: 502, 408: 504, 429: 429 };
-  const out = map[s] || 502;
-  return json({ error: "upstream", upstream: s || null }, out, env, origin);
+  const s = (res && res.status) || null;
+  const statusMap = { 400: 400, 408: 504, 429: 429 };
+  const out = statusMap[s] || 502;
+  const reason = res && res.ok ? "non-sse" : "http";
+  return json({ error: "upstream", upstream: s, reason }, out, env, origin);
 }
 
 // Liest den getee'ten SSE-Stream serverseitig und extrahiert usage.cost (letzter Wert gewinnt).
