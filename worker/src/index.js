@@ -55,8 +55,9 @@ export default {
 
     // 0) Anmeldung Pflicht (Phase B): jeder gehostete Call haengt an einem Konto.
     // Zuerst pruefen, damit unauth schnell und ohne Turnstile-Kosten abprallt.
-    const user = await getSessionUser(req, env);
-    if (!user) return json({ error: "auth-required" }, 401, env, origin);
+    const g = await gateUser(req, env, origin);
+    if (g.resp) return g.resp;
+    const user = g.user;
 
     // 1) Turnstile (Dev-Bypass via SKIP_TURNSTILE=1)
     if (env.SKIP_TURNSTILE !== "1") {
@@ -165,8 +166,9 @@ async function startJob(req, env, ctx, origin) {
   const ip = req.headers.get("CF-Connecting-IP") || "0.0.0.0";
 
   // Anmeldung Pflicht (Phase B) – zuerst, vor Turnstile.
-  const user = await getSessionUser(req, env);
-  if (!user) return json({ error: "auth-required" }, 401, env, origin);
+  const g = await gateUser(req, env, origin);
+  if (g.resp) return g.resp;
+  const user = g.user;
 
   if (env.SKIP_TURNSTILE !== "1") {
     const token = req.headers.get("CF-Turnstile-Token") || "";
@@ -217,8 +219,9 @@ async function startJob(req, env, ctx, origin) {
 // Pollt den Status/Result eines Jobs (jobId ist eine nicht erratbare UUID).
 // Anmeldung Pflicht; touch:false, damit das haeufige Poll nicht jedes Mal last_seen schreibt.
 async function pollJob(jobId, req, env, origin) {
-  const user = await getSessionUser(req, env, { touch: false });
-  if (!user) return json({ error: "auth-required" }, 401, env, origin);
+  const g = await gateUser(req, env, origin, { touch: false });
+  if (g.resp) return g.resp;
+  const user = g.user;
   if (!jobId || jobId.length > 64) return json({ error: "bad-job" }, 400, env, origin);
   const jobStub = env.GENJOB_DO.get(env.GENJOB_DO.idFromName(jobId));
   let st;
@@ -238,6 +241,18 @@ async function pollJob(jobId, req, env, origin) {
 
 function budgetStub(env) {
   return env.BUDGET_DO.get(env.BUDGET_DO.idFromName("global"));
+}
+
+// Auth-Gate mit kontrolliertem Fehlerpfad: getSessionUser kann bei fehlender/nachhinkender
+// D1-Migration (Schema-Drift) werfen — das wuerde sonst auf ALLEN Hosted-Endpoints einen
+// 500 statt einer kontrollierten Antwort ausloesen (Codex-Review R2: Outage-Risiko). Daher
+// Store-Fehler abfangen → 503 (auth-unavailable), fehlende Session → 401.
+async function gateUser(req, env, origin, opts) {
+  let user;
+  try { user = await getSessionUser(req, env, opts); }
+  catch { return { resp: json({ error: "auth-unavailable" }, 503, env, origin) }; }
+  if (!user) return { resp: json({ error: "auth-required" }, 401, env, origin) };
+  return { user };
 }
 
 async function doCall(stub, op, payload) {

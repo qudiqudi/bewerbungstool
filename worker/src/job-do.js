@@ -42,6 +42,7 @@ export class GenerationJobDO {
         params: body.params,     // { jobText, numQuestions, difficulty, vertiefung }
         tier: body.tier,         // aufgeloestes Tier-Objekt (model/reasoning/strictSchema)
         subject: body.subject,
+        subjectKind: "user",     // markiert Jobs aus dem Auth-Pflicht-Code (Ownership-Check)
         reserveId: body.reserveId,
         reserveAmount: body.reserveAmount, // Worst-Case-Reserve → konservativer Settle-Estimate
         createdAt: Date.now(),
@@ -54,9 +55,14 @@ export class GenerationJobDO {
       // lesen. Der Worker reicht die authentifizierte user.id als X-Subject durch. Ein
       // unbekannter Job (kein subject gespeichert) faellt in den unknown-Pfad unten (404),
       // ohne dass ein fremdes Konto je Inhalt zu sehen bekommt (Codex-Review: Job-Isolation).
+      // ABER nur fuer Jobs aus dem neuen Code (subjectKind "user"): DO-Storage ueberlebt
+      // Deploys, Alt-Jobs (vor diesem Deploy, subject=IP, kein subjectKind) behalten das
+      // alte Capability-Modell (jobId genuegt) bis zu ihrer normalen TTL — sonst verloeren
+      // Nutzer beim Rollout ihr noch laufendes/fertiges Ergebnis (Codex-Review R2).
       const storedSubject = await this.state.storage.get("subject");
+      const subjectKind = await this.state.storage.get("subjectKind");
       const requester = req.headers.get("X-Subject") || "";
-      if (storedSubject && requester !== storedSubject) {
+      if (subjectKind === "user" && storedSubject && requester !== storedSubject) {
         return jsonResponse({ status: "forbidden" });
       }
       const status = (await this.state.storage.get("status")) || "unknown";
