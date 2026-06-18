@@ -12,6 +12,14 @@ name = "jobreif-hosted"
 main = "src/index.js"
 compatibility_date = "2026-05-01"
 
+# Workers Logs aktivieren: Requests, Statuscodes und console-Ausgaben werden im
+# Cloudflare-Dashboard (Worker > Observability) und per API/MCP abfragbar. Bei der
+# geringen Last hier 100 % Sampling. Macht u. a. die Gate-Ablehnungen (429/503 mit
+# Grund budget/ip/subject/inflight/active-job) im Nachhinein nachvollziehbar.
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 # Custom Domain api.jobreif.de für den Worker. Greift erst, wenn die Zone jobreif.de
 # auf Cloudflare AKTIV ist (NS-Umzug durch). Dann legt `wrangler deploy` den
 # Custom-Domain-Eintrag automatisch an. Läuft man `wrangler deploy` VOR der Aktivierung,
