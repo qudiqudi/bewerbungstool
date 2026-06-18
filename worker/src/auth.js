@@ -158,6 +158,11 @@ async function magicStart(req, env, ctx, origin) {
   // wertet dieses eine Statement COUNT + INSERT unter Schreibsperre aus: nur einfuegen,
   // wenn UNTER beiden Caps. Gemailt wird NUR, wenn der INSERT tatsaechlich griff.
   const since = now() - 3600;
+  // Opportunistisches Raeumen: Zeilen ausserhalb des Zaehlfensters (1 h) sind laengst
+  // abgelaufen (TTL 15 min) und werden nie mitgezaehlt → loeschen haelt die Tabelle klein,
+  // damit der COUNT (mit den neuen Indizes, Migration 0003) auf dem Login-Pfad schnell
+  // bleibt und nicht ueber eine append-only wachsende Historie scannt (Codex-Review R7).
+  await env.DB.prepare("DELETE FROM magic_tokens WHERE created_at < ?").bind(since).run();
   const raw = randomToken();
   const hash = await sha256hex(raw);
   const ttl = Number(env.MAGIC_TTL_S || MAGIC_TTL_DEFAULT);
@@ -209,6 +214,8 @@ async function googleStart(req, env, origin) {
   if (!/^[0-9a-f]{64}$/.test(vh)) return json({ error: "bad-verifier" }, 400, env, origin);
   const state = randomToken(24);
   const redirectUri = new URL(req.url).origin + "/auth/google/callback";
+  // Abgelaufene states opportunistisch raeumen (abgebrochene Logins haeufen sich sonst an).
+  await env.DB.prepare("DELETE FROM oauth_states WHERE expires_at < ?").bind(now()).run();
   // state-Insert vor dem Redirect (CSRF). waitUntil reicht nicht – muss persistiert sein.
   await env.DB.prepare(
     "INSERT INTO oauth_states (state, created_at, expires_at, verifier_hash) VALUES (?, ?, ?, ?)"
@@ -264,6 +271,8 @@ async function googleCallback(req, env, origin) {
     // kurzlebigen Einmal-Code, an den Verifier-Hash gebunden. Die SPA tauscht ihn per
     // POST /auth/exchange (mit dem Verifier) gegen die Session.
     const handoff = randomToken();
+    // Abgelaufene/alte Handoff-Codes opportunistisch raeumen (kurze TTL, haeufen sich sonst).
+    await env.DB.prepare("DELETE FROM handoff_codes WHERE expires_at < ?").bind(now()).run();
     await env.DB.prepare(
       "INSERT INTO handoff_codes (code_hash, user_id, verifier_hash, created_at, expires_at, consumed) VALUES (?, ?, ?, ?, ?, 0)"
     ).bind(await sha256hex(handoff), user.id, st.verifier_hash, now(), now() + 120).run();
