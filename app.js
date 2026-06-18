@@ -3226,7 +3226,10 @@ function renderQuestion() {
   // frueh aus). Rein lokal, loest keinen API-Call aus.
   const reportArea = $("report-area");
   reportArea.innerHTML = "";
-  appendReportButton(reportArea, q, reportKontextAktiv());
+  // answersSecret: im aktiven Pruefungsmodus (vor der Auswertung) darf die
+  // Meldung die korrekte Antwort NICHT mitspeichern - sonst koennte man eine Frage
+  // melden und die Loesung ueber Export/localStorage vor der Bewertung auslesen.
+  appendReportButton(reportArea, q, { ...reportKontextAktiv(), answersSecret: mode === "pruefung" && !reviewing });
 
   $("btn-prev").disabled = current === 0;
   $("btn-next").textContent =
@@ -6725,7 +6728,7 @@ $("btn-report-submit").addEventListener("click", () => {
     frage: clip(q.frage || "", 600),
     typ: q.typ === "multiple_choice" ? "multiple_choice" : "offen",
     kategorie_fachlich: clip(q.kategorie || "", 200),
-    korrekte_antwort: clip(q.korrekte_antwort || "", 300),
+    korrekte_antwort: kontext.answersSecret ? "" : clip(q.korrekte_antwort || "", 300),
     optionen,
     gruende,
     notiz: note,
