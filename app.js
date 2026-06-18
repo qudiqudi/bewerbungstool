@@ -5082,25 +5082,16 @@ function saveAttempt(result, durationMs, evalCost, evalTokens) {
     // Kernpunkte NICHT loeschen - der Guard laesst sie unberuehrt. Versionswrapper
     // wie bei themenfelder, erleichtert spaetere Migrationen.
     if (quiz.kernpunkte && typeof quiz.kernpunkte === "object") {
-      // Kernpunkte und ihre Quelle ATOMAR zusammen aktualisieren: Beim Merge per
-      // urlKey/identityKey kann der Job einen aelteren jobText tragen als das
-      // aktuelle Quiz. Wir frischen job.jobText hier auf die Anzeige auf, aus der
-      // die Kernpunkte stammen (wie titel/arbeitgeber/arbeitsort oben) - dann
-      // passt srcKey zum jobText und das Panel zeigt die frisch erzeugten
-      // Kernpunkte, statt sie wegen eines veralteten Textes dauerhaft zu
-      // verbergen. Der Merge laeuft ueber die stabilen Anker (urlKey/identityKey),
-      // daher ist die jobText-Auffrischung unkritisch fuer die Wiederfindung.
-      if (typeof quiz.jobText === "string" && quiz.jobText.trim()) {
-        job.jobText = quiz.jobText;
-        // Invariante wahren: job.key ist der Hash des gespeicherten jobText. Wird
-        // jobText aufgefrischt, MUSS key mitziehen - sonst brechen der Post-Save-
-        // Lookup per jobKey(quiz.jobText) (Abzeichen/Fortschritt) und die Text-key-
-        // Rueckfaelle bei Import/Loeschen. Die Stelle bleibt ueber urlKey/identityKey
-        // auffindbar; key ist nur der schwaechste Rueckfall.
-        try { job.key = jobKey(job.jobText); } catch { /* egal */ }
-      }
+      // Bewusst KEINE Mutation von job.jobText oder job.key: das wuerde die
+      // Job-Identitaet (Text-Hash) veraendern und koennte mit dem key einer
+      // ANDEREN Stelle kollidieren - deleteJob filtert per key und wuerde dann
+      // beide Stellen loeschen (Datenverlust). Die Kernpunkte werden einfach als
+      // jeweils NEUESTE Extraktion abgelegt (bei jedem normalen Test ueberschrieben)
+      // und immer angezeigt. srcKey haelt nur zur Nachvollziehbarkeit fest, aus
+      // welcher Anzeige sie stammen - er ist KEIN Render-Gate (sonst koennten sie
+      // wegen eines bei Merge veralteten job.jobText dauerhaft verborgen werden).
       let srcKey = null;
-      try { srcKey = jobKey(job.jobText); } catch { /* egal */ }
+      try { srcKey = jobKey(quiz.jobText); } catch { /* egal */ }
       job.kernpunkte = { v: 1, generatedAt: Date.now(), srcKey, data: quiz.kernpunkte };
     }
   }
@@ -5522,17 +5513,12 @@ function buildNumStepper(initial, onChange, opts = {}) {
 // wird ausschliesslich ueber textContent gesetzt (kein innerHTML).
 const KERNPUNKTE_LIST_MAX = 8; // sehr lange Listen kappen (geschwaetzige Modelle)
 function buildKernpunktePanel(job) {
-  // Nur anzeigen, wenn die Kernpunkte zur AKTUELL gespeicherten Anzeige der Stelle
-  // gehoeren: srcKey (Textschluessel der Quell-Anzeige) muss zum jobText des Jobs
-  // passen. Sonst stammen sie aus einer anderen/aelteren Anzeige (Merge per
-  // identityKey, geaenderte Anzeige) und duerften nicht als Fakten dieser Stelle
-  // gezeigt werden. Fehlt srcKey (sehr alte Daten), nicht anzeigen (sicher).
-  let kp = job && job.kernpunkte && job.kernpunkte.data ? job.kernpunkte.data : null;
-  if (kp) {
-    let curKey = null;
-    try { curKey = job.jobText ? jobKey(job.jobText) : null; } catch { /* egal */ }
-    if (!job.kernpunkte.srcKey || job.kernpunkte.srcKey !== curKey) kp = null;
-  }
+  // job.kernpunkte ist stets die jeweils neueste Extraktion fuer diese Stelle
+  // (bei jedem normalen Test ueberschrieben) und wird angezeigt, sobald vorhanden.
+  // Kein Abgleich gegen job.jobText/job.key: ein solches Render-Gate konnte frisch
+  // erzeugte Kernpunkte nach einem Merge dauerhaft verbergen, und das noetige
+  // Mutieren der Job-Identitaet barg Kollisions-/Loesch-Risiken.
+  const kp = job && job.kernpunkte && job.kernpunkte.data ? job.kernpunkte.data : null;
   if (!kp) return null;
   const sections = [
     { key: "aufgaben", label: "Aufgaben", type: "list" },
