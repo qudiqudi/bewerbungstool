@@ -6278,13 +6278,13 @@ $("btn-review-questions").addEventListener("click", () => {
   showView("view-quiz");
 });
 
-// Top-Nav "Meine Stellen": fuehrt zur Startliste (Home). Die Historie einer
-// einzelnen Stelle ist von dort per Tippen auf die Stelle erreichbar; die
+// Top-Nav "Meine Stellen": fuehrt zur Startliste (Home, via goHome). Die Historie
+// einer einzelnen Stelle ist von dort per Tippen auf die Stelle erreichbar; die
 // Vollansicht aller Stellen ueber "Alle Stellen ansehen" auf der Startliste.
-$("btn-home").addEventListener("click", () => {
-  renderHome();
-  showView("view-home");
-});
+// (Anders als der fruehere Peek-Button "Historie" ist dies ein Ziel-Button - er
+// kehrt bewusst zur Startliste zurueck statt per goReturn in einen laufenden Test;
+// "Einstellungen" bewahrt den laufenden Test weiterhin.)
+$("btn-home").addEventListener("click", goHome);
 
 $("btn-history-back").addEventListener("click", goReturn);
 
