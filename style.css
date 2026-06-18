@@ -1385,15 +1385,6 @@ button.danger:hover { background: var(--red-soft); border-color: var(--red); }
   gap: 0.25rem;
   font-size: 0.9rem;
 }
-.kernpunkte-text { margin: 0; font-size: 0.9rem; }
-.kernpunkte-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
-.kp-chip {
-  padding: 0.25rem 0.6rem;
-  font-size: 0.8rem;
-  border-radius: 999px;
-  background: var(--primary-soft);
-  color: var(--text);
-}
 @media (max-width: 600px) {
   .kernpunkte-grid { grid-template-columns: 1fr; }
 }

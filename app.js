@@ -888,38 +888,13 @@ const QUESTIONS_SCHEMA = {
           items: KERNPUNKT_ITEM_SCHEMA,
           description: "Nice-to-have / wuenschenswerte Anforderungen mit Beleg-Zitat; leer wenn nicht genannt",
         },
-        arbeitsmodell: {
-          type: "object",
-          properties: {
-            text: { type: "string", description: "Arbeitszeit/Modell (Vollzeit/Teilzeit, Schicht, Remote/Hybrid, Befristung); leer wenn nicht genannt" },
-            beleg: { type: "string", description: "Woertliches, exakt aus dem Anzeigentext kopiertes Zitat, das den Punkt stuetzt; leer wenn nicht genannt" },
-          },
-          required: ["text", "beleg"],
-          additionalProperties: false,
-          description: "Arbeitszeit/Modell mit Beleg-Zitat; text und beleg leer wenn nicht genannt",
-        },
-        gehalt: {
-          type: "object",
-          properties: {
-            text: { type: "string", description: "Gehalt/Verguetung wortgetreu wie genannt (Spanne, Tarif); leer wenn nicht genannt" },
-            beleg: { type: "string", description: "Woertliches, exakt aus dem Anzeigentext kopiertes Zitat, das den Punkt stuetzt; leer wenn nicht genannt" },
-          },
-          required: ["text", "beleg"],
-          additionalProperties: false,
-          description: "Gehalt/Verguetung mit Beleg-Zitat; text und beleg leer wenn nicht genannt",
-        },
-        benefits: {
-          type: "array",
-          items: KERNPUNKT_ITEM_SCHEMA,
-          description: "Benefits/Zusatzleistungen mit Beleg-Zitat; leer wenn nicht genannt",
-        },
         besonderheiten: {
           type: "array",
           items: KERNPUNKT_ITEM_SCHEMA,
           description: "Sonstige relevante Besonderheiten der Stelle mit Beleg-Zitat; leer wenn nicht genannt",
         },
       },
-      required: ["aufgaben", "anforderungen_muss", "anforderungen_optional", "arbeitsmodell", "gehalt", "benefits", "besonderheiten"],
+      required: ["aufgaben", "anforderungen_muss", "anforderungen_optional", "besonderheiten"],
       additionalProperties: false,
     },
   },
@@ -1077,13 +1052,13 @@ function normalizeKernpunkte(k, jobText) {
     (Array.isArray(v) ? v.map(verified).filter(Boolean) : []);
   // BEWUSST entschaerft: die praezisen, faktischen und besonders fehl-info-
   // anfaelligen Felder Gehalt, Benefits und Arbeitsmodell werden NICHT mehr
-  // uebernommen/angezeigt. Grund: eine robuste Trennung der eigentlichen Anzeige
+  // generiert/angezeigt. Grund: eine robuste Trennung der eigentlichen Anzeige
   // von Teasern/Seiten-Chrome ist auf gescrapten Portalseiten deterministisch
   // nicht garantierbar - ein fremdes Gehalt/Remote/Benefit koennte sonst als Fakt
-  // DIESER Stelle erscheinen. Es bleiben beschreibende Highlights (Aufgaben,
+  // DIESER Stelle erscheinen. Diese Felder sind daher aus Schema und Prompt
+  // entfernt; uebrig bleiben die beschreibenden Highlights (Aufgaben,
   // Anforderungen, Besonderheiten), die im Panel zudem als "bitte im Original
-  // pruefen" gerahmt sind. Schema/Prompt fordern die Felder noch an; sie werden
-  // hier verworfen (kein Speichern/Anzeigen).
+  // pruefen" gerahmt sind. normalizeKernpunkte haelt nur diese vier Kategorien.
   const out = {
     aufgaben: verArr(k.aufgaben),
     anforderungen_muss: verArr(k.anforderungen_muss),
@@ -2774,12 +2749,12 @@ async function generateQuiz(opts = {}) {
         "stabile Adressen, keine tief verschachtelten Links. Sonst lasse die URL leer und waehle einen praegnanten Titel, " +
         "der sich gut als Suchbegriff eignet. " +
         "Extrahiere zusätzlich die wichtigsten Kernpunkte der Stelle (Aufgaben, zwingende und optionale Anforderungen, " +
-        "Arbeitsmodell, Gehalt, Benefits, Besonderheiten) ausschliesslich aus dem Anzeigentext. Erfinde nichts und leite " +
+        "Besonderheiten) ausschliesslich aus dem Anzeigentext. Erfinde nichts und leite " +
         "nichts her - was nicht ausdrücklich im Text steht, lässt du leer (leerer String bzw. leeres Array). Formuliere " +
-        "jeden Punkt knapp; Gehalt möglichst wortgetreu. Zu JEDEM Kernpunkt gehört ein beleg = ein WÖRTLICHES, exakt " +
+        "jeden Punkt knapp. Zu JEDEM Kernpunkt gehört ein beleg = ein WÖRTLICHES, exakt " +
         "aus dem Anzeigentext kopiertes Zitat (kein paraphrasiertes), das die Aussage stützt. Nimm einen Kernpunkt NUR " +
-        "auf, wenn es ein solches wörtliches Zitat im Text gibt; sonst lass die Kategorie leer. Gehalt, Benefits und " +
-        "Anforderungen nur bei wörtlicher Deckung. Beziehe dich AUSSCHLIESSLICH auf DIESE eine ausgeschriebene Stelle: " +
+        "auf, wenn es ein solches wörtliches Zitat im Text gibt; sonst lass die Kategorie leer. Anforderungen " +
+        "nur bei wörtlicher Deckung. Beziehe dich AUSSCHLIESSLICH auf DIESE eine ausgeschriebene Stelle: " +
         "verwende KEINE Angaben aus Navigation, Cookie-/Footer-Hinweisen, Werbeblöcken oder Teasern für ANDERE bzw. " +
         "ähnliche Stellen, die im Seitentext mitkopiert sein können - auch wenn dort etwa ein Gehalt oder Benefit steht. " +
         "Im Zweifel die Kategorie leer lassen. ";
@@ -5558,8 +5533,8 @@ function buildNumStepper(initial, onChange, opts = {}) {
 }
 
 // Kernpunkte-Panel der Stellenseite: scanbare Karten mit den wichtigsten Punkten
-// der Anzeige (Aufgaben, Anforderungen, Arbeitsmodell, Gehalt, Benefits,
-// Besonderheiten). Defensiv: fehlen die Daten (alte Stellen, lokale Tests),
+// der Anzeige (Aufgaben, Muss-/Optional-Anforderungen, Besonderheiten).
+// Defensiv: fehlen die Daten (alte Stellen, lokale Tests),
 // gibt die Funktion null zurueck und renderJob haengt nichts ein. Modell-Output
 // wird ausschliesslich ueber textContent gesetzt (kein innerHTML).
 const KERNPUNKTE_LIST_MAX = 8; // sehr lange Listen kappen (geschwaetzige Modelle)
@@ -5573,18 +5548,14 @@ function buildKernpunktePanel(job) {
   if (!kp) return null;
   // Bewusst nur beschreibende Highlights - Gehalt/Benefits/Arbeitsmodell werden
   // nicht als Fakten angezeigt (Teaser-/Fehl-Info-Risiko, s. normalizeKernpunkte).
+  // Alle vier Kategorien sind String-Listen und werden gleich (als ul) gerendert.
   const sections = [
-    { key: "aufgaben", label: "Aufgaben", type: "list" },
-    { key: "anforderungen_muss", label: "Muss-Anforderungen", type: "list" },
-    { key: "anforderungen_optional", label: "Nice-to-have", type: "list" },
-    { key: "besonderheiten", label: "Besonderheiten", type: "list" },
+    { key: "aufgaben", label: "Aufgaben" },
+    { key: "anforderungen_muss", label: "Muss-Anforderungen" },
+    { key: "anforderungen_optional", label: "Nice-to-have" },
+    { key: "besonderheiten", label: "Besonderheiten" },
   ];
-  const present = sections.filter((s) => {
-    const v = kp[s.key];
-    return s.type === "text"
-      ? (typeof v === "string" && v.trim())
-      : (Array.isArray(v) && v.length);
-  });
+  const present = sections.filter((s) => Array.isArray(kp[s.key]) && kp[s.key].length);
   if (!present.length) return null;
 
   const panel = document.createElement("div");
@@ -5609,31 +5580,14 @@ function buildKernpunktePanel(job) {
     title.textContent = s.label;
     card.appendChild(title);
 
-    if (s.type === "text") {
-      const p = document.createElement("p");
-      p.className = "kernpunkte-text";
-      p.textContent = String(kp[s.key]).trim();
-      card.appendChild(p);
-    } else if (s.type === "chips") {
-      const chips = document.createElement("div");
-      chips.className = "kernpunkte-chips";
-      kp[s.key].slice(0, KERNPUNKTE_LIST_MAX).forEach((item) => {
-        const chip = document.createElement("span");
-        chip.className = "kp-chip";
-        chip.textContent = String(item);
-        chips.appendChild(chip);
-      });
-      card.appendChild(chips);
-    } else {
-      const ul = document.createElement("ul");
-      ul.className = "kernpunkte-list";
-      kp[s.key].slice(0, KERNPUNKTE_LIST_MAX).forEach((item) => {
-        const li = document.createElement("li");
-        li.textContent = String(item);
-        ul.appendChild(li);
-      });
-      card.appendChild(ul);
-    }
+    const ul = document.createElement("ul");
+    ul.className = "kernpunkte-list";
+    kp[s.key].slice(0, KERNPUNKTE_LIST_MAX).forEach((item) => {
+      const li = document.createElement("li");
+      li.textContent = String(item);
+      ul.appendChild(li);
+    });
+    card.appendChild(ul);
     grid.appendChild(card);
   });
 
