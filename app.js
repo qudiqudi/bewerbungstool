@@ -1223,9 +1223,11 @@ function clearAuthToken() {
 // im Konto-Bereich angezeigt wird.
 let _authRedirectMsg = "";
 
-// Entfernt die Auth-Parameter aus der URL (Token nicht im Verlauf/teilen lassen).
+// Entfernt ALLE Auth-Parameter aus der URL (kein Token/Code im Verlauf/teilbar).
+// code = Google-Handoff (neu), session = Alt-Worker-Bearer (Kompatibilitaetsfenster),
+// auth = Magic-Token, auth_error = Abbruch.
 function cleanAuthParamsFromUrl(params) {
-  params.delete("session"); params.delete("auth"); params.delete("auth_error");
+  params.delete("code"); params.delete("session"); params.delete("auth"); params.delete("auth_error");
   const qs = params.toString();
   const url = location.pathname + (qs ? "?" + qs : "") + location.hash;
   try { history.replaceState(null, "", url); } catch { /* egal */ }
@@ -1256,10 +1258,17 @@ async function consumeAuthRedirect() {
   try { params = new URLSearchParams(location.search); } catch { return false; }
   const code = params.get("code");
   const magic = params.get("auth");
+  const sess = params.get("session"); // nur Kompatibilitaetsfenster (Alt-Worker)
   const err = params.get("auth_error");
-  if (!code && !magic && !err) return false;
-  cleanAuthParamsFromUrl(params);
+  if (!code && !magic && !sess && !err) return false;
+  cleanAuthParamsFromUrl(params); // IMMER zuerst scrubben, egal welcher Pfad
   if (err) { _authRedirectMsg = "Die Anmeldung wurde abgebrochen."; return true; }
+  if (sess) {
+    // Kompatibilitaetsfenster: ein noch laufender Alt-Worker liefert ?session=<bearer>.
+    // Das Token ist bereits in der URL (oben schon gescrubbt) → sofort uebernehmen, statt
+    // es liegen zu lassen. Der neue Worker stellt ?session nicht mehr aus (nur ?code).
+    setAuthToken(sess); _authRedirectMsg = "Erfolgreich angemeldet."; return true;
+  }
   if (code) {
     let verifier = "";
     try { verifier = sessionStorage.getItem(OAUTH_VERIFIER_KEY) || ""; } catch { /* egal */ }
