@@ -2750,9 +2750,21 @@ async function runEvaluation() {
       const byId = new Map(
         result.ergebnisse.filter((e) => e && e.id != null).map((e) => [e.id, e]),
       );
-      result.ergebnisse = quiz.fragen.map(
-        (q) => byId.get(q.id) || { id: q.id, punkte: 0, feedback: "Keine Bewertung erhalten.", musterantwort: "" },
-      );
+      // punkte pro Zeile hart auf eine Ganzzahl 0..10 klemmen und ZURUECK-
+      // schreiben: nicht-strikte Provider (DeepSeek/lokal) sind nicht schema-
+      // erzwungen und koennen z. B. 100 oder -5 liefern. Ohne Klemmen wuerde die
+      // Summe unten unmoegliche Gesamtprozente (>100 / negativ) in die Historie
+      // speichern (die Detail-Anzeige klemmt nur fuers Rendern, nicht den Stand).
+      const clampPunkte = (p) => {
+        const n = Math.round(Number(p));
+        return Number.isFinite(n) ? Math.max(0, Math.min(10, n)) : 0;
+      };
+      result.ergebnisse = quiz.fragen.map((q) => {
+        const e = byId.get(q.id);
+        if (!e) return { id: q.id, punkte: 0, feedback: "Keine Bewertung erhalten.", musterantwort: "" };
+        e.punkte = clampPunkte(e.punkte);
+        return e;
+      });
     }
 
     // gesamt.prozent NEU aus ALLEN Fragen berechnen (Nenner = quiz.fragen.length,
@@ -2762,7 +2774,8 @@ async function runEvaluation() {
     {
       const sum = result.ergebnisse.reduce((a, e) => a + (Number(e.punkte) || 0), 0);
       const max = quiz.fragen.length * 10;
-      result.gesamt.prozent = max ? Math.round((sum / max) * 100) : 0;
+      const prozent = max ? Math.round((sum / max) * 100) : 0;
+      result.gesamt.prozent = Math.max(0, Math.min(100, prozent));
     }
 
     saveAttempt(result, durationMs, evalCost, evalTokens);
