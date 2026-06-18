@@ -50,7 +50,7 @@ ALLOW_PAID = "0"            # Phase A: "Beste"/Opus hinter der Paywall → 402
 APP_ORIGIN = "https://jobreif.de"   # Ziel der Magic-Link-/OAuth-Redirects
 MAGIC_TTL_S = "900"          # Gültigkeit eines Magic-Link-Tokens (15 min, einmalig)
 SESSION_TTL_S = "2592000"    # Session-Lebensdauer (30 Tage)
-MAGIC_FROM = "login@jobreif.de"     # Resend-Absender (Domain muss verifiziert sein)
+MAGIC_FROM = "login@mail.jobreif.de"  # Resend-Absender (Subdomain mail.jobreif.de verifiziert)
 # Dev-Flags (in Produktion NICHT setzen): MOCK_UPSTREAM, SKIP_TURNSTILE, MOCK_COST
 # Auth-Secrets via `wrangler secret put` (NIE hier): RESEND_KEY, GOOGLE_CLIENT_ID,
 # GOOGLE_CLIENT_SECRET. Ohne RESEND_KEY loggt der Worker den Magic-Link nur (Dev).
