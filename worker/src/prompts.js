@@ -159,7 +159,10 @@ export function buildQuizMessages({ jobText, numQuestions, difficulty, vertiefun
     "und beziehe dich ausschliesslich auf die eigentliche Stellenanzeige. Enthält der Text mehrere " +
     "Stellen, nimm die mit Abstand am ausführlichsten beschriebene. Antworte auf Deutsch.";
 
-  const n = Number(numQuestions);
+  // numQuestions ist im Body optional; fehlt/ungültig/≤0 → sicherer Default 10 (sonst
+  // stünde "genau NaN Fragen" im Prompt und ein Call würde sinnlos verbrannt). Obergrenze 40.
+  const nReq = Number(numQuestions);
+  const n = Number.isFinite(nReq) && nReq >= 1 ? Math.min(40, Math.floor(nReq)) : 10;
   let niveauHinweis = "";
   if (isVertiefung && vertiefung.niveau) {
     const niv = vertiefung.niveau;
