@@ -4672,7 +4672,9 @@ function clip(str, max) {
   return s.length > max ? s.slice(0, max) : s;
 }
 
-// Schreibt einen Report (fuellt id/date) und gibt das gespeicherte Objekt zurueck.
+// Schreibt einen Report (fuellt id/date). Gibt das gespeicherte Objekt zurueck,
+// oder null, wenn das Speichern fehlschlug (localStorage voll/gesperrt). Der
+// Aufrufer darf eine Meldung nur dann als erfolgt ausgeben, wenn != null.
 function addReport(partial) {
   const r = loadReports();
   const report = {
@@ -4681,15 +4683,20 @@ function addReport(partial) {
     ...partial,
   };
   r.reports.push(report);
-  saveReports(r);
-  return report;
+  return saveReports(r) ? report : null;
 }
 
-// Wurde diese Frage (stabile fragenKey-Identitaet) schon gemeldet? Steuert den
-// "Gemeldet"-Knopfzustand beim Render.
-function reportStatusForFrage(key) {
+// Wurde diese Frage in DIESEM Stellen-Kontext schon gemeldet? Der Status ist pro
+// (fragenKey, jobKey)-Paar: dieselbe generische Frage kann in einer Stelle
+// passen und in einer anderen unpassend sein ("thematisch irrelevant"), daher
+// darf eine Meldung in Stelle A das Melden in Stelle B nicht sperren. Ohne
+// jobKey (kein Stellenbezug) bildet null einen eigenen Bucket.
+function reportStatusForFrage(key, jobKey) {
   if (!key) return false;
-  return loadReports().reports.some((r) => r && r.fragenKey === key);
+  const jk = jobKey || null;
+  return loadReports().reports.some(
+    (r) => r && r.fragenKey === key && (r.jobKey || null) === jk,
+  );
 }
 
 // Dieselbe Anzeige (gleicher Text) landet immer bei derselben Stelle
@@ -6568,7 +6575,7 @@ function appendReportButton(container, q, kontext) {
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "report-btn ghost";
-  const gemeldet = reportStatusForFrage(key);
+  const gemeldet = reportStatusForFrage(key, kontext && kontext.jobKey);
   if (gemeldet) {
     btn.textContent = "Gemeldet";
     btn.disabled = true;
@@ -6598,6 +6605,7 @@ function openReportModal(q, kontext, button) {
   });
   $("report-note").value = "";
   $("report-question").textContent = clip(q.frage || "", 200);
+  $("report-error").classList.add("hidden");
   updateReportSubmitState();
   $("report-modal").classList.remove("hidden");
   const first = $("report-cat-fachlich_falsch");
@@ -6633,7 +6641,7 @@ $("btn-report-submit").addEventListener("click", () => {
   const optionen = Array.isArray(q.optionen)
     ? q.optionen.slice(0, 8).map((o) => clip(o, 200))
     : [];
-  addReport({
+  const saved = addReport({
     fragenKey: fragenKey(q),
     frage: clip(q.frage || "", 600),
     typ: q.typ === "multiple_choice" ? "multiple_choice" : "offen",
@@ -6648,6 +6656,13 @@ $("btn-report-submit").addEventListener("click", () => {
     tier: kontext.tier || null,
     model: kontext.model || null,
   });
+
+  // Speichern fehlgeschlagen (localStorage voll/gesperrt): Meldung NICHT als
+  // erfolgt ausgeben. Modal/Knopf bleiben nutzbar, Fehlerhinweis einblenden.
+  if (!saved) {
+    $("report-error").classList.remove("hidden");
+    return;
+  }
 
   // Knopf der gemeldeten Frage wird zu "Gemeldet" (disabled) - keine
   // Doppelmeldung. Bei erneutem Render leitet appendReportButton denselben
