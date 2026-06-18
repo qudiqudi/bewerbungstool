@@ -124,7 +124,9 @@ export default {
       });
     } catch (e) {
       await doCall(stub, "release", { reserveId });
-      return json({ error: "upstream", detail: String(e && e.message || e) }, 502, env, origin);
+      // KEINE Exception-Details an den Client (CodeQL: Information exposure via stack trace).
+      // Stabiler, generischer Fehler; Diagnose bei Bedarf ueber `wrangler tail`.
+      return json({ error: "upstream" }, 502, env, origin);
     }
   },
 };
