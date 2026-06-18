@@ -72,9 +72,14 @@ export default {
     const hardCap = Number(env.HARD_CAP_TOKENS || 18000);
     const reserve = worstCaseCost(tier, hardCap);
     const stub = budgetStub(env);
-    const gate = await doCall(stub, "reserve", { amount: reserve, subject: ip, ip });
+    // Auch der (von aelteren, gecachten Clients noch genutzte) synchrone Generierungs-
+    // pfad nimmt am Pro-Nutzer-exclusive-Gate teil, sonst liesse sich die "nur ein Test
+    // gleichzeitig"-Regel durch Direktaufruf umgehen (Codex-Finding). evaluate/themenfelder
+    // bleiben nicht-exklusiv (kurze Aufrufe, kein Generierungs-Slot).
+    const exclusive = route.action === "generate-quiz";
+    const gate = await doCall(stub, "reserve", { amount: reserve, subject: ip, ip, exclusive });
     if (!gate.ok) {
-      const status = gate.reason === "budget" ? 503 : 429; // inflight/subject/ip → 429
+      const status = gate.reason === "budget" ? 503 : 429; // active-job/inflight/subject/ip → 429
       return json({ error: gate.reason }, status, env, origin);
     }
     const reserveId = gate.reserveId;

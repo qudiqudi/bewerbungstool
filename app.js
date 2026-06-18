@@ -2121,9 +2121,22 @@ function finalizeQuiz(result, ctx) {
 /* ---------- Hosted-Hintergrund-Generierung (Punkt 1) ---------- */
 
 const ACTIVE_JOB_KEY = "bewerbungstool.activeJob";
-function loadActiveJob() { try { return JSON.parse(localStorage.getItem(ACTIVE_JOB_KEY)); } catch { return null; } }
-function saveActiveJob(j) { try { localStorage.setItem(ACTIVE_JOB_KEY, JSON.stringify(j)); } catch {} }
-function clearActiveJob() { try { localStorage.removeItem(ACTIVE_JOB_KEY); } catch {} }
+// In-Memory-Spiegel: faellt localStorage aus (voll/blockiert), geht der einzige Zeiger
+// auf den bereits serverseitig laufenden (ggf. kostenpflichtigen) Job nicht verloren —
+// Polling/Loslegen funktioniert dann zumindest im aktuellen Tab weiter.
+let _activeJobMem = null;
+function loadActiveJob() {
+  try { const raw = localStorage.getItem(ACTIVE_JOB_KEY); if (raw) return JSON.parse(raw); } catch {}
+  return _activeJobMem;
+}
+function saveActiveJob(j) {
+  _activeJobMem = j;
+  try { localStorage.setItem(ACTIVE_JOB_KEY, JSON.stringify(j)); return true; } catch { return false; }
+}
+function clearActiveJob() {
+  _activeJobMem = null;
+  try { localStorage.removeItem(ACTIVE_JOB_KEY); } catch {}
+}
 
 let _jobPollTimer = null;
 function scheduleJobPoll(delayMs) {
@@ -2164,7 +2177,7 @@ async function startHostedGeneration(ctx) {
     const data = await res.json();
     if (!data.jobId) throw new Error("Der Test konnte nicht gestartet werden. Bitte erneut versuchen.");
     // Nur den fuer die Fertigstellung noetigen Kontext sichern (keine Prompts/Tokens).
-    saveActiveJob({
+    const persisted = saveActiveJob({
       jobId: data.jobId,
       status: "pending",
       createdAt: Date.now(),
@@ -2176,6 +2189,12 @@ async function startHostedGeneration(ctx) {
     hideLoading();
     showView("view-home");
     renderActiveJobCard("pending");
+    // Konnte der Zeiger nicht dauerhaft gespeichert werden (Speicher voll/blockiert),
+    // laeuft der Job dank In-Memory-Spiegel im aktuellen Tab weiter — ein Reload oder
+    // Tabwechsel wuerde ihn aber verlieren. Den Nutzer darauf hinweisen.
+    if (!persisted) {
+      showError("Dein Test wird erstellt, kann aber nicht dauerhaft gesichert werden (Browser-Speicher voll?). Bitte diesen Tab geöffnet lassen, bis der Test fertig ist.");
+    }
     scheduleJobPoll(0);
   } catch (e) {
     showError(e.message);
@@ -2185,23 +2204,46 @@ async function startHostedGeneration(ctx) {
   }
 }
 
+// Obergrenze fuer die Wartezeit auf einen Job. Bewusst etwas ueber der server-
+// seitigen RESERVE_TTL_S (600 s), damit ein haengender Job-Slot beim naechsten Start
+// schon per Reconcile freigegeben ist und der Pro-Nutzer-Gate nicht dauerhaft blockt.
+const MAX_JOB_MS = 11 * 60 * 1000;
+
 async function pollActiveJob() {
   const job = loadActiveJob();
   if (!job || job.status === "ready") return; // fertig: wartet auf "Loslegen"
-  let data;
+
+  // Haengender/abgestuerzter Job: nicht endlos weiterpollen, sonst bleibt der
+  // Erstellen-Slot fuer den Nutzer dauerhaft belegt. Abbrechen und Neustart anbieten.
+  if (Date.now() - (job.createdAt || 0) > MAX_JOB_MS) {
+    clearActiveJob();
+    renderActiveJobCard("error");
+    showError("Die Erstellung dauert ungewöhnlich lange und wurde abgebrochen. Bitte starte den Test neu.");
+    return;
+  }
+
+  let r;
   try {
-    const r = await fetch(hostedBase() + "/api/jobs/" + encodeURIComponent(job.jobId));
-    if (r.status === 404) {
-      clearActiveJob();
-      renderActiveJobCard(null);
-      showError("Der erstellte Test ist nicht mehr verfügbar. Bitte starte ihn neu.");
-      return;
-    }
-    data = await r.json();
+    r = await fetch(hostedBase() + "/api/jobs/" + encodeURIComponent(job.jobId));
   } catch {
     scheduleJobPoll(5000); // Netzfehler/Offline: spaeter erneut versuchen
     return;
   }
+  if (r.status === 404) {
+    clearActiveJob();
+    renderActiveJobCard(null);
+    showError("Der erstellte Test ist nicht mehr verfügbar. Bitte starte ihn neu.");
+    return;
+  }
+  if (!r.ok) {
+    // Server-/Gateway-Fehler (5xx/403/…): als voruebergehend behandeln, mit Abstand
+    // erneut versuchen. Der Max-Alter-Schutz oben beendet hartnaeckige Faelle.
+    scheduleJobPoll(5000);
+    return;
+  }
+  let data;
+  try { data = await r.json(); } catch { scheduleJobPoll(5000); return; }
+
   if (data.status === "done" && data.quiz) {
     // Ergebnis sichern und ruhen lassen — der Nutzer startet selbst (kein Wegreissen).
     saveActiveJob({ ...job, status: "ready", quiz: data.quiz });
