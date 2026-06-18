@@ -61,7 +61,7 @@ MAGIC_FROM = "login@jobreif.de"     # Resend-Absender (Domain muss verifiziert s
 [[d1_databases]]
 binding = "DB"
 database_name = "jobreif-auth"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "bdfa39da-e0cf-4263-bf21-b5cad7f6fd95"
 migrations_dir = "migrations"
 
 [[durable_objects.bindings]]
