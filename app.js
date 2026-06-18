@@ -5356,7 +5356,16 @@ function renderJobBlock(job, opts) {
     score.textContent = att.prozent + " %";
     const openBtn = document.createElement("button");
     openBtn.textContent = "Ansehen";
-    openBtn.addEventListener("click", () => openAttempt(job, att));
+    // openAttempt klont att.quiz und liest quiz.fragen - fehlt das bei sehr
+    // alten Versuchen, wuerde "Ansehen" abstuerzen. Solche Versuche bleiben
+    // sichtbar, aber der Knopf wird deaktiviert (degradierter, kein Crash).
+    const canReview = att.quiz && Array.isArray(att.quiz.fragen);
+    if (canReview) {
+      openBtn.addEventListener("click", () => openAttempt(job, att));
+    } else {
+      openBtn.disabled = true;
+      openBtn.title = "Ansehen nicht möglich: Daten dieses Versuchs sind unvollständig.";
+    }
     li.appendChild(info);
     li.appendChild(score);
     li.appendChild(openBtn);
