@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.8.1";
+const APP_VERSION = "1.8.2";
 
 const CHANGELOG = [
+  {
+    version: "1.8.2",
+    date: "18.06.2026",
+    items: [
+      "Die obere Leiste führt jetzt mit „Meine Stellen“ direkt zu deiner Stellenliste (statt zu „Historie“). Die bisherigen Tests einer einzelnen Stelle erreichst du wie gewohnt, indem du die Stelle in der Liste antippst.",
+    ],
+  },
   {
     version: "1.8.1",
     date: "18.06.2026",
@@ -6271,11 +6278,13 @@ $("btn-review-questions").addEventListener("click", () => {
   showView("view-quiz");
 });
 
-$("btn-history").addEventListener("click", () => {
-  rememberReturnView();
-  renderHistory();
-  showView("view-history");
-});
+// Top-Nav "Meine Stellen": fuehrt zur Startliste (Home, via goHome). Die Historie
+// einer einzelnen Stelle ist von dort per Tippen auf die Stelle erreichbar; die
+// Vollansicht aller Stellen ueber "Alle Stellen ansehen" auf der Startliste.
+// (Anders als der fruehere Peek-Button "Historie" ist dies ein Ziel-Button - er
+// kehrt bewusst zur Startliste zurueck statt per goReturn in einen laufenden Test;
+// "Einstellungen" bewahrt den laufenden Test weiterhin.)
+$("btn-home").addEventListener("click", goHome);
 
 $("btn-history-back").addEventListener("click", goReturn);
 
