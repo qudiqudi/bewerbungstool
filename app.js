@@ -6237,16 +6237,27 @@ function importData(text) {
   // Gemeldete Fragen defensiv und nicht-destruktiv mergen: per id dedupen,
   // beschaedigte Eintraege ueberspringen, den Import nie daran abbrechen lassen.
   let newReports = 0;
+  let reportsDropped = 0;
   if (data.reports && Array.isArray(data.reports.reports)) {
     const r = loadReports();
     const seen = new Set(r.reports.map((x) => x && x.id).filter(Boolean));
+    const importedIds = [];
     data.reports.reports.forEach((rep) => {
       if (!rep || typeof rep !== "object" || !rep.id || seen.has(rep.id)) return;
       seen.add(rep.id);
       r.reports.push(rep);
-      newReports++;
+      importedIds.push(rep.id);
     });
-    if (newReports) saveReports(r);
+    if (importedIds.length) {
+      saveReports(r);
+      // Persistenz verifizieren: saveReports kann auf REPORTS_MAX kappen oder bei
+      // vollem/gesperrtem Speicher Eintraege verwerfen. Nur die tatsaechlich
+      // gespeicherten Meldungen als "neu" zaehlen, den Rest als verworfen melden -
+      // sonst taeuscht der Import bei der Geraetemigration Datenerhalt vor.
+      const persisted = new Set(loadReports().reports.map((x) => x && x.id).filter(Boolean));
+      newReports = importedIds.filter((id) => persisted.has(id)).length;
+      reportsDropped = importedIds.length - newReports;
+    }
   }
 
   const parts = [];
@@ -6258,6 +6269,11 @@ function importData(text) {
   );
   if (newReports) {
     parts.push(newReports === 1 ? "1 neue Meldung" : newReports + " neue Meldungen");
+  }
+  if (reportsDropped) {
+    parts.push(reportsDropped === 1
+      ? "1 Meldung nicht gespeichert (Speicher voll)"
+      : reportsDropped + " Meldungen nicht gespeichert (Speicher voll)");
   }
   return parts.join("; ") + ".";
 }
