@@ -126,11 +126,16 @@
         <label>Konto (optional)</label>
         <p id="account-status" class="hint">Nicht angemeldet.</p>
         <div id="account-login">
-          <input type="email" id="account-email" placeholder="dein@email.de" autocomplete="email" spellcheck="false">
-          <div class="row wrap">
-            <button id="btn-account-magic" type="button" class="ghost">Anmeldelink per E-Mail</button>
-            <button id="btn-account-google" type="button" class="ghost">Mit Google anmelden</button>
-          </div>
+          <form id="account-magic-form">
+            <label for="account-email" class="sr-only">E-Mail-Adresse für den Anmeldelink</label>
+            <input type="email" id="account-email" name="email" placeholder="dein@email.de"
+                   autocomplete="email" inputmode="email" autocapitalize="off" autocorrect="off"
+                   spellcheck="false" maxlength="254" enterkeyhint="send" required>
+            <div class="row wrap">
+              <button id="btn-account-magic" type="submit" class="ghost">Anmeldelink per E-Mail</button>
+              <button id="btn-account-google" type="button" class="ghost">Mit Google anmelden</button>
+            </div>
+          </form>
         </div>
         <div id="account-loggedin" class="hidden">
           <div class="row wrap">

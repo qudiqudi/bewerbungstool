@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.7.0";
+const APP_VERSION = "1.7.1";
 
 const CHANGELOG = [
+  {
+    version: "1.7.1",
+    date: "18.06.2026",
+    items: [
+      "Das E-Mail-Feld bei der Anmeldung war zu schmal dargestellt – es ist jetzt korrekt über die volle Breite und prüft die eingegebene Adresse direkt im Browser.",
+    ],
+  },
   {
     version: "1.7.0",
     date: "18.06.2026",
@@ -5693,12 +5700,14 @@ async function renderAccountSection() {
   } catch { /* offline: optimistischer Zustand bleibt */ }
 }
 
-$("btn-account-magic").addEventListener("click", async () => {
-  const email = $("account-email").value.trim();
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    $("account-msg").textContent = "Bitte eine gültige E-Mail-Adresse eingeben.";
-    return;
-  }
+$("account-magic-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const input = $("account-email");
+  // Native Constraint-Validierung (type=email + required) nutzen; bei Verstoss
+  // zeigt der Browser seine eigene, lokalisierte Meldung am Feld.
+  if (!input.checkValidity()) { input.reportValidity(); return; }
+  // Sanitisierung: trimmen + klein normalisieren (der Worker normalisiert ebenfalls).
+  const email = input.value.trim().toLowerCase();
   const btn = $("btn-account-magic");
   btn.disabled = true;
   $("account-msg").textContent = "Anmeldelink wird gesendet...";

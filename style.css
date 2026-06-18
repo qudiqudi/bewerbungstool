@@ -281,6 +281,7 @@ label {
 input[type="text"],
 input[type="password"],
 input[type="url"],
+input[type="email"],
 select,
 textarea {
   width: 100%;
@@ -1382,7 +1383,7 @@ button.danger:hover { background: var(--red-soft); border-color: var(--red); }
   .card { padding: 1.1rem; border-radius: 16px; }
 
   /* 16px verhindert den automatischen Zoom beim Fokussieren auf iOS */
-  input[type="text"], input[type="password"], input[type="url"], select, textarea {
+  input[type="text"], input[type="password"], input[type="url"], input[type="email"], select, textarea {
     font-size: 16px;
   }
 
