@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.8.3";
+const APP_VERSION = "1.8.4";
 
 const CHANGELOG = [
+  {
+    version: "1.8.4",
+    date: "18.06.2026",
+    items: [
+      "Stellenseite: Die wichtigsten Kernpunkte einer Anzeige – Aufgaben, Anforderungen und Besonderheiten – erscheinen jetzt als übersichtliche Karten oben auf der Stelle. Sie werden beim Erstellen eines Tests automatisch aus der Anzeige gelesen (ohne Zusatzkosten) und sind als Anhaltspunkt gedacht – im Zweifel die Originalanzeige prüfen. Ältere Stellen bekommen die Übersicht beim nächsten Test.",
+    ],
+  },
   {
     version: "1.8.3",
     date: "18.06.2026",
@@ -760,6 +767,19 @@ function setQuizNotice(msg) {
 
 /* ---------- JSON-Schemata ---------- */
 
+// Ein einzelner Kernpunkt: knapper text plus woertliches Beleg-Zitat aus dem
+// Anzeigentext. Der beleg ist die Grundlage der Grounding-Pruefung in
+// normalizeKernpunkte (Punkte ohne im Text auffindbares Zitat werden verworfen).
+const KERNPUNKT_ITEM_SCHEMA = {
+  type: "object",
+  properties: {
+    text: { type: "string", description: "Der knappe Kernpunkt" },
+    beleg: { type: "string", description: "Woertliches, exakt aus dem Anzeigentext kopiertes Zitat, das den Punkt stuetzt" },
+  },
+  required: ["text", "beleg"],
+  additionalProperties: false,
+};
+
 const QUESTIONS_SCHEMA = {
   type: "object",
   properties: {
@@ -844,8 +864,41 @@ const QUESTIONS_SCHEMA = {
         additionalProperties: false,
       },
     },
+    kernpunkte: {
+      type: "object",
+      description:
+        "Die wichtigsten Kernpunkte der Stelle, ausschliesslich aus dem Anzeigentext " +
+        "extrahiert. Nichts erfinden: was nicht im Text steht, bleibt leer. Zu JEDEM " +
+        "Kernpunkt gehoert ein beleg = ein woertliches, exakt aus dem Anzeigentext " +
+        "kopiertes Zitat, das den Punkt stuetzt. Gibt es kein solches Zitat, bleibt die " +
+        "Kategorie leer (leeres Array bzw. text und beleg leer).",
+      properties: {
+        aufgaben: {
+          type: "array",
+          items: KERNPUNKT_ITEM_SCHEMA,
+          description: "Wichtigste Aufgaben/Taetigkeiten, je ein knapper Punkt mit Beleg-Zitat; leer wenn nicht genannt",
+        },
+        anforderungen_muss: {
+          type: "array",
+          items: KERNPUNKT_ITEM_SCHEMA,
+          description: "Zwingende Anforderungen / Muss-Skills mit Beleg-Zitat; leer wenn nicht genannt",
+        },
+        anforderungen_optional: {
+          type: "array",
+          items: KERNPUNKT_ITEM_SCHEMA,
+          description: "Nice-to-have / wuenschenswerte Anforderungen mit Beleg-Zitat; leer wenn nicht genannt",
+        },
+        besonderheiten: {
+          type: "array",
+          items: KERNPUNKT_ITEM_SCHEMA,
+          description: "Sonstige relevante Besonderheiten der Stelle mit Beleg-Zitat; leer wenn nicht genannt",
+        },
+      },
+      required: ["aufgaben", "anforderungen_muss", "anforderungen_optional", "besonderheiten"],
+      additionalProperties: false,
+    },
   },
-  required: ["titel", "arbeitgeber", "arbeitsort", "empfohlene_zeit_minuten", "fragen"],
+  required: ["titel", "arbeitgeber", "arbeitsort", "empfohlene_zeit_minuten", "fragen", "kernpunkte"],
   additionalProperties: false,
 };
 
@@ -862,6 +915,11 @@ const QUESTIONS_SCHEMA_LOCAL = (() => {
   delete item.properties.lerninfo;
   delete item.properties.quellen;
   item.required = item.required.filter((k) => k !== "lerninfo" && k !== "quellen");
+  // Kernpunkte fuer lokale Modelle ganz entfernen: lokale Modelle halluzinieren
+  // gern und sollen pro Block moeglichst wenig erzeugen. Aus properties UND
+  // required strippen, sonst gibt der strikte lokale Pfad (strict: true) HTTP 400.
+  delete s.properties.kernpunkte;
+  s.required = s.required.filter((k) => k !== "kernpunkte");
   return s;
 })();
 
@@ -931,7 +989,132 @@ const EVAL_SCHEMA = {
 // nutzbar (harmlose Luecken auffuellen) und werfen nur, wenn das Ergebnis
 // grundsaetzlich unbrauchbar ist.
 
-function normalizeQuizData(result) {
+// Kernpunkte der Stelle defensiv aufbereiten und GEGEN DEN ANZEIGENTEXT
+// VERIFIZIEREN. Jeder Kernpunkt liefert vom Modell { text, beleg }; der beleg
+// muss ein woertliches Zitat aus dem Anzeigentext sein. Punkte, deren beleg sich
+// nicht (normalisiert) im jobText finden laesst, werden verworfen - so wird ein
+// halluziniertes Ergebnis nicht als "vertrauenswuerdige" Stellen-Info gespeichert
+// oder angezeigt. Die Ausgabe bleibt absichtlich TEXT-ONLY (string[] bzw. string),
+// damit Panel (buildKernpunktePanel) und Persistenz (saveAttempt) unveraendert
+// bleiben. Gibt null zurueck, wenn nach der Pruefung keine Kategorie uebrig ist
+// (nicht-extrahierende Provider/lokal sollen keinen leeren Block speichern).
+// Tolerant gegen Fehlen und Teilbefuellung. Ohne jobText kann nichts verifiziert
+// werden -> alles wird verworfen (sichere Default).
+// Begrenzt den Anzeigentext auf die EIGENTLICHE Stellenausschreibung, indem ein
+// abschliessender "aehnliche/weitere Stellen"-Block abgeschnitten wird, den
+// Jobportale unter die Anzeige haengen. Damit lassen sich Kernpunkte nicht mehr
+// gegen Fremd-Anzeigen (z. B. ein anderes Gehalt im Teaser) belegen. Greift den
+// haeufigen Fall ab (Teaser am Ende); eine vollstaendige Struktur-Segmentierung
+// (Navigation/Footer/Seitenleiste) waere ein groesserer, separater Schritt.
+function mainAdSegment(text) {
+  const s = typeof text === "string" ? text : "";
+  const marker =
+    /(^|\n)\s*(ähnliche?\s+(stellen|jobs|anzeigen|stellenangebote)|weitere\s+(stellen|jobs|stellenangebote|passende)|das könnte (dich|sie) auch interessieren|empfohlene\s+jobs|passende\s+jobs|similar\s+jobs|related\s+jobs|recommended\s+jobs|more\s+jobs)/i;
+  const m = s.match(marker);
+  // Nur abschneiden, wenn ein sinnvoller Haupttext davor steht (sonst Fehltreffer).
+  if (m && m.index > 200) return s.slice(0, m.index);
+  return s;
+}
+
+function normalizeKernpunkte(k, jobText) {
+  if (!k || typeof k !== "object") return null;
+  const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+  // Belege werden NUR gegen den Haupt-Anzeigentext geprueft (ohne nachgehaengte
+  // Teaser fuer andere Stellen), nicht gegen die ganze gescrapte Seite.
+  const hay = norm(mainAdSegment(jobText));
+  // item ist { text, beleg }. Gibt den getrimmten text zurueck, wenn text nicht
+  // leer ist UND der beleg ein hinreichend langes, im Anzeigentext woertlich
+  // auffindbares Zitat ist; sonst "" (verwerfen). Die Mindestlaenge schliesst aus,
+  // dass ein triviales Schnipsel ("und", "m/w/d") als Beleg durchgeht.
+  const verified = (item) => {
+    if (!item || typeof item !== "object") return "";
+    const text = typeof item.text === "string" ? item.text.trim() : "";
+    const beleg = typeof item.beleg === "string" ? item.beleg.trim() : "";
+    // Das Modell muss den Punkt kategorisiert haben (text nicht leer) - sonst
+    // verwerfen.
+    if (!text) return "";
+    // Der Beleg muss ein hinreichend langes, im Anzeigentext WOERTLICH auffindbares
+    // Zitat sein (Mindestlaenge gegen triviale Schnipsel). Angezeigt wird IMMER das
+    // verifizierte Zitat selbst (gekuerzt), NIE die kondensierte Modell-Formulierung
+    // (`text`): ein Teilstring des Zitats koennte die Bedeutung kippen - etwa
+    // "Homeoffice" aus dem Beleg "Kein Homeoffice vorgesehen". Das Zitat bewahrt den
+    // Sinn (inkl. Verneinungen) und ist nachweislich aus der Anzeige.
+    const nb = norm(beleg);
+    // Mindestlaenge gegen triviale Schnipsel; Hoechstlaenge, damit ein FOKUSSIERTES
+    // Zitat erzwungen wird, statt es mitten im Satz zu kuerzen: eine blinde Kuerzung
+    // koennte einen nachgestellten Qualifier oder eine Verneinung abschneiden und
+    // so die Aussage verfaelschen. Zu lange Belege werden verworfen (kein Card),
+    // nie gekuerzt. Angezeigt wird das vollstaendige, verifizierte Zitat.
+    if (nb.length < 8 || nb.length > 240 || !hay.includes(nb)) return "";
+    return beleg;
+  };
+  const verArr = (v) =>
+    (Array.isArray(v) ? v.map(verified).filter(Boolean) : []);
+  // BEWUSST entschaerft: die praezisen, faktischen und besonders fehl-info-
+  // anfaelligen Felder Gehalt, Benefits und Arbeitsmodell werden NICHT mehr
+  // generiert/angezeigt. Grund: eine robuste Trennung der eigentlichen Anzeige
+  // von Teasern/Seiten-Chrome ist auf gescrapten Portalseiten deterministisch
+  // nicht garantierbar - ein fremdes Gehalt/Remote/Benefit koennte sonst als Fakt
+  // DIESER Stelle erscheinen. Diese Felder sind daher aus Schema und Prompt
+  // entfernt; uebrig bleiben die beschreibenden Highlights (Aufgaben,
+  // Anforderungen, Besonderheiten), die im Panel zudem als "bitte im Original
+  // pruefen" gerahmt sind. normalizeKernpunkte haelt nur diese vier Kategorien.
+  const out = {
+    aufgaben: verArr(k.aufgaben),
+    anforderungen_muss: verArr(k.anforderungen_muss),
+    anforderungen_optional: verArr(k.anforderungen_optional),
+    besonderheiten: verArr(k.besonderheiten),
+  };
+  const hasAny =
+    out.aufgaben.length ||
+    out.anforderungen_muss.length ||
+    out.anforderungen_optional.length ||
+    out.besonderheiten.length;
+  return hasAny ? out : null;
+}
+
+// Importierte Kernpunkte (aus einem Backup) erneut erden: nur die erlaubten,
+// beschreibenden Kategorien als String-Arrays uebernehmen und jeden Eintrag gegen
+// den Haupt-Anzeigentext DIESES Jobs pruefen. So koennen ein korruptes/editiertes
+// Backup keine ungeprueften (z. B. falschen Gehalts-)Fakten unterschieben - dieselbe
+// Erdung wie beim Generieren. Gibt das bereinigte data-Objekt zurueck oder null.
+function regroundKernpunkteData(data, jobText) {
+  if (!data || typeof data !== "object") return null;
+  const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+  const hay = norm(mainAdSegment(jobText));
+  if (!hay) return null;
+  const keep = (arr) =>
+    (Array.isArray(arr) ? arr : [])
+      .filter((x) => typeof x === "string")
+      .map((x) => x.trim())
+      .filter((x) => { const n = norm(x); return n.length >= 8 && n.length <= 240 && hay.includes(n); });
+  const out = {
+    aufgaben: keep(data.aufgaben),
+    anforderungen_muss: keep(data.anforderungen_muss),
+    anforderungen_optional: keep(data.anforderungen_optional),
+    besonderheiten: keep(data.besonderheiten),
+  };
+  return (out.aufgaben.length || out.anforderungen_muss.length ||
+    out.anforderungen_optional.length || out.besonderheiten.length) ? out : null;
+}
+
+// Importierte Kernpunkte eines Jobs erneut erden (gegen dessen eigenen jobText)
+// und in einen sauberen Versionswrapper packen; undefined, wenn nichts uebrig
+// bleibt. So unterschiebt ein korruptes/editiertes Backup keine ungeprueften Fakten.
+function regroundImportedKernpunkte(impJob) {
+  const kp = impJob && impJob.kernpunkte;
+  if (!kp || typeof kp !== "object") return undefined;
+  const data = regroundKernpunkteData(kp.data, impJob.jobText);
+  if (!data) return undefined;
+  return {
+    v: 1,
+    generatedAt: Number.isFinite(Number(kp.generatedAt)) ? Number(kp.generatedAt) : Date.now(),
+    srcKey: typeof kp.srcKey === "string" ? kp.srcKey : null,
+    data,
+  };
+}
+
+function normalizeQuizData(result, jobText = "") {
   if (!result || typeof result !== "object" || !Array.isArray(result.fragen)) {
     throw new Error("Die Modellantwort hatte nicht die erwartete Form (keine Fragenliste).");
   }
@@ -1062,12 +1245,15 @@ function normalizeQuizData(result) {
     throw new Error("Die Modellantwort enthielt keine verwertbaren Fragen.");
   }
   const zeit = Math.round(Number(result.empfohlene_zeit_minuten));
+  const kp = normalizeKernpunkte(result.kernpunkte, jobText);
   return {
     titel: typeof result.titel === "string" && result.titel.trim() ? result.titel.trim() : "Einstellungstest",
     arbeitgeber: typeof result.arbeitgeber === "string" ? result.arbeitgeber.trim() : "",
     arbeitsort: typeof result.arbeitsort === "string" ? result.arbeitsort.trim() : "",
     empfohlene_zeit_minuten: Number.isFinite(zeit) && zeit > 0 ? zeit : 0,
     fragen,
+    // Nur setzen, wenn wirklich etwas extrahiert wurde (sonst Feld weglassen).
+    ...(kp ? { kernpunkte: kp } : {}),
   };
 }
 
@@ -2214,7 +2400,7 @@ async function generateLocalBatches(system, jobText, total, onProgress) {
 
       let norm;
       try {
-        norm = normalizeQuizData(out.data);
+        norm = normalizeQuizData(out.data, jobText);
       } catch (e) {
         if (collected.length) break;
         throw e;
@@ -2561,7 +2747,17 @@ async function generateQuiz(opts = {}) {
         "Nenne nur real existierende Quellen (Gesetze, Normen, Standardwerke, offizielle Dokumentation, etablierte Fachseiten). " +
         "Gib die URL einer Quelle nur an, wenn du dir sicher bist, dass sie existiert - bevorzugt Startseiten oder bekannte, " +
         "stabile Adressen, keine tief verschachtelten Links. Sonst lasse die URL leer und waehle einen praegnanten Titel, " +
-        "der sich gut als Suchbegriff eignet. ";
+        "der sich gut als Suchbegriff eignet. " +
+        "Extrahiere zusätzlich die wichtigsten Kernpunkte der Stelle (Aufgaben, zwingende und optionale Anforderungen, " +
+        "Besonderheiten) ausschliesslich aus dem Anzeigentext. Erfinde nichts und leite " +
+        "nichts her - was nicht ausdrücklich im Text steht, lässt du leer (leerer String bzw. leeres Array). Formuliere " +
+        "jeden Punkt knapp. Zu JEDEM Kernpunkt gehört ein beleg = ein WÖRTLICHES, exakt " +
+        "aus dem Anzeigentext kopiertes Zitat (kein paraphrasiertes), das die Aussage stützt. Nimm einen Kernpunkt NUR " +
+        "auf, wenn es ein solches wörtliches Zitat im Text gibt; sonst lass die Kategorie leer. Anforderungen " +
+        "nur bei wörtlicher Deckung. Beziehe dich AUSSCHLIESSLICH auf DIESE eine ausgeschriebene Stelle: " +
+        "verwende KEINE Angaben aus Navigation, Cookie-/Footer-Hinweisen, Werbeblöcken oder Teasern für ANDERE bzw. " +
+        "ähnliche Stellen, die im Seitentext mitkopiert sein können - auch wenn dort etwa ein Gehalt oder Benefit steht. " +
+        "Im Zweifel die Kategorie leer lassen. ";
 
     // Vertiefungen tragen Tiefe ueber offene Fragen besser als ueber MC, und die
     // Distraktoren muessen anspruchsvoll sein. Normale Tests behalten exakt die
@@ -2681,7 +2877,7 @@ async function generateQuiz(opts = {}) {
 // synchronen (BYOK/lokal) und vom asynchronen Hosted-Pfad. ctx traegt den zur
 // Fertigstellung noetigen Kontext (zur Startzeit festgehalten).
 function finalizeQuiz(result, ctx) {
-  quiz = normalizeQuizData(result);
+  quiz = normalizeQuizData(result, ctx.jobText);
   quiz.jobText = ctx.jobText;
   if (ctx.urlKey) { quiz.urlKey = ctx.urlKey; quiz.jobUrl = ctx.jobUrl; }
   quiz.schwierigkeitsgrad = ctx.difficulty;
@@ -4902,6 +5098,28 @@ function saveAttempt(result, durationMs, evalCost, evalTokens) {
     // dann auf den Titel allein zurueck. Leere Werte ueberschreiben nichts.
     if (typeof quiz.arbeitgeber === "string" && quiz.arbeitgeber.trim()) job.arbeitgeber = quiz.arbeitgeber.trim();
     if (typeof quiz.arbeitsort === "string" && quiz.arbeitsort.trim()) job.arbeitsort = quiz.arbeitsort.trim();
+    // Kernpunkte der Stelle am Job auffrischen, sobald welche extrahiert wurden.
+    // Nur bei normalen Tests (kein Vertiefungsbogen, dessen Quiz Teilthemen verengt)
+    // und nur, wenn quiz.kernpunkte befuellt ist (normalizeQuizData setzt das Feld
+    // nur dann). Ein spaeterer Test ohne Extraktion (lokal) darf bestehende
+    // Kernpunkte NICHT loeschen - der Guard laesst sie unberuehrt. Versionswrapper
+    // wie bei themenfelder, erleichtert spaetere Migrationen.
+    if (quiz.kernpunkte && typeof quiz.kernpunkte === "object") {
+      // Kernpunkte NUR schreiben, wenn dieser Test aus DERSELBEN Anzeige stammt wie
+      // die gespeicherte Stelle: jobKey(quiz.jobText) === job.key. Dann passen die
+      // angezeigten Kernpunkte immer zum job.jobText, aus dem auch Folge-Tests
+      // erzeugt werden (Anzeige und Wiederholung konsistent) - OHNE die mutable,
+      // text-hash-basierte Job-Identitaet anzufassen (kein key-Kollisions-/Loesch-
+      // Risiko). Bei einem identityKey-Merge mit abweichendem Text (andere oder
+      // aktualisierte Anzeige) bleiben die bestehenden, zum job.jobText passenden
+      // Kernpunkte unveraendert, statt fremde Fakten unterzuschieben. job.key wird
+      // nicht mehr mutiert, daher gilt weiterhin job.key === jobKey(job.jobText).
+      let curKey = null;
+      try { curKey = jobKey(quiz.jobText); } catch { /* egal */ }
+      if (curKey && curKey === job.key) {
+        job.kernpunkte = { v: 1, generatedAt: Date.now(), srcKey: curKey, data: quiz.kernpunkte };
+      }
+    }
   }
   // identityKey aus den aktuellen Feldern der Stelle ableiten (nicht aus dem
   // einzelnen Versuch), damit er zur Stelle passt und ältere, vor diesem Feld
@@ -4948,6 +5166,7 @@ function saveAttempt(result, durationMs, evalCost, evalTokens) {
   delete quizCopy.urlKey;  // liegt am Job
   delete quizCopy.jobUrl;  // liegt am Job
   delete quizCopy.vertiefungFelder; // liegt als attempt.vertiefung am Versuch
+  delete quizCopy.kernpunkte; // liegt am Job (job.kernpunkte), nicht doppelt je Versuch
 
   const attempt = {
     date: Date.now(),
@@ -5313,6 +5532,69 @@ function buildNumStepper(initial, onChange, opts = {}) {
   return wrap;
 }
 
+// Kernpunkte-Panel der Stellenseite: scanbare Karten mit den wichtigsten Punkten
+// der Anzeige (Aufgaben, Muss-/Optional-Anforderungen, Besonderheiten).
+// Defensiv: fehlen die Daten (alte Stellen, lokale Tests),
+// gibt die Funktion null zurueck und renderJob haengt nichts ein. Modell-Output
+// wird ausschliesslich ueber textContent gesetzt (kein innerHTML).
+const KERNPUNKTE_LIST_MAX = 8; // sehr lange Listen kappen (geschwaetzige Modelle)
+function buildKernpunktePanel(job) {
+  // job.kernpunkte ist stets die jeweils neueste Extraktion fuer diese Stelle
+  // (bei jedem normalen Test ueberschrieben) und wird angezeigt, sobald vorhanden.
+  // Kein Abgleich gegen job.jobText/job.key: ein solches Render-Gate konnte frisch
+  // erzeugte Kernpunkte nach einem Merge dauerhaft verbergen, und das noetige
+  // Mutieren der Job-Identitaet barg Kollisions-/Loesch-Risiken.
+  const kp = job && job.kernpunkte && job.kernpunkte.data ? job.kernpunkte.data : null;
+  if (!kp) return null;
+  // Bewusst nur beschreibende Highlights - Gehalt/Benefits/Arbeitsmodell werden
+  // nicht als Fakten angezeigt (Teaser-/Fehl-Info-Risiko, s. normalizeKernpunkte).
+  // Alle vier Kategorien sind String-Listen und werden gleich (als ul) gerendert.
+  const sections = [
+    { key: "aufgaben", label: "Aufgaben" },
+    { key: "anforderungen_muss", label: "Muss-Anforderungen" },
+    { key: "anforderungen_optional", label: "Nice-to-have" },
+    { key: "besonderheiten", label: "Besonderheiten" },
+  ];
+  const present = sections.filter((s) => Array.isArray(kp[s.key]) && kp[s.key].length);
+  if (!present.length) return null;
+
+  const panel = document.createElement("div");
+  panel.className = "kernpunkte-panel";
+  const heading = document.createElement("h3");
+  heading.textContent = "Das Wichtigste auf einen Blick";
+  panel.appendChild(heading);
+
+  const hint = document.createElement("p");
+  hint.className = "kernpunkte-hint hint";
+  hint.textContent = "Automatisch aus der Anzeige extrahiert - bitte im Original prüfen.";
+  panel.appendChild(hint);
+
+  const grid = document.createElement("div");
+  grid.className = "kernpunkte-grid";
+
+  present.forEach((s) => {
+    const card = document.createElement("div");
+    card.className = "kernpunkte-card";
+    const title = document.createElement("div");
+    title.className = "kernpunkte-card-title";
+    title.textContent = s.label;
+    card.appendChild(title);
+
+    const ul = document.createElement("ul");
+    ul.className = "kernpunkte-list";
+    kp[s.key].slice(0, KERNPUNKTE_LIST_MAX).forEach((item) => {
+      const li = document.createElement("li");
+      li.textContent = String(item);
+      ul.appendChild(li);
+    });
+    card.appendChild(ul);
+    grid.appendChild(card);
+  });
+
+  panel.appendChild(grid);
+  return panel;
+}
+
 // Start-Panel der Subpage: Schwierigkeit und Fragenzahl stehen direkt sichtbar
 // ueber zwei Startknoepfen (Lern-/Pruefungsmodus) - kein aufklappbarer Bereich
 // mehr. Generiert wird erst beim ausdruecklichen Klick auf einen Startknopf,
@@ -5611,6 +5893,12 @@ function renderJob(job) {
   // Start-Panel direkt unter den Kopf (vor den Trend) setzen, damit der Titel
   // zuerst kommt und die Startknoepfe gleich darunter sichtbar sind.
   block.insertBefore(buildStartPanel(job), block.children[1] || null);
+  // Kernpunkte-Panel direkt unter das Start-Panel (vor den Trend), wenn die
+  // Stelle welche traegt. Reihenfolge: Titel -> Startknoepfe -> Kernpunkte ->
+  // Fortschritt/Verlauf. Alte Stellen ohne kernpunkte liefern null -> nichts
+  // eingehaengt, Screen wie bisher.
+  const kpPanel = buildKernpunktePanel(job);
+  if (kpPanel) block.insertBefore(kpPanel, block.children[2] || null);
   const wrap = $("job-detail");
   wrap.innerHTML = "";
   wrap.appendChild(block);
@@ -6259,7 +6547,15 @@ function importData(text) {
         // identityKey direkt mitschreiben, falls er aus den Feldern abgeleitet
         // wurde, aber im Alt-Export noch fehlte - sonst greift die Identitaets-
         // Zusammenfuehrung erst nach dem naechsten Versuch/Import.
-        h.jobs.push({ ...impJob, attempts: incoming, ...(impIKey ? { identityKey: impIKey } : {}) });
+        // Kernpunkte NICHT ungeprueft aus dem Backup uebernehmen, sondern gegen den
+        // eigenen jobText des Imports neu erden (s. regroundImportedKernpunkte) -
+        // sonst koennte ein korruptes/editiertes Backup falsche Fakten unterschieben.
+        h.jobs.push({
+          ...impJob,
+          attempts: incoming,
+          kernpunkte: regroundImportedKernpunkte(impJob),
+          ...(impIKey ? { identityKey: impIKey } : {}),
+        });
         newJobs++;
         newAttempts += incoming.length;
         return;
@@ -6273,6 +6569,13 @@ function importData(text) {
       if (impJob.arbeitgeber && !existing.arbeitgeber) existing.arbeitgeber = impJob.arbeitgeber;
       if (impJob.arbeitsort && !existing.arbeitsort) existing.arbeitsort = impJob.arbeitsort;
       if (impIKey && !existing.identityKey) existing.identityKey = impIKey;
+      // Kernpunkte aus dem Import additiv nachtragen, falls lokal noch keine
+      // vorhanden sind (analog Arbeitgeber/Ort). Beim Neuanlegen oben uebernimmt
+      // der Spread sie ohnehin.
+      if (impJob.kernpunkte && !existing.kernpunkte) {
+        const rk = regroundImportedKernpunkte(impJob);
+        if (rk) existing.kernpunkte = rk;
+      }
       // Vertiefungs-Themenfelder aus dem Import uebernehmen: fehlt lokal eins
       // oder ist das importierte neuer (generatedAt), das importierte behalten -
       // sonst geht eine schon bezahlte Ableitung beim Restore/Sync verloren.

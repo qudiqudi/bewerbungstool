@@ -6,6 +6,19 @@
 // WICHTIG (Dual-Maintenance, Plan A.3.1): Ändert sich ein Prompt in app.js, MUSS er
 // hier mitgezogen werden. Vor Go-Live mit dem Golden-Set gegen den App-Pfad prüfen (A.6).
 
+// Ein einzelner Kernpunkt: knapper text plus woertliches Beleg-Zitat aus dem
+// Anzeigentext. Identisch zu KERNPUNKT_ITEM_SCHEMA in app.js; der beleg ist die
+// Grundlage der Grounding-Pruefung in normalizeKernpunkte (app.js).
+const KERNPUNKT_ITEM_SCHEMA = {
+  type: "object",
+  properties: {
+    text: { type: "string", description: "Der knappe Kernpunkt" },
+    beleg: { type: "string", description: "Woertliches, exakt aus dem Anzeigentext kopiertes Zitat, das den Punkt stuetzt" },
+  },
+  required: ["text", "beleg"],
+  additionalProperties: false,
+};
+
 export const QUESTIONS_SCHEMA = {
   type: "object",
   properties: {
@@ -62,8 +75,41 @@ export const QUESTIONS_SCHEMA = {
         additionalProperties: false,
       },
     },
+    kernpunkte: {
+      type: "object",
+      description:
+        "Die wichtigsten Kernpunkte der Stelle, ausschliesslich aus dem Anzeigentext " +
+        "extrahiert. Nichts erfinden: was nicht im Text steht, bleibt leer. Zu JEDEM " +
+        "Kernpunkt gehoert ein beleg = ein woertliches, exakt aus dem Anzeigentext " +
+        "kopiertes Zitat, das den Punkt stuetzt. Gibt es kein solches Zitat, bleibt die " +
+        "Kategorie leer (leeres Array bzw. text und beleg leer).",
+      properties: {
+        aufgaben: {
+          type: "array",
+          items: KERNPUNKT_ITEM_SCHEMA,
+          description: "Wichtigste Aufgaben/Taetigkeiten, je ein knapper Punkt mit Beleg-Zitat; leer wenn nicht genannt",
+        },
+        anforderungen_muss: {
+          type: "array",
+          items: KERNPUNKT_ITEM_SCHEMA,
+          description: "Zwingende Anforderungen / Muss-Skills mit Beleg-Zitat; leer wenn nicht genannt",
+        },
+        anforderungen_optional: {
+          type: "array",
+          items: KERNPUNKT_ITEM_SCHEMA,
+          description: "Nice-to-have / wuenschenswerte Anforderungen mit Beleg-Zitat; leer wenn nicht genannt",
+        },
+        besonderheiten: {
+          type: "array",
+          items: KERNPUNKT_ITEM_SCHEMA,
+          description: "Sonstige relevante Besonderheiten der Stelle mit Beleg-Zitat; leer wenn nicht genannt",
+        },
+      },
+      required: ["aufgaben", "anforderungen_muss", "anforderungen_optional", "besonderheiten"],
+      additionalProperties: false,
+    },
   },
-  required: ["titel", "arbeitgeber", "arbeitsort", "empfohlene_zeit_minuten", "fragen"],
+  required: ["titel", "arbeitgeber", "arbeitsort", "empfohlene_zeit_minuten", "fragen", "kernpunkte"],
   additionalProperties: false,
 };
 
@@ -144,7 +190,17 @@ export function buildQuizMessages({ jobText, numQuestions, difficulty, vertiefun
     "Nenne nur real existierende Quellen (Gesetze, Normen, Standardwerke, offizielle Dokumentation, etablierte Fachseiten). " +
     "Gib die URL einer Quelle nur an, wenn du dir sicher bist, dass sie existiert - bevorzugt Startseiten oder bekannte, " +
     "stabile Adressen, keine tief verschachtelten Links. Sonst lasse die URL leer und waehle einen praegnanten Titel, " +
-    "der sich gut als Suchbegriff eignet. ";
+    "der sich gut als Suchbegriff eignet. " +
+    "Extrahiere zusätzlich die wichtigsten Kernpunkte der Stelle (Aufgaben, zwingende und optionale Anforderungen, " +
+    "Besonderheiten) ausschliesslich aus dem Anzeigentext. Erfinde nichts und leite " +
+    "nichts her - was nicht ausdrücklich im Text steht, lässt du leer (leerer String bzw. leeres Array). Formuliere " +
+    "jeden Punkt knapp. Zu JEDEM Kernpunkt gehört ein beleg = ein WÖRTLICHES, exakt " +
+    "aus dem Anzeigentext kopiertes Zitat (kein paraphrasiertes), das die Aussage stützt. Nimm einen Kernpunkt NUR " +
+    "auf, wenn es ein solches wörtliches Zitat im Text gibt; sonst lass die Kategorie leer. Anforderungen " +
+    "nur bei wörtlicher Deckung. Beziehe dich AUSSCHLIESSLICH auf DIESE eine ausgeschriebene Stelle: " +
+    "verwende KEINE Angaben aus Navigation, Cookie-/Footer-Hinweisen, Werbeblöcken oder Teasern für ANDERE bzw. " +
+    "ähnliche Stellen, die im Seitentext mitkopiert sein können - auch wenn dort etwa ein Gehalt oder Benefit steht. " +
+    "Im Zweifel die Kategorie leer lassen. ";
 
   // Hosted nutzt starke Cloud-Modelle -> Reihenfolge-Aufgaben werden hier (anders
   // als im App-local-Pfad) NICHT unterdrueckt.
