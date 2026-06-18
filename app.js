@@ -5082,17 +5082,20 @@ function saveAttempt(result, durationMs, evalCost, evalTokens) {
     // Kernpunkte NICHT loeschen - der Guard laesst sie unberuehrt. Versionswrapper
     // wie bei themenfelder, erleichtert spaetere Migrationen.
     if (quiz.kernpunkte && typeof quiz.kernpunkte === "object") {
-      // Bewusst KEINE Mutation von job.jobText oder job.key: das wuerde die
-      // Job-Identitaet (Text-Hash) veraendern und koennte mit dem key einer
-      // ANDEREN Stelle kollidieren - deleteJob filtert per key und wuerde dann
-      // beide Stellen loeschen (Datenverlust). Die Kernpunkte werden einfach als
-      // jeweils NEUESTE Extraktion abgelegt (bei jedem normalen Test ueberschrieben)
-      // und immer angezeigt. srcKey haelt nur zur Nachvollziehbarkeit fest, aus
-      // welcher Anzeige sie stammen - er ist KEIN Render-Gate (sonst koennten sie
-      // wegen eines bei Merge veralteten job.jobText dauerhaft verborgen werden).
-      let srcKey = null;
-      try { srcKey = jobKey(quiz.jobText); } catch { /* egal */ }
-      job.kernpunkte = { v: 1, generatedAt: Date.now(), srcKey, data: quiz.kernpunkte };
+      // Kernpunkte NUR schreiben, wenn dieser Test aus DERSELBEN Anzeige stammt wie
+      // die gespeicherte Stelle: jobKey(quiz.jobText) === job.key. Dann passen die
+      // angezeigten Kernpunkte immer zum job.jobText, aus dem auch Folge-Tests
+      // erzeugt werden (Anzeige und Wiederholung konsistent) - OHNE die mutable,
+      // text-hash-basierte Job-Identitaet anzufassen (kein key-Kollisions-/Loesch-
+      // Risiko). Bei einem identityKey-Merge mit abweichendem Text (andere oder
+      // aktualisierte Anzeige) bleiben die bestehenden, zum job.jobText passenden
+      // Kernpunkte unveraendert, statt fremde Fakten unterzuschieben. job.key wird
+      // nicht mehr mutiert, daher gilt weiterhin job.key === jobKey(job.jobText).
+      let curKey = null;
+      try { curKey = jobKey(quiz.jobText); } catch { /* egal */ }
+      if (curKey && curKey === job.key) {
+        job.kernpunkte = { v: 1, generatedAt: Date.now(), srcKey: curKey, data: quiz.kernpunkte };
+      }
     }
   }
   // identityKey aus den aktuellen Feldern der Stelle ableiten (nicht aus dem
