@@ -54,18 +54,27 @@ export class BudgetDO {
     // ABER offene Reservierungen NICHT verwerfen: ein Stream, der ueber Mitternacht
     // laeuft, muss seine Reserve behalten, sonst findet sein settle die Reservierung
     // nicht mehr und der echte usage.cost ginge verloren — und der In-flight-Zaehler
-    // wuerde mitten im Stream auf 0 gesetzt (kurzzeitige Ueber-Concurrency). Deshalb
-    // perSubject/perIp NICHT leeren, sondern aus den ueberlebenden Reserven NEU AUFBAUEN:
-    // settle/release/reconcile buchen spaeter r.amount bzw. 1 wieder ab — leerten wir die
-    // Buckets, ginge der Pro-Subjekt-/Pro-IP-Anteil dieses Calls am neuen Tag still
-    // verloren (Math.max-Clamp auf 0). dayReserved konsistent als Summe der offenen
-    // Reserven; inflight bleibt unveraendert.
+    // wuerde mitten im Stream auf 0 gesetzt (kurzzeitige Ueber-Concurrency).
+    //
+    // perSubject und dayReserved werden von settle/release/reconcile spaeter wieder
+    // abgebucht (Netto: settle +cost, release 0, reconcile +est). Deshalb sie NICHT
+    // leeren, sondern aus den ueberlebenden Reserven NEU AUFBAUEN — sonst clampt die
+    // spaetere Abbuchung gegen den genullten Bucket auf 0 und der Pro-Subjekt-Anteil
+    // dieses Calls ginge am neuen Tag still verloren.
+    //
+    // perIp ist ANDERS: ein Pro-Tag-Nutzungszaehler, den NUR release (Vor-Generierungs-
+    // Fehler) dekrementiert; settle/reconcile lassen ihn stehen, weil ein erfolgreicher
+    // Call dauerhaft gegen das Tageslimit zaehlen soll. Wuerden wir ihn aus den
+    // ueberlebenden Reserven neu aufbauen, bliebe der Eintrag nach dem settle den
+    // ganzen neuen Tag stehen (settle entfernt ihn nicht) — der ueber Mitternacht
+    // laufende Call zaehlte dann gegen alten UND neuen Tag und koennte das Pro-IP-
+    // Tageslimit faelschlich erschoepfen. Also bewusst leeren: das spaetere release
+    // dekrementiert dann gegen 0 (Math.max-Clamp, harmloser No-op).
     this.perSubject = {};
     this.perIp = {};
     this.dayReserved = 0;
     for (const r of Object.values(this.reservations)) {
       this.perSubject[r.subject] = (this.perSubject[r.subject] || 0) + r.amount;
-      this.perIp[r.ip] = (this.perIp[r.ip] || 0) + 1;
       this.dayReserved += r.amount;
     }
   }
