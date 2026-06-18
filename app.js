@@ -1016,6 +1016,29 @@ function mainAdSegment(text) {
   return s;
 }
 
+// Bereinigt einen Kernpunkt-String fuer die ANZEIGE (nicht fuer die Belegpruefung):
+// entfernt eine fuehrende Listen-/Aufzaehlungsmarkierung (Spiegelstrich, Bullet,
+// Sternchen, "1." / "1)") samt folgendem Whitespace und kollabiert interne
+// Whitespace-/Zeilenumbruch-Laeufe zu einem Leerzeichen. Bewusst konservativ:
+// nur eine Markierung GANZ AM ANFANG, die von Whitespace gefolgt wird, wird
+// entfernt - Bindestriche INNERHALB eines Worts (z. B. "5-Tage-Woche",
+// "Nice-to-have", "m/w/d") bleiben unberuehrt. Mehrfach angewandt, damit auch
+// kombinierte Marker ("- • Text") sauber wegfallen.
+function cleanKernpunktText(s) {
+  let out = String(s == null ? "" : s).replace(/\s+/g, " ").trim();
+  // Solange am Anfang ein Marker + Whitespace (oder Marker am Stringende) steht,
+  // diesen abtrennen. Marker: Spiegelstriche/Bullets/Sternchen oder ein
+  // Enumerator wie "1." / "1)". Der nachfolgende Whitespace ist Pflicht, damit
+  // Wort-interne Bindestriche nicht getroffen werden.
+  const marker = /^(?:[-–—•·*▪◦‣]|\d+[.)])(?:\s+|$)/;
+  let prev;
+  do {
+    prev = out;
+    out = out.replace(marker, "").trim();
+  } while (out !== prev && out.length);
+  return out;
+}
+
 function normalizeKernpunkte(k, jobText) {
   if (!k || typeof k !== "object") return null;
   const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
@@ -1046,7 +1069,9 @@ function normalizeKernpunkte(k, jobText) {
     // so die Aussage verfaelschen. Zu lange Belege werden verworfen (kein Card),
     // nie gekuerzt. Angezeigt wird das vollstaendige, verifizierte Zitat.
     if (nb.length < 8 || nb.length > 240 || !hay.includes(nb)) return "";
-    return beleg;
+    // Verifiziert wird gegen den ROHEN Beleg (der Marker steht echt im Quelltext),
+    // angezeigt/gespeichert wird die bereinigte Fassung ohne Listen-Marker.
+    return cleanKernpunktText(beleg);
   };
   const verArr = (v) =>
     (Array.isArray(v) ? v.map(verified).filter(Boolean) : []);
@@ -1059,18 +1084,45 @@ function normalizeKernpunkte(k, jobText) {
   // entfernt; uebrig bleiben die beschreibenden Highlights (Aufgaben,
   // Anforderungen, Besonderheiten), die im Panel zudem als "bitte im Original
   // pruefen" gerahmt sind. normalizeKernpunkte haelt nur diese vier Kategorien.
-  const out = {
+  const out = dedupeKernpunkte({
     aufgaben: verArr(k.aufgaben),
     anforderungen_muss: verArr(k.anforderungen_muss),
     anforderungen_optional: verArr(k.anforderungen_optional),
     besonderheiten: verArr(k.besonderheiten),
-  };
+  });
   const hasAny =
     out.aufgaben.length ||
     out.anforderungen_muss.length ||
     out.anforderungen_optional.length ||
     out.besonderheiten.length;
   return hasAny ? out : null;
+}
+
+// Entfernt Dubletten aus den vier Kernpunkt-Kategorien. Modelle wiederholen
+// denselben Punkt gern mehrfach und listen ihn zusaetzlich unter mehreren
+// Kategorien (z. B. dasselbe Zitat unter Aufgaben UND Muss-Anforderung). Es wird
+// in der festen Reihenfolge aufgaben -> anforderungen_muss ->
+// anforderungen_optional -> besonderheiten dedupliziert; das ERSTE Vorkommen
+// gewinnt, spaetere identische Eintraege (bereinigt + normalisiert verglichen)
+// fallen raus. Die Eingabe-Reihenfolge bleibt sonst erhalten. Die Strings selbst
+// werden unveraendert uebernommen (bereits bereinigt aus cleanKernpunktText).
+const KERNPUNKT_CATEGORIES = ["aufgaben", "anforderungen_muss", "anforderungen_optional", "besonderheiten"];
+function dedupeKernpunkte(obj) {
+  const o = obj && typeof obj === "object" ? obj : {};
+  const seen = new Set();
+  const result = {};
+  KERNPUNKT_CATEGORIES.forEach((cat) => {
+    const arr = Array.isArray(o[cat]) ? o[cat] : [];
+    const kept = [];
+    arr.forEach((item) => {
+      const key = String(item == null ? "" : item).toLowerCase().replace(/\s+/g, " ").trim();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      kept.push(item);
+    });
+    result[cat] = kept;
+  });
+  return result;
 }
 
 // Importierte Kernpunkte (aus einem Backup) erneut erden: nur die erlaubten,
@@ -1083,17 +1135,21 @@ function regroundKernpunkteData(data, jobText) {
   const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
   const hay = norm(mainAdSegment(jobText));
   if (!hay) return null;
+  // Gegen den ROHEN (getrimmten) String pruefen - ein importierter Eintrag kann
+  // noch den Listen-Marker aus dem Original enthalten und muss sich so im
+  // Anzeigentext belegen lassen. Erst nach bestandener Pruefung bereinigen.
   const keep = (arr) =>
     (Array.isArray(arr) ? arr : [])
       .filter((x) => typeof x === "string")
       .map((x) => x.trim())
-      .filter((x) => { const n = norm(x); return n.length >= 8 && n.length <= 240 && hay.includes(n); });
-  const out = {
+      .filter((x) => { const n = norm(x); return n.length >= 8 && n.length <= 240 && hay.includes(n); })
+      .map((x) => cleanKernpunktText(x));
+  const out = dedupeKernpunkte({
     aufgaben: keep(data.aufgaben),
     anforderungen_muss: keep(data.anforderungen_muss),
     anforderungen_optional: keep(data.anforderungen_optional),
     besonderheiten: keep(data.besonderheiten),
-  };
+  });
   return (out.aufgaben.length || out.anforderungen_muss.length ||
     out.anforderungen_optional.length || out.besonderheiten.length) ? out : null;
 }
@@ -5544,8 +5600,19 @@ function buildKernpunktePanel(job) {
   // Kein Abgleich gegen job.jobText/job.key: ein solches Render-Gate konnte frisch
   // erzeugte Kernpunkte nach einem Merge dauerhaft verbergen, und das noetige
   // Mutieren der Job-Identitaet barg Kollisions-/Loesch-Risiken.
-  const kp = job && job.kernpunkte && job.kernpunkte.data ? job.kernpunkte.data : null;
-  if (!kp) return null;
+  const rawKp = job && job.kernpunkte && job.kernpunkte.data ? job.kernpunkte.data : null;
+  if (!rawKp) return null;
+  // Bereits gespeicherte Eintraege koennen noch fuehrende Listen-Marker und
+  // Dubletten enthalten (aus aelteren Versionen). Beim Rendern dieselbe Bereinigung
+  // und Deduplizierung anwenden wie bei frischer Extraktion - rein zur Anzeige, der
+  // gespeicherte Datenbestand bleibt unveraendert. Dedup laeuft VOR dem
+  // KERNPUNKTE_LIST_MAX-Cap, damit die Kappung eindeutige Eintraege zaehlt.
+  const kp = dedupeKernpunkte({
+    aufgaben: (Array.isArray(rawKp.aufgaben) ? rawKp.aufgaben : []).map(cleanKernpunktText).filter(Boolean),
+    anforderungen_muss: (Array.isArray(rawKp.anforderungen_muss) ? rawKp.anforderungen_muss : []).map(cleanKernpunktText).filter(Boolean),
+    anforderungen_optional: (Array.isArray(rawKp.anforderungen_optional) ? rawKp.anforderungen_optional : []).map(cleanKernpunktText).filter(Boolean),
+    besonderheiten: (Array.isArray(rawKp.besonderheiten) ? rawKp.besonderheiten : []).map(cleanKernpunktText).filter(Boolean),
+  });
   // Bewusst nur beschreibende Highlights - Gehalt/Benefits/Arbeitsmodell werden
   // nicht als Fakten angezeigt (Teaser-/Fehl-Info-Risiko, s. normalizeKernpunkte).
   // Alle vier Kategorien sind String-Listen und werden gleich (als ul) gerendert.
