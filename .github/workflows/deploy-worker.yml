@@ -1,0 +1,58 @@
+name: Deploy Worker zu Cloudflare
+
+# Pendant zum GitHub-Pages-Deploy (deploy.yml), aber fuer den Hosted-Worker
+# (worker/). Laeuft NUR, wenn sich etwas unter worker/ aendert - ein reiner
+# Frontend-Commit deployt den Worker also nicht erneut.
+#
+# Voraussetzung (einmalig): Repo-Secret CLOUDFLARE_API_TOKEN mit einem Token,
+# der Workers-Skripte bearbeiten darf (Cloudflare-Vorlage "Edit Cloudflare
+# Workers"). Optional CLOUDFLARE_ACCOUNT_ID, falls der Token mehrere Accounts
+# umfasst. Laufzeit-Secrets des Workers (OPENROUTER_KEY, TURNSTILE_SECRET) bleiben
+# davon unberuehrt - `wrangler deploy` fasst sie nicht an.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "worker/**"
+      - ".github/workflows/deploy-worker.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Deploys nicht parallel laufen lassen; einen laufenden NICHT abbrechen.
+concurrency:
+  group: worker-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Worker-Syntax pruefen
+        working-directory: worker
+        run: for f in src/*.js; do node --check "$f"; done
+
+      - name: Abhaengigkeiten installieren
+        working-directory: worker
+        run: npm ci
+
+      # Bei einem Account-scoped Token (Cloudflare-Vorlage "Edit Cloudflare
+      # Workers") leitet Wrangler den Account selbst ab. Umfasst der Token mehrere
+      # Accounts und der Deploy bricht mit "more than one account" ab: Secret
+      # CLOUDFLARE_ACCOUNT_ID setzen und hier als env ergaenzen
+      # (CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}).
+      - name: Deploy via Wrangler
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          workingDirectory: worker
