@@ -1075,42 +1075,68 @@ function normalizeKernpunkte(k, jobText) {
   };
   const verArr = (v) =>
     (Array.isArray(v) ? v.map(verified).filter(Boolean) : []);
-  // Kategorie-Plausibilitaet fuer die hochsensiblen, FAKTISCHEN Felder Gehalt und
-  // Arbeitsmodell: das verifizierte Zitat muss kategorietypische Begriffe
-  // enthalten. Die Erdung beweist nur, dass der Text aus der Anzeige stammt - nicht,
-  // dass er zur Kategorie gehoert. So wird ein reales, aber falsch einsortiertes
-  // Zitat (z. B. "Vollzeit" unter Gehalt) unter diesen Labels verhindert. Die
-  // offenen Kategorien (Aufgaben, Anforderungen, Benefits, Besonderheiten) sind zu
-  // vielfaeltig fuer eine zuverlaessige Stichwortpruefung und stuetzen sich auf
-  // Erdung + Prompt.
-  const CAT = {
-    gehalt: /(€|\beur\b|euro|gehalt|verg[üu]tung|entgelt|\blohn\b|brutto|netto|jahresgehalt|tarif|bezahlung|verdienst|\d[\d.,]*\s*(€|eur|euro|tsd|k\b))/i,
-    arbeitsmodell: /(vollzeit|teilzeit|remote|home\s*-?\s*office|hybrid|schicht|gleitzeit|(un)?befristet|wochenstunden|arbeitszeit|\d+\s*(std|stunden|h\b))/i,
-  };
-  const verifiedCat = (item, cat) => {
-    const v = verified(item);
-    if (!v) return "";
-    const pat = CAT[cat];
-    return pat && !pat.test(v) ? "" : v;
-  };
+  // BEWUSST entschaerft: die praezisen, faktischen und besonders fehl-info-
+  // anfaelligen Felder Gehalt, Benefits und Arbeitsmodell werden NICHT mehr
+  // uebernommen/angezeigt. Grund: eine robuste Trennung der eigentlichen Anzeige
+  // von Teasern/Seiten-Chrome ist auf gescrapten Portalseiten deterministisch
+  // nicht garantierbar - ein fremdes Gehalt/Remote/Benefit koennte sonst als Fakt
+  // DIESER Stelle erscheinen. Es bleiben beschreibende Highlights (Aufgaben,
+  // Anforderungen, Besonderheiten), die im Panel zudem als "bitte im Original
+  // pruefen" gerahmt sind. Schema/Prompt fordern die Felder noch an; sie werden
+  // hier verworfen (kein Speichern/Anzeigen).
   const out = {
     aufgaben: verArr(k.aufgaben),
     anforderungen_muss: verArr(k.anforderungen_muss),
     anforderungen_optional: verArr(k.anforderungen_optional),
-    arbeitsmodell: verifiedCat(k.arbeitsmodell, "arbeitsmodell"),
-    gehalt: verifiedCat(k.gehalt, "gehalt"),
-    benefits: verArr(k.benefits),
     besonderheiten: verArr(k.besonderheiten),
   };
   const hasAny =
     out.aufgaben.length ||
     out.anforderungen_muss.length ||
     out.anforderungen_optional.length ||
-    out.arbeitsmodell ||
-    out.gehalt ||
-    out.benefits.length ||
     out.besonderheiten.length;
   return hasAny ? out : null;
+}
+
+// Importierte Kernpunkte (aus einem Backup) erneut erden: nur die erlaubten,
+// beschreibenden Kategorien als String-Arrays uebernehmen und jeden Eintrag gegen
+// den Haupt-Anzeigentext DIESES Jobs pruefen. So koennen ein korruptes/editiertes
+// Backup keine ungeprueften (z. B. falschen Gehalts-)Fakten unterschieben - dieselbe
+// Erdung wie beim Generieren. Gibt das bereinigte data-Objekt zurueck oder null.
+function regroundKernpunkteData(data, jobText) {
+  if (!data || typeof data !== "object") return null;
+  const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+  const hay = norm(mainAdSegment(jobText));
+  if (!hay) return null;
+  const keep = (arr) =>
+    (Array.isArray(arr) ? arr : [])
+      .filter((x) => typeof x === "string")
+      .map((x) => x.trim())
+      .filter((x) => { const n = norm(x); return n.length >= 8 && n.length <= 240 && hay.includes(n); });
+  const out = {
+    aufgaben: keep(data.aufgaben),
+    anforderungen_muss: keep(data.anforderungen_muss),
+    anforderungen_optional: keep(data.anforderungen_optional),
+    besonderheiten: keep(data.besonderheiten),
+  };
+  return (out.aufgaben.length || out.anforderungen_muss.length ||
+    out.anforderungen_optional.length || out.besonderheiten.length) ? out : null;
+}
+
+// Importierte Kernpunkte eines Jobs erneut erden (gegen dessen eigenen jobText)
+// und in einen sauberen Versionswrapper packen; undefined, wenn nichts uebrig
+// bleibt. So unterschiebt ein korruptes/editiertes Backup keine ungeprueften Fakten.
+function regroundImportedKernpunkte(impJob) {
+  const kp = impJob && impJob.kernpunkte;
+  if (!kp || typeof kp !== "object") return undefined;
+  const data = regroundKernpunkteData(kp.data, impJob.jobText);
+  if (!data) return undefined;
+  return {
+    v: 1,
+    generatedAt: Number.isFinite(Number(kp.generatedAt)) ? Number(kp.generatedAt) : Date.now(),
+    srcKey: typeof kp.srcKey === "string" ? kp.srcKey : null,
+    data,
+  };
 }
 
 function normalizeQuizData(result, jobText = "") {
@@ -5545,13 +5571,12 @@ function buildKernpunktePanel(job) {
   // Mutieren der Job-Identitaet barg Kollisions-/Loesch-Risiken.
   const kp = job && job.kernpunkte && job.kernpunkte.data ? job.kernpunkte.data : null;
   if (!kp) return null;
+  // Bewusst nur beschreibende Highlights - Gehalt/Benefits/Arbeitsmodell werden
+  // nicht als Fakten angezeigt (Teaser-/Fehl-Info-Risiko, s. normalizeKernpunkte).
   const sections = [
     { key: "aufgaben", label: "Aufgaben", type: "list" },
     { key: "anforderungen_muss", label: "Muss-Anforderungen", type: "list" },
     { key: "anforderungen_optional", label: "Nice-to-have", type: "list" },
-    { key: "arbeitsmodell", label: "Arbeitsmodell", type: "text" },
-    { key: "gehalt", label: "Gehalt", type: "text" },
-    { key: "benefits", label: "Benefits", type: "chips" },
     { key: "besonderheiten", label: "Besonderheiten", type: "list" },
   ];
   const present = sections.filter((s) => {
@@ -5567,6 +5592,11 @@ function buildKernpunktePanel(job) {
   const heading = document.createElement("h3");
   heading.textContent = "Das Wichtigste auf einen Blick";
   panel.appendChild(heading);
+
+  const hint = document.createElement("p");
+  hint.className = "kernpunkte-hint hint";
+  hint.textContent = "Automatisch aus der Anzeige extrahiert - bitte im Original prüfen.";
+  panel.appendChild(hint);
 
   const grid = document.createElement("div");
   grid.className = "kernpunkte-grid";
@@ -6563,7 +6593,15 @@ function importData(text) {
         // identityKey direkt mitschreiben, falls er aus den Feldern abgeleitet
         // wurde, aber im Alt-Export noch fehlte - sonst greift die Identitaets-
         // Zusammenfuehrung erst nach dem naechsten Versuch/Import.
-        h.jobs.push({ ...impJob, attempts: incoming, ...(impIKey ? { identityKey: impIKey } : {}) });
+        // Kernpunkte NICHT ungeprueft aus dem Backup uebernehmen, sondern gegen den
+        // eigenen jobText des Imports neu erden (s. regroundImportedKernpunkte) -
+        // sonst koennte ein korruptes/editiertes Backup falsche Fakten unterschieben.
+        h.jobs.push({
+          ...impJob,
+          attempts: incoming,
+          kernpunkte: regroundImportedKernpunkte(impJob),
+          ...(impIKey ? { identityKey: impIKey } : {}),
+        });
         newJobs++;
         newAttempts += incoming.length;
         return;
@@ -6580,7 +6618,10 @@ function importData(text) {
       // Kernpunkte aus dem Import additiv nachtragen, falls lokal noch keine
       // vorhanden sind (analog Arbeitgeber/Ort). Beim Neuanlegen oben uebernimmt
       // der Spread sie ohnehin.
-      if (impJob.kernpunkte && !existing.kernpunkte) existing.kernpunkte = impJob.kernpunkte;
+      if (impJob.kernpunkte && !existing.kernpunkte) {
+        const rk = regroundImportedKernpunkte(impJob);
+        if (rk) existing.kernpunkte = rk;
+      }
       // Vertiefungs-Themenfelder aus dem Import uebernehmen: fehlt lokal eins
       // oder ist das importierte neuer (generatedAt), das importierte behalten -
       // sonst geht eine schon bezahlte Ableitung beim Restore/Sync verloren.
