@@ -81,11 +81,29 @@ function checkQuiz(d, want) {
   if (d.fragen.length !== want) issues.push(`fragen=${d.fragen.length}, erwartet ${want}`);
   d.fragen.forEach((f, i) => {
     if (!f.frage) issues.push(`#${i}: leere frage`);
-    if (!["multiple_choice", "offen"].includes(f.typ)) issues.push(`#${i}: typ ${f.typ}`);
+    if (!["multiple_choice", "offen", "reihenfolge"].includes(f.typ)) issues.push(`#${i}: typ ${f.typ}`);
     if (!["leicht", "mittel", "schwer"].includes(f.schwierigkeit)) issues.push(`#${i}: schwierigkeit ${f.schwierigkeit}`);
     if (f.typ === "multiple_choice") {
-      if (!Array.isArray(f.optionen) || f.optionen.length < 2) issues.push(`#${i}: <2 optionen`);
-      else if (!f.optionen.includes(f.korrekte_antwort)) issues.push(`#${i}: korrekte_antwort nicht in optionen`);
+      if (!Array.isArray(f.optionen) || f.optionen.length < 2) { issues.push(`#${i}: <2 optionen`); return; }
+      // korrekte_indizes ist die Wahrheitsquelle (seit Mehrfach-MC): der Client
+      // (normalizeQuizData) richtet korrekte_antwort daran aus. Brauchbar ist die
+      // Frage, solange ENTWEDER gueltige Indizes ODER korrekte_antwort in optionen
+      // vorliegt - sonst kann die App keine richtige Antwort markieren.
+      const idx = Array.isArray(f.korrekte_indizes)
+        ? f.korrekte_indizes.filter((n) => Number.isInteger(n) && n >= 0 && n < f.optionen.length)
+        : [];
+      if (!idx.length && !f.optionen.includes(f.korrekte_antwort)) {
+        issues.push(`#${i}: weder gueltige korrekte_indizes noch korrekte_antwort in optionen`);
+      }
+    } else if (f.typ === "reihenfolge") {
+      // Brauchbar nur als echte Permutation der elemente-Indizes (>= 2 Elemente).
+      const el = Array.isArray(f.elemente) ? f.elemente : [];
+      const ord = Array.isArray(f.korrekte_reihenfolge) ? f.korrekte_reihenfolge : [];
+      const istPermutation =
+        el.length >= 2 && ord.length === el.length &&
+        ord.every((x) => Number.isInteger(x) && x >= 0 && x < el.length) &&
+        new Set(ord).size === el.length;
+      if (!istPermutation) issues.push(`#${i}: reihenfolge ohne gueltige Permutation`);
     }
   });
   return issues;

@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.4.0";
+const APP_VERSION = "1.5.0";
 
 const CHANGELOG = [
+  {
+    version: "1.5.0",
+    date: "18.06.2026",
+    items: [
+      "Neuer Aufgabentyp: Reihenfolge-Aufgaben. Bei Abläufen und Prozessen bringst du jetzt Elemente per Ziehen am Griff oder über Hoch-/Runter-Pfeile in die richtige Reihenfolge – auch am Handy. Die Bewertung erfolgt automatisch mit Teilpunkten.",
+    ],
+  },
   {
     version: "1.4.0",
     date: "18.06.2026",
@@ -494,6 +501,13 @@ let current = 0;
 let mode = "lernen";  // "lernen" | "pruefung"
 let reviewing = false; // Durchgehen eines bereits bewerteten Fragebogens (keine erneute Auswertung)
 let revealed = [];    // Lernmodus: welche Fragen bereits aufgeloest wurden
+// Reihenfolge-Aufgaben: ephemere Anzeige-Reihenfolge je Frageindex (Map index ->
+// number[] der elemente-Indizes). NICHT persistiert (analog revealed). Beim
+// ersten Anzeigen einer Reihenfolge-Frage mit einer gemischten Startpermutation
+// gefuellt; bleibt ueber Re-Renders/Navigation in der Sitzung stabil. Die
+// Antwort-Absicht liegt getrennt in answers[i] und bleibt leer, bis der Nutzer
+// das erste Mal umsortiert.
+let sortDisplay = {};
 // Lokaler Lernmodus: lerninfo/quellen werden erst beim Aufloesen nachgeladen.
 // enrichingIdx = Index der Frage, die gerade angereichert wird (-1 = keine);
 // enrichTried merkt sich versuchte Indizes, damit ein Fehlschlag nicht in einer
@@ -660,7 +674,7 @@ const QUESTIONS_SCHEMA = {
         type: "object",
         properties: {
           id: { type: "integer" },
-          typ: { type: "string", enum: ["multiple_choice", "offen"] },
+          typ: { type: "string", enum: ["multiple_choice", "offen", "reihenfolge"] },
           kategorie: { type: "string", description: "z. B. Fachwissen, Soft Skills, Situativ" },
           schwierigkeit: {
             type: "string",
@@ -690,6 +704,16 @@ const QUESTIONS_SCHEMA = {
             items: { type: "string" },
             description: "Bei multiple_choice parallel zu optionen: je Option ein Satz, warum sie richtig oder falsch ist; bei offenen Fragen leeres Array",
           },
+          elemente: {
+            type: "array",
+            items: { type: "string" },
+            description: "Nur bei typ='reihenfolge': die zu ordnenden Elemente, bereits zufaellig gemischt (NICHT in korrekter Reihenfolge). Sonst leeres Array.",
+          },
+          korrekte_reihenfolge: {
+            type: "array",
+            items: { type: "integer" },
+            description: "Nur bei typ='reihenfolge': Permutation der Indizes von elemente. Erster Eintrag = Index des Elements, das an Position 1 gehoert. Sonst leeres Array.",
+          },
           lerninfo: {
             type: "string",
             description: "Lernrelevanter Hintergrund zum Thema der Frage, 2 bis 4 Saetze",
@@ -708,7 +732,7 @@ const QUESTIONS_SCHEMA = {
             description: "1 bis 3 real existierende Quellen zur Vertiefung",
           },
         },
-        required: ["id", "typ", "kategorie", "schwierigkeit", "frage", "optionen", "korrekte_antwort", "korrekte_indizes", "erklaerungen", "lerninfo", "quellen"],
+        required: ["id", "typ", "kategorie", "schwierigkeit", "frage", "optionen", "korrekte_antwort", "korrekte_indizes", "erklaerungen", "elemente", "korrekte_reihenfolge", "lerninfo", "quellen"],
         additionalProperties: false,
       },
     },
@@ -803,7 +827,7 @@ function normalizeQuizData(result) {
   if (!result || typeof result !== "object" || !Array.isArray(result.fragen)) {
     throw new Error("Die Modellantwort hatte nicht die erwartete Form (keine Fragenliste).");
   }
-  const validTyp = (t) => (t === "multiple_choice" || t === "offen" ? t : "offen");
+  const validTyp = (t) => (t === "multiple_choice" || t === "offen" || t === "reihenfolge" ? t : "offen");
   const validDiff = (d) => (d === "leicht" || d === "mittel" || d === "schwer" ? d : "");
   const fragen = [];
   result.fragen.forEach((q, i) => {
@@ -814,7 +838,6 @@ function normalizeQuizData(result) {
     let optionen = Array.isArray(q.optionen) ? q.optionen.filter((o) => typeof o === "string") : [];
     // Multiple-Choice ohne brauchbare Optionen ist nicht bedienbar -> offene Frage
     if (typ === "multiple_choice" && optionen.length < 2) { typ = "offen"; optionen = []; }
-
     // korrekte_indizes defensiv normalisieren: nur gueltige Optionsindizes,
     // ohne Duplikate. Additiv - alte Daten ohne das Feld bleiben [].
     let korrekte_antwort = typeof q.korrekte_antwort === "string" ? q.korrekte_antwort : "";
@@ -872,6 +895,29 @@ function normalizeQuizData(result) {
       }
     }
 
+    // Reihenfolge-Aufgabe: nur gueltig, wenn elemente + korrekte_reihenfolge
+    // eine echte Permutation bilden. Sonst auf offene Frage zurueckfallen
+    // (immer bedienbar). Felder werden unten IMMER mitgeschrieben (leer bei
+    // Nicht-Reihenfolge), damit das interne Quiz-Objekt formstabil ist.
+    let elemente = [];
+    let korrekte_reihenfolge = [];
+    if (typ === "reihenfolge") {
+      elemente = Array.isArray(q.elemente) ? q.elemente.filter((e) => typeof e === "string" && e.trim()) : [];
+      const roh = Array.isArray(q.korrekte_reihenfolge) ? q.korrekte_reihenfolge.map(Number) : [];
+      const istPermutation =
+        elemente.length >= 2 &&
+        roh.length === elemente.length &&
+        roh.every((x) => Number.isInteger(x) && x >= 0 && x < elemente.length) &&
+        new Set(roh).size === elemente.length;
+      if (istPermutation) {
+        korrekte_reihenfolge = roh;
+      } else {
+        typ = "offen";
+        elemente = [];
+        korrekte_reihenfolge = [];
+      }
+    }
+
     const quellen = Array.isArray(q.quellen)
       ? q.quellen
           .filter((s) => s && typeof s === "object")
@@ -898,6 +944,8 @@ function normalizeQuizData(result) {
       korrekte_antwort,
       korrekte_indizes,
       erklaerungen,
+      elemente,
+      korrekte_reihenfolge,
       lerninfo: typeof q.lerninfo === "string" ? q.lerninfo : "",
       quellen,
     });
@@ -941,6 +989,66 @@ function normalizeEvalData(result) {
       verbesserungen: strArr(g.verbesserungen),
     },
   };
+}
+
+/* ---------- Reihenfolge-Aufgaben: Helfer ---------- */
+
+// Liefert eine gemischte Startpermutation [0..n-1]. Fisher-Yates. Faengt den
+// Sonderfall ab, dass die zufaellige Mischung exakt der korrekten Reihenfolge
+// entspricht (waere als Startzustand unfair einfach): in dem Fall einmal
+// rotieren. correctOrder ist optional und dient nur diesem Abgleich.
+function shuffleOrder(n, correctOrder) {
+  const a = Array.from({ length: n }, (_, i) => i);
+  for (let i = n - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  if (n >= 2 && Array.isArray(correctOrder) && correctOrder.length === n) {
+    const gleich = a.every((x, i) => x === correctOrder[i]);
+    if (gleich) {
+      // rotieren, damit der Start nicht zufaellig schon die Loesung ist
+      a.push(a.shift());
+    }
+  }
+  return a;
+}
+
+// Parst eine gespeicherte Nutzerreihenfolge (JSON-Index-Array). Gibt nur eine
+// gueltige Permutation von 0..n-1 zurueck, sonst null (-> als unbeantwortet /
+// 0 Punkte behandeln, nie crashen).
+function parseOrder(str, n) {
+  try {
+    const a = JSON.parse(str);
+    if (
+      Array.isArray(a) &&
+      a.length === n &&
+      a.every((x) => Number.isInteger(x) && x >= 0 && x < n) &&
+      new Set(a).size === n
+    ) {
+      return a;
+    }
+  } catch {}
+  return null;
+}
+
+// Deterministisches Partial-Credit-Scoring fuer Reihenfolge-Aufgaben:
+// Kendall-Tau-basierter Anteil korrekt geordneter Paare (0..10, ganzzahlig).
+// Verzeiht kleine Verschiebungen, voll umgekehrt -> 0, exakt richtig -> 10.
+function scoreReihenfolge(userOrder, correctOrder) {
+  const n = correctOrder.length;
+  if (n < 2) return 10;
+  const rank = new Array(n);
+  correctOrder.forEach((el, pos) => { rank[el] = pos; });
+  let concordant = 0;
+  let total = 0;
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      total++;
+      if (rank[userOrder[i]] < rank[userOrder[j]]) concordant++;
+    }
+  }
+  const frac = total ? concordant / total : 1;
+  return Math.round(frac * 10);
 }
 
 /* ---------- LLM-Aufruf (Anthropic / OpenAI) ---------- */
@@ -2168,6 +2276,26 @@ async function generateQuiz(opts = {}) {
   actionRunning = true;
   showLoading("Fragenkatalog wird erstellt...");
   try {
+    // Reihenfolge-Aufgaben werden nur im NICHT-lokalen Pfad angeregt: kleine
+    // lokale Modelle liefern Permutationen oft inkonsistent (der Normalizer
+    // faengt das zwar ab, aber dann waeren es nutzlose Fragen). Im Hosted-
+    // Default baut ohnehin der Worker den Prompt (siehe worker/src/prompts.js).
+    const reihenfolgeHinweis = isLocal
+      ? ""
+      : "Wenn sich ein Thema natuerlich als Abfolge, Ablauf, Verfahren, Prozesskette, " +
+        "Rangfolge oder Hierarchie darstellen laesst (z. B. Schritte eines Vorgangs, " +
+        "Eskalationsstufen, Phasen eines Projekts), erstelle gelegentlich statt einer " +
+        "Multiple-Choice- oder offenen Frage eine Reihenfolge-Aufgabe (typ='reihenfolge'): " +
+        "Gib 3 bis 6 Elemente in 'elemente' an und in 'korrekte_reihenfolge' die Indizes " +
+        "dieser Elemente in der fachlich korrekten Reihenfolge. Hoechstens etwa jede " +
+        "sechste Frage soll eine Reihenfolge-Aufgabe sein, und nur wenn es fachlich " +
+        "wirklich eine eindeutige korrekte Reihenfolge gibt. Bei allen anderen Fragen " +
+        "bleiben 'elemente' und 'korrekte_reihenfolge' leere Arrays. ";
+
+    const reihenfolgeAntwort =
+      "Bei Reihenfolge-Aufgaben enthaelt korrekte_antwort die korrekte Reihenfolge als " +
+      "lesbaren Text (Elemente durch ' -> ' getrennt). ";
+
     const antwortHinweis = isLocal
       ? "Gib zu jeder Frage die korrekte Antwort an (bei Multiple-Choice den Wortlaut mindestens einer richtigen Option, " +
         "bei offenen Fragen eine knappe Musterantwort). Gib bei Multiple-Choice zusätzlich in korrekte_indizes alle " +
@@ -2180,6 +2308,7 @@ async function generateQuiz(opts = {}) {
         "Option (richtig wie falsch) eine kurze Erklärung, warum sie richtig oder falsch ist - bei mehreren richtigen " +
         "Optionen ist entsprechend jede davon als richtig zu begründen. Liefere ausserdem " +
         "einen lernrelevanten Hintergrund (lerninfo) sowie 1 bis 3 Quellen zur Vertiefung. " +
+        reihenfolgeAntwort +
         "Nenne nur real existierende Quellen (Gesetze, Normen, Standardwerke, offizielle Dokumentation, etablierte Fachseiten). " +
         "Gib die URL einer Quelle nur an, wenn du dir sicher bist, dass sie existiert - bevorzugt Startseiten oder bekannte, " +
         "stabile Adressen, keine tief verschachtelten Links. Sonst lasse die URL leer und waehle einen praegnanten Titel, " +
@@ -2218,6 +2347,7 @@ async function generateQuiz(opts = {}) {
       "und stelle nicht mehrfach dieselbe Frage in anderer Formulierung. " +
       "Mische Fachfragen, situative Fragen und Soft-Skill-Fragen. " +
       mcMix +
+      reihenfolgeHinweis +
       "Ordne jeder Frage eine Schwierigkeit zu: 'schwer' sind Fragen, wie sie im echten Auswahlverfahren " +
       "oder Vorstellungsgespräch für genau diese Stelle am wahrscheinlichsten gestellt werden - realistisch, " +
       "spezifisch und anspruchsvoll. 'mittel' sind solide Fachfragen, 'leicht' sind Grundlagen- und Einstiegsfragen. " +
@@ -2308,6 +2438,7 @@ function finalizeQuiz(result, ctx) {
   quiz.genTokens = ctx.genTokens ?? null;
   answers = new Array(quiz.fragen.length).fill("");
   revealed = new Array(quiz.fragen.length).fill(false);
+  sortDisplay = {};
   current = 0;
   reviewing = false;
   startTime = Date.now();
@@ -2622,9 +2753,10 @@ function renderResumeCard() {
 /* ---------- Timer (Prüfungsmodus) ---------- */
 
 function computeTimeLimitMin(q) {
-  // Faustregel als Absicherung: 1,5 min je Multiple-Choice, 4 min je offene Frage
+  // Faustregel als Absicherung: 1,5 min je Multiple-Choice, 4 min je offene
+  // Frage, 2 min je Reihenfolge-Aufgabe.
   const fallback = Math.ceil(
-    q.fragen.reduce((sum, f) => sum + (f.typ === "offen" ? 4 : 1.5), 0)
+    q.fragen.reduce((sum, f) => sum + (f.typ === "offen" ? 4 : f.typ === "reihenfolge" ? 2 : 1.5), 0)
   );
   const suggested = q.empfohlene_zeit_minuten;
   if (Number.isFinite(suggested) && suggested >= fallback * 0.5 && suggested <= fallback * 3) {
@@ -2802,7 +2934,11 @@ function renderQuestion() {
       }
       area.appendChild(btn);
     });
+  } else if (q.typ === "reihenfolge" && Array.isArray(q.elemente) && q.elemente.length >= 2) {
+    renderReihenfolge(q, area, locked, isRevealed);
   } else {
+    // Catch-all: offene Frage UND jeder unbekannte/zukuenftige typ -> Textarea,
+    // damit ein Versuch aus einer neueren Version nie crasht.
     const ta = document.createElement("textarea");
     ta.rows = 6;
     ta.placeholder = "Deine Antwort...";
@@ -2819,6 +2955,218 @@ function renderQuestion() {
   $("btn-prev").disabled = current === 0;
   $("btn-next").textContent =
     current === total - 1 ? (reviewing ? "Zur Auswertung" : "Auswerten") : "Weiter";
+}
+
+// Rendert eine Reihenfolge-Aufgabe in #answer-area: eine sortierbare Liste mit
+// Drag-Griff (Pointer Events) UND immer sichtbaren Hoch/Runter-Buttons als
+// gleichwertigem, barrierefreiem Pfad. Die Anzeige-Reihenfolge liegt aktiv in
+// sortDisplay[current]; answers[current] bleibt leer, bis der Nutzer das erste
+// Mal umsortiert. Im gesperrten Zustand (Review / aufgeloest) wird die finale
+// Nutzerreihenfolge aus answers[current] gezeigt (nicht neu gemischt).
+function renderReihenfolge(q, area, locked, isRevealed) {
+  const n = q.elemente.length;
+  const korrekt = Array.isArray(q.korrekte_reihenfolge) && q.korrekte_reihenfolge.length === n
+    ? q.korrekte_reihenfolge
+    : null;
+
+  // Aktuelle Anzeige-Reihenfolge bestimmen.
+  let order;
+  const gespeichert = parseOrder(answers[current] || "", n);
+  if (locked) {
+    // Gesperrt: gespeicherte Nutzerreihenfolge zeigen; unbeantwortet -> natuerlich.
+    order = gespeichert || Array.from({ length: n }, (_, i) => i);
+  } else {
+    // Aktiv: hat der Nutzer schon sortiert, diese Reihenfolge weiterfuehren;
+    // sonst die einmal gemischte ephemere Startreihenfolge aus sortDisplay.
+    if (gespeichert) {
+      order = gespeichert;
+      sortDisplay[current] = gespeichert.slice();
+    } else {
+      if (!Array.isArray(sortDisplay[current]) || sortDisplay[current].length !== n) {
+        sortDisplay[current] = shuffleOrder(n, korrekt);
+      }
+      order = sortDisplay[current];
+    }
+  }
+
+  const unbeantwortet = !gespeichert;
+
+  const ol = document.createElement("ol");
+  ol.className = "sortable";
+  if (locked) ol.classList.add("locked");
+
+  // aria-live-Region fuer Verschiebe-Ansagen (Screenreader)
+  const live = document.createElement("div");
+  live.className = "sort-live sr-only";
+  live.setAttribute("aria-live", "polite");
+
+  // Schreibt die aktuelle order nach answers (= beantwortet) und sortDisplay,
+  // und zeichnet die Frage neu. fokusIdx = Position, deren Button danach Fokus
+  // bekommen soll; fokusSel = Klasse des Buttons (".sort-up"/".sort-down").
+  const commit = (newOrder, fokusIdx, fokusSel) => {
+    sortDisplay[current] = newOrder.slice();
+    answers[current] = JSON.stringify(newOrder);
+    renderQuestion();
+    if (fokusIdx != null && fokusSel) {
+      const items = $("answer-area").querySelectorAll(".sort-item");
+      const li = items[fokusIdx];
+      if (li) {
+        const b = li.querySelector(fokusSel);
+        if (b && !b.disabled) b.focus();
+        else if (li.querySelector(".sort-grip")) li.querySelector(".sort-grip").focus();
+      }
+    }
+  };
+
+  order.forEach((elIdx, pos) => {
+    const li = document.createElement("li");
+    li.className = "sort-item";
+    li.dataset.idx = String(elIdx);
+
+    // Korrektheits-Markierung nur im aufgeloesten Lernmodus
+    if (isRevealed && korrekt && !unbeantwortet) {
+      if (korrekt[pos] === elIdx) li.classList.add("correct");
+      else li.classList.add("wrong");
+    }
+
+    const grip = document.createElement("button");
+    grip.type = "button";
+    grip.className = "sort-grip";
+    grip.setAttribute("aria-label", "Zum Verschieben ziehen");
+    grip.textContent = "≡"; // ≡
+    if (locked) grip.disabled = true;
+
+    const posEl = document.createElement("span");
+    posEl.className = "sort-pos";
+    posEl.textContent = `${pos + 1}.`;
+
+    const txt = document.createElement("span");
+    txt.className = "sort-text";
+    txt.textContent = q.elemente[elIdx] != null ? String(q.elemente[elIdx]) : "";
+
+    const moves = document.createElement("div");
+    moves.className = "sort-moves";
+
+    const up = document.createElement("button");
+    up.type = "button";
+    up.className = "sort-up";
+    up.setAttribute("aria-label", "Nach oben");
+    up.textContent = "▲"; // ▲
+    up.disabled = locked || pos === 0;
+    up.addEventListener("click", () => {
+      const o = order.slice();
+      [o[pos - 1], o[pos]] = [o[pos], o[pos - 1]];
+      live.textContent = `Element an Position ${pos}.`;
+      commit(o, pos - 1, ".sort-up");
+    });
+
+    const down = document.createElement("button");
+    down.type = "button";
+    down.className = "sort-down";
+    down.setAttribute("aria-label", "Nach unten");
+    down.textContent = "▼"; // ▼
+    down.disabled = locked || pos === n - 1;
+    down.addEventListener("click", () => {
+      const o = order.slice();
+      [o[pos + 1], o[pos]] = [o[pos], o[pos + 1]];
+      live.textContent = `Element an Position ${pos + 2}.`;
+      commit(o, pos + 1, ".sort-down");
+    });
+
+    moves.appendChild(up);
+    moves.appendChild(down);
+
+    li.appendChild(grip);
+    li.appendChild(posEl);
+    li.appendChild(txt);
+    li.appendChild(moves);
+    ol.appendChild(li);
+
+    if (!locked) attachSortDrag(grip, li, ol, order, commit);
+  });
+
+  area.appendChild(ol);
+  area.appendChild(live);
+
+  if (unbeantwortet && locked) {
+    const note = document.createElement("p");
+    note.className = "sort-note";
+    note.textContent = "Nicht beantwortet.";
+    area.appendChild(note);
+  }
+}
+
+// Pointer-Events-Drag am Griff. setPointerCapture macht das Ziehen robust, auch
+// wenn der Finger das Element verlaesst. Beim Ablegen wird die neue Reihenfolge
+// ueber commit() festgeschrieben. Nur am Griff aktiv (touch-action:none via
+// CSS), damit der Rest der Liste vertikal scrollbar bleibt.
+function attachSortDrag(grip, li, ol, order, commit) {
+  grip.addEventListener("pointerdown", (e) => {
+    if (e.button != null && e.button !== 0) return;
+    e.preventDefault();
+    const items = Array.from(ol.querySelectorAll(".sort-item"));
+    const startIdx = items.indexOf(li);
+    if (startIdx < 0) return;
+
+    const startY = e.clientY;
+    const liRect = li.getBoundingClientRect();
+    const liH = liRect.height;
+
+    // Platzhalter an der urspruenglichen Stelle
+    const placeholder = document.createElement("li");
+    placeholder.className = "sort-placeholder";
+    placeholder.style.height = `${liH}px`;
+
+    li.classList.add("dragging");
+    ol.classList.add("is-dragging");
+    li.parentNode.insertBefore(placeholder, li);
+
+    try { grip.setPointerCapture(e.pointerId); } catch {}
+
+    let targetIdx = startIdx;
+
+    const onMove = (ev) => {
+      const dy = ev.clientY - startY;
+      li.style.transform = `translateY(${dy}px)`;
+      // Einfuegeposition aus der Y-Mitte der uebrigen Items bestimmen
+      const others = Array.from(ol.querySelectorAll(".sort-item")).filter((x) => x !== li);
+      let idx = others.length;
+      for (let k = 0; k < others.length; k++) {
+        const r = others[k].getBoundingClientRect();
+        if (ev.clientY < r.top + r.height / 2) { idx = k; break; }
+      }
+      targetIdx = idx;
+      const ref = others[idx] || null;
+      ol.insertBefore(placeholder, ref);
+    };
+
+    const finish = () => {
+      grip.removeEventListener("pointermove", onMove);
+      grip.removeEventListener("pointerup", onUp);
+      grip.removeEventListener("pointercancel", onUp);
+      li.classList.remove("dragging");
+      ol.classList.remove("is-dragging");
+      li.style.transform = "";
+      try { grip.releasePointerCapture(e.pointerId); } catch {}
+
+      const o = order.slice();
+      const [moved] = o.splice(startIdx, 1);
+      let insertAt = targetIdx;
+      if (insertAt > startIdx) insertAt -= 1; // Korrektur, weil moved entfernt wurde
+      if (insertAt < 0) insertAt = 0;
+      if (insertAt > o.length) insertAt = o.length;
+      o.splice(insertAt, 0, moved);
+      // Auch ohne Positionsaenderung als Interaktion werten (Nutzer hat bewusst
+      // gegriffen) - konsistent zu den Hoch/Runter-Buttons.
+      commit(o, null, null);
+    };
+
+    const onUp = () => finish();
+
+    grip.addEventListener("pointermove", onMove);
+    grip.addEventListener("pointerup", onUp);
+    grip.addEventListener("pointercancel", onUp);
+  });
 }
 
 // Quelle als klickbarer Link: direkte URL, wenn das Modell sich sicher war,
@@ -2874,18 +3222,41 @@ function renderLearnArea(q, isRevealed) {
   const box = document.createElement("div");
   box.className = "learn-box";
 
-  const correct = mcCorrectIndices(q);
-  const answerLine = document.createElement("p");
-  answerLine.className = "learn-answer";
-  if (mcIsMulti(q)) {
-    answerLine.textContent =
-      "Richtige Antworten: " +
-      [...correct].sort((a, b) => a - b).map((i) => q.optionen[i]).filter((t) => t).join(", ");
+  const korrektReihenfolge =
+    q.typ === "reihenfolge" &&
+    Array.isArray(q.elemente) &&
+    Array.isArray(q.korrekte_reihenfolge) &&
+    q.korrekte_reihenfolge.length === q.elemente.length &&
+    q.elemente.length >= 2;
+
+  if (korrektReihenfolge) {
+    // Korrekte Reihenfolge als nummerierte Liste (robuster als der Klartext).
+    const label = document.createElement("p");
+    label.className = "learn-answer";
+    label.textContent = "Korrekte Reihenfolge:";
+    box.appendChild(label);
+    const ol = document.createElement("ol");
+    ol.className = "sort-solution";
+    q.korrekte_reihenfolge.forEach((elIdx) => {
+      const li = document.createElement("li");
+      li.textContent = q.elemente[elIdx] != null ? String(q.elemente[elIdx]) : "";
+      ol.appendChild(li);
+    });
+    box.appendChild(ol);
   } else {
-    answerLine.textContent =
-      (q.typ === "multiple_choice" ? "Richtige Antwort: " : "Musterantwort: ") + (q.korrekte_antwort || "");
+    const correct = mcCorrectIndices(q);
+    const answerLine = document.createElement("p");
+    answerLine.className = "learn-answer";
+    if (mcIsMulti(q)) {
+      answerLine.textContent =
+        "Richtige Antworten: " +
+        [...correct].sort((a, b) => a - b).map((i) => q.optionen[i]).filter((t) => t).join(", ");
+    } else {
+      answerLine.textContent =
+        (q.typ === "multiple_choice" ? "Richtige Antwort: " : "Musterantwort: ") + (q.korrekte_antwort || "");
+    }
+    box.appendChild(answerLine);
   }
-  box.appendChild(answerLine);
 
   const erklaerungen = Array.isArray(q.erklaerungen) ? q.erklaerungen : [];
   if (q.typ === "multiple_choice" && erklaerungen.length) {
@@ -2993,36 +3364,66 @@ async function runEvaluation() {
       "Fragen, die im Lernmodus vor dem Antworten aufgelöst wurden (aufgeloest: true), bewerte normal, " +
       "erwähne den Umstand aber kurz im Feedback. Antworte auf Deutsch.";
 
-    // Mehrfach-MC wird LOKAL/deterministisch gescort (Partial Credit) und NICHT
-    // ans Modell geschickt - das spart Tokens, ist reproduzierbar und kostet im
-    // Hosted-Modus keinen Extra-Worker-Call. Single-Choice-MC und offene Fragen
-    // bleiben bewusst beim Modell (Verhalten bestehender Tests unveraendert).
+    // Reihenfolge- und Mehrfach-MC-Fragen werden LOKAL/deterministisch gescort
+    // (Partial Credit) und NICHT ans Modell geschickt: spart Tokens, ist
+    // reproduzierbar und kostet im Hosted-Modus keinen Extra-Worker-Call.
+    // Single-Choice-MC und offene Fragen bleiben bewusst beim Modell (Verhalten
+    // bestehender Tests unveraendert). Erkennung defensiv: alte Versuche kennen
+    // die Typen nicht.
+    const istReihenfolge = (q) =>
+      q && q.typ === "reihenfolge" && Array.isArray(q.elemente) && q.elemente.length >= 2 &&
+      Array.isArray(q.korrekte_reihenfolge) && q.korrekte_reihenfolge.length === q.elemente.length;
+
+    // Lokale Ergebniszeilen (Reihenfolge + Mehrfach-MC, auch unbeantwortete) und
+    // kompakte Zusammenfassung fuer die Gesamteinschaetzung des Modells. modelFragen
+    // behaelt den Original-Index, damit answers[i]/revealed[i] korrekt bleiben.
+    const localResults = [];
+    const localSummary = [];
     const modelFragen = [];
-    const mcMultiResults = [];
-    const mcMultiSummary = [];
     quiz.fragen.forEach((q, i) => {
-      if (mcIsMulti(q)) {
+      if (istReihenfolge(q)) {
+        const musterantwort = q.korrekte_reihenfolge.map((idx) => q.elemente[idx]).join(" -> ");
+        const userOrder = parseOrder(answers[i] || "", q.elemente.length);
+        if (!userOrder) {
+          // nie sortiert / korrupt -> 0 Punkte wie eine uebersprungene Frage
+          localResults.push({
+            id: q.id,
+            punkte: 0,
+            feedback: "Nicht beantwortet: die Reihenfolge wurde nicht angeordnet.",
+            musterantwort,
+          });
+          localSummary.push({ frage: (q.frage || "").slice(0, 160), punkte: 0 });
+          return;
+        }
+        const punkte = scoreReihenfolge(userOrder, q.korrekte_reihenfolge);
+        const richtig = userOrder.reduce((acc, el, pos) => acc + (q.korrekte_reihenfolge[pos] === el ? 1 : 0), 0);
+        const prozentGeordnet = Math.round((punkte / 10) * 100);
+        localResults.push({
+          id: q.id,
+          punkte,
+          feedback: `${richtig} von ${q.elemente.length} Elementen an der richtigen Position; Reihenfolge zu ${prozentGeordnet}% korrekt geordnet.`,
+          musterantwort,
+        });
+        localSummary.push({ frage: (q.frage || "").slice(0, 160), punkte });
+      } else if (mcIsMulti(q)) {
         const res = scoreMultiMc(q, answers[i]);
         if (mode === "lernen" && revealed[i]) res.feedback += " (im Lernmodus aufgelöst)";
-        mcMultiResults.push(res);
-        // Kompakte Zusammenfassung fuer das Modell, damit die Gesamtbewertung
-        // (Zusammenfassung, Staerken, Verbesserungen) auch die lokal gescorten
-        // Mehrfach-MC-Fragen beruecksichtigt - ohne sie erneut zu bewerten.
-        mcMultiSummary.push({ frage: (q.frage || "").slice(0, 160), punkte: res.punkte });
+        localResults.push(res);
+        localSummary.push({ frage: (q.frage || "").slice(0, 160), punkte: res.punkte });
       } else {
         modelFragen.push({ q, i });
       }
     });
 
     // Hinweis-Block (gleicher Wortlaut wie im Worker, buildEvalMessages): nennt
-    // dem Modell die bereits bewerteten Mehrfach-MC-Fragen samt Punkten, mit der
-    // Anweisung, sie NICHT erneut als eigene Eintraege auszugeben.
-    const mcLokalHinweis = mcMultiSummary.length
-      ? "\n\nZusätzlich wurden " + mcMultiSummary.length + " Multiple-Choice-Fragen mit Mehrfachauswahl " +
+    // dem Modell die bereits bewerteten Fragen samt Punkten, mit der Anweisung,
+    // sie NICHT erneut als eigene Eintraege auszugeben.
+    const mcLokalHinweis = localSummary.length
+      ? "\n\nZusätzlich wurden " + localSummary.length + " Fragen (Mehrfachauswahl bzw. Reihenfolge) " +
         "bereits separat und deterministisch bewertet. Bewerte sie NICHT erneut und gib fuer sie KEINE " +
         "eigenen Ergebnis-Eintraege aus; beziehe ihre Ergebnisse aber in die Gesamteinschätzung " +
         "(Zusammenfassung, Stärken, Verbesserungen) mit ein:\n" +
-        mcMultiSummary.map((m) => `- ${m.frage}: ${m.punkte}/10`).join("\n")
+        localSummary.map((m) => `- ${m.frage}: ${m.punkte}/10`).join("\n")
       : "";
 
     const payload = modelFragen.map(({ q, i }) => ({
@@ -3053,24 +3454,23 @@ async function runEvaluation() {
     let evalTokens;
 
     if (payload.length === 0) {
-      // Sonderfall: ausschliesslich Mehrfach-MC. Kein Modell-/Worker-Call
-      // ausloesen (Kosten/Latenz sparen) - Auswertung komplett lokal.
+      // Sonderfall: das Quiz besteht nur aus lokal gescorten Fragen (Mehrfach-MC
+      // und/oder Reihenfolge). Kein Modell-/Worker-Call (eine leere Eval-Payload
+      // wuerde der Worker mit 400 ablehnen) - Auswertung komplett lokal. Der
+      // gesamt-Block wird unten aus den reconcileten Zeilen befuellt.
       result = normalizeEvalData({
-        ergebnisse: mcMultiResults,
+        ergebnisse: localResults,
         gesamt: { prozent: 0, zusammenfassung: "", staerken: [], verbesserungen: [] },
       });
-      const sumLocal = mcMultiResults.reduce((a, e) => a + (Number(e.punkte) || 0), 0);
-      result.gesamt.zusammenfassung =
-        `${sumLocal} von ${mcMultiResults.length * 10} Punkten in den Multiple-Choice-Fragen erreicht.`;
     } else {
-      // Progress zaehlt nur die Modell-Fragen (Mehrfach-MC laeuft nicht ueber den
-      // Stream) - sonst bliebe der Balken haengen.
+      // Progress zaehlt nur die Modell-Fragen (lokal gescorte laufen nicht ueber
+      // den Stream) - sonst bliebe der Balken haengen.
       const total = payload.length;
       setLoadingProgress(0, total, "Das Modell prüft deine Antworten...");
       const evalHostedPayload = {
         jobText: quiz.jobText,
         payload,
-        kontext: { mode, limitMin: timer.limitMin, minutesUsed, overtime: timer.overtime, mcLokal: mcMultiSummary },
+        kontext: { mode, limitMin: timer.limitMin, minutesUsed, overtime: timer.overtime, mcLokal: localSummary },
       };
       const { data: rawResult, cost, tokens } = await callLLM(system, user, EVAL_SCHEMA, (acc) => {
         const seen = (acc.match(/"feedback"\s*:/g) || []).length;
@@ -3084,13 +3484,13 @@ async function runEvaluation() {
       // (DeepSeek, lokale Modelle) koennte z. B. das gesamt-Objekt fehlen, was
       // beim Speichern (result.gesamt.prozent) sonst einen Absturz ausloest
       result = normalizeEvalData(rawResult);
-      // Lokale Mehrfach-MC-Ergebnisse einmischen (das Modell hat sie nicht
-      // gesehen). Modell-Ergebnisse vorher auf die tatsaechlich gestellten
+      // Lokale Ergebnisse (Mehrfach-MC + Reihenfolge) einmischen (das Modell hat
+      // sie nicht gesehen). Modell-Ergebnisse vorher auf die tatsaechlich gestellten
       // (Payload-)IDs filtern: Erfindet das Modell trotz Anweisung einen Eintrag
-      // fuer eine Mehrfach-MC-Frage, gewinnt sonst beim id-Lookup in renderResult
+      // fuer eine lokal gescorte Frage, gewinnt sonst beim id-Lookup in renderResult
       // ggf. der falsche (Modell-)Eintrag. Reihenfolge ist egal (Suche per id).
       const modelIds = new Set(payload.map((p) => Number(p.id)));
-      result.ergebnisse = result.ergebnisse.filter((e) => modelIds.has(Number(e.id))).concat(mcMultiResults);
+      result.ergebnisse = result.ergebnisse.filter((e) => modelIds.has(Number(e.id))).concat(localResults);
     }
 
     // Ergebnisse gegen ALLE Quizfragen abgleichen: pro Frage genau eine Zeile, in
@@ -3130,6 +3530,12 @@ async function runEvaluation() {
       const max = quiz.fragen.length * 10;
       const prozent = max ? Math.round((sum / max) * 100) : 0;
       result.gesamt.prozent = Math.max(0, Math.min(100, prozent));
+    }
+    if (payload.length === 0) {
+      // Rein lokal gescortes Quiz (nur Mehrfach-MC und/oder Reihenfolge): gesamt
+      // lokal mit generischem Text fuellen, da kein Modell eine Zusammenfassung lieferte.
+      result.gesamt.zusammenfassung = result.gesamt.zusammenfassung ||
+        `Du hast ${result.gesamt.prozent}% der automatisch bewerteten Aufgaben erreicht.`;
     }
 
     const saved = saveAttempt(result, durationMs, evalCost, evalTokens);
@@ -3264,12 +3670,15 @@ function renderResult(result, durationMs) {
       badge.textContent = difficultyLabel(q.schwierigkeit);
       div.querySelector(".q").appendChild(badge);
     }
-    // Mehrfach-MC speichert die Auswahl als Index-JSON ("[0,2]") - fuer die
-    // Anzeige in lesbare Optionstexte aufloesen. Alte Versuche ohne
-    // korrekte_indizes sind nie mcIsMulti => roher String (bei Single-Choice
-    // ohnehin der Optionstext). Keine Regression.
+    // Reihenfolge-Antworten sind ein JSON-Index-Array, Mehrfach-MC eine Index-
+    // Auswahl ("[0,2]") - beide fuer die Anzeige in lesbare Texte aufloesen. Alte
+    // Versuche ohne diese Typen fallen auf den rohen String zurueck (bei
+    // Single-Choice ohnehin der Optionstext). Keine Regression.
     let antwortText = answers[i] || "(keine Antwort)";
-    if (mcIsMulti(q)) {
+    if (q.typ === "reihenfolge" && Array.isArray(q.elemente)) {
+      const uo = parseOrder(answers[i] || "", q.elemente.length);
+      antwortText = uo ? uo.map((idx) => q.elemente[idx]).join(" -> ") : "(keine Antwort)";
+    } else if (mcIsMulti(q)) {
       const sel = parseMultiSelection(answers[i] || "");
       antwortText = sel.size
         ? [...sel].sort((a, b) => a - b).map((k) => q.optionen[k]).filter((t) => t).join(", ")
@@ -4845,6 +5254,9 @@ function openAttempt(job, att) {
   while (answers.length < quiz.fragen.length) answers.push("");
   revealed = (att.revealed || []).slice();
   while (revealed.length < quiz.fragen.length) revealed.push(false);
+  // In der Review nicht neu mischen: die gespeicherte answers[i] ist die finale
+  // Nutzerreihenfolge und wird im gesperrten Zustand exakt so angezeigt.
+  sortDisplay = {};
   current = 0;
   startTime = Date.now();
   stopTimer();
@@ -5453,6 +5865,7 @@ $("btn-restart").addEventListener("click", () => {
   quiz = null;
   answers = [];
   revealed = [];
+  sortDisplay = {};
   reviewing = false;
   stopTimer();
   $("quiz-timer").classList.add("hidden");
