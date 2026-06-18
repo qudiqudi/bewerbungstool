@@ -1640,9 +1640,21 @@ function fragenKey(q) {
   // unabhaengig von der Anzeige-Reihenfolge ist. normalizeQuizData mischt die
   // Optionen jetzt zufaellig; ohne Sortierung bekaeme dieselbe MC-Frage aus zwei
   // lokalen Batches unterschiedliche Schluessel und wuerde nicht mehr als
-  // Dublette erkannt. korrekte_antwort ist ohnehin shuffle-invariant.
+  // Dublette erkannt.
   const optsNorm = optionen.map(normText).sort();
-  return [normText(q.frage), normText(q.korrekte_antwort), ...optsNorm].join(" | ");
+  // Korrektheit als SORTIERTE MENGE der richtigen Optionstexte (shuffle-
+  // invariant). NICHT korrekte_antwort verwenden: das ist bei Mehrfach-MC
+  // optionen[korrekte_indizes[0]] und haengt damit von der gemischten
+  // Reihenfolge ab - dieselbe Frage bekaeme sonst je Shuffle einen anderen
+  // Schluessel. Bei offenen Fragen (keine Optionen) bleibt die Musterantwort
+  // (korrekte_antwort) der Korrektheitsteil wie bisher.
+  const correctNorm = [...mcCorrectIndices(q)]
+    .map((i) => optionen[i])
+    .filter((o) => typeof o === "string")
+    .map(normText)
+    .sort();
+  const answerPart = optionen.length ? correctNorm : [normText(q.korrekte_antwort)];
+  return [normText(q.frage), ...answerPart, "|opt|", ...optsNorm].join(" | ");
 }
 
 /* ---------- Multiple-Choice: ein vs. mehrere richtige Antworten ---------- */
