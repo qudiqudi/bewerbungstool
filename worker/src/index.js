@@ -185,7 +185,7 @@ async function startJob(req, env, ctx, origin) {
   try {
     await jobStub.fetch("https://do/start", {
       method: "POST",
-      body: JSON.stringify({ params, tier, subject: ip, reserveId: gate.reserveId }),
+      body: JSON.stringify({ params, tier, subject: ip, reserveId: gate.reserveId, reserveAmount: reserve }),
     });
   } catch {
     await doCall(stub, "release", { reserveId: gate.reserveId }); // Slot wieder freigeben

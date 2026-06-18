@@ -2205,16 +2205,20 @@ async function startHostedGeneration(ctx) {
 }
 
 // Obergrenze fuer die Wartezeit auf einen Job. Bewusst etwas ueber der server-
-// seitigen RESERVE_TTL_S (600 s), damit ein haengender Job-Slot beim naechsten Start
-// schon per Reconcile freigegeben ist und der Pro-Nutzer-Gate nicht dauerhaft blockt.
-const MAX_JOB_MS = 11 * 60 * 1000;
+// Reiner Client-BACKSTOP fuer den Fall, dass der Server gar nicht erreichbar ist.
+// Im Normalfall entscheidet der Server ueber die Staleness: sein Status-Endpunkt
+// markiert einen zu lange "pending" Job selbst terminal (timeout) und gibt die
+// Reserve frei. Dieser Wert liegt daher ueber dem server-seitigen JOB_TIMEOUT
+// (16 min) und unter/auf RESERVE_TTL_S (1200 s = 20 min), damit beim Aufgeben der
+// Slot serverseitig schon (fast) frei ist.
+const MAX_JOB_MS = 18 * 60 * 1000;
 
 async function pollActiveJob() {
   const job = loadActiveJob();
   if (!job || job.status === "ready") return; // fertig: wartet auf "Loslegen"
 
-  // Haengender/abgestuerzter Job: nicht endlos weiterpollen, sonst bleibt der
-  // Erstellen-Slot fuer den Nutzer dauerhaft belegt. Abbrechen und Neustart anbieten.
+  // Backstop nur fuer "Server dauerhaft nicht erreichbar": sonst kommt das terminale
+  // Aus vom Server (status "error"/"timeout", s. unten) und nicht aus lokalem Alter.
   if (Date.now() - (job.createdAt || 0) > MAX_JOB_MS) {
     clearActiveJob();
     renderActiveJobCard("error");
@@ -2261,6 +2265,9 @@ async function pollActiveJob() {
 function jobErrorMessage(code) {
   if (code === "parse" || code === "upstream") {
     return "Bei der Erstellung ist ein Fehler aufgetreten. Bitte erneut versuchen, ggf. mit weniger Fragen.";
+  }
+  if (code === "timeout") {
+    return "Die Erstellung hat zu lange gedauert und wurde abgebrochen. Bitte starte den Test neu.";
   }
   return "Der Test konnte nicht erstellt werden. Bitte erneut versuchen.";
 }

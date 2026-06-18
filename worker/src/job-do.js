@@ -17,6 +17,16 @@ const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 // danach wird jobText/Ergebnis serverseitig geloescht (keine unbegrenzte Haltung).
 const RESULT_TTL_MS = 60 * 60 * 1000; // 1 h
 
+// Eigen-Timeout des Generierungs-Calls: bricht einen haengenden Upstream ab, lange
+// bevor das Alarm-Wall-Limit (15 min) greift. Bewusst ueber der real beobachteten
+// Maximaldauer (reasoning ~150 s), damit echte Laeufe nicht abgeschnitten werden.
+const GEN_TIMEOUT_MS = 4 * 60 * 1000; // 4 min
+// Server-seitiger Backstop: ein noch "pending" Job, der aelter ist als das Alarm-
+// Wall-Limit, kann nicht mehr laufen (Plattform hat die Alarm-Invocation laengst
+// beendet) → beim naechsten Poll terminal als Timeout markieren. Die Staleness ist
+// damit server-eigen, der Client raeumt nicht spekulativ (Codex-Review Runde 2).
+const JOB_TIMEOUT_MS = 16 * 60 * 1000; // 16 min (> 15-min-Alarm-Wall)
+
 export class GenerationJobDO {
   constructor(state, env) {
     this.state = state;
@@ -33,6 +43,7 @@ export class GenerationJobDO {
         tier: body.tier,         // aufgeloestes Tier-Objekt (model/reasoning/strictSchema)
         subject: body.subject,
         reserveId: body.reserveId,
+        reserveAmount: body.reserveAmount, // Worst-Case-Reserve → konservativer Settle-Estimate
         createdAt: Date.now(),
       });
       await this.state.storage.setAlarm(Date.now()); // sofort generieren
@@ -40,6 +51,18 @@ export class GenerationJobDO {
     }
     if (op === "status") {
       const status = (await this.state.storage.get("status")) || "unknown";
+      // Server-eigener Timeout: ein zu lange "pending" Job gilt als tot (Alarm vom
+      // Plattform-Wall-Limit beendet) → terminal markieren, Reserve freigeben, Input
+      // loeschen. Erst danach antworten, damit der Client eine echte Terminal-Aussage
+      // bekommt und nicht selbst spekulativ raeumen muss.
+      if (status === "pending") {
+        const createdAt = (await this.state.storage.get("createdAt")) || 0;
+        if (Date.now() - createdAt > JOB_TIMEOUT_MS) {
+          const reserveId = await this.state.storage.get("reserveId");
+          await this.finish("error", null, "timeout", reserveId, null);
+          return jsonResponse({ status: "error", errorCode: "timeout" });
+        }
+      }
       const result = await this.state.storage.get("result");
       const errorCode = await this.state.storage.get("errorCode");
       return jsonResponse({ status, result: result || undefined, errorCode: errorCode || undefined });
@@ -56,11 +79,16 @@ export class GenerationJobDO {
     const params = await this.state.storage.get("params");
     const tier = await this.state.storage.get("tier");
     const reserveId = await this.state.storage.get("reserveId");
+    const reserveAmount = await this.state.storage.get("reserveAmount");
     const hardCap = Number(this.env.HARD_CAP_TOKENS || 24000);
 
     let result = null;
     let errorCode = null;
     let cost = null;
+    // Wurde eine 200-Antwort (potenziell kostenpflichtig) erreicht? Dann darf ein
+    // anschliessender Lese-/Parse-Fehler die Reserve NICHT freigeben, sonst liesse sich
+    // ueber wiederholte degradierte 200-Antworten das Budget umgehen (Codex-Review R2).
+    let charged = false;
     try {
       if (this.env.MOCK_UPSTREAM === "1") {
         // Dev: gültiges Mock-Quiz ohne echten OpenRouter-Call (Last-/Flow-Test).
@@ -93,10 +121,15 @@ export class GenerationJobDO {
           "X-Title": "jobreif",
         },
         body: JSON.stringify(body),
+        // Haengenden Upstream selbst abbrechen (vor dem Alarm-Wall-Limit). Bricht VOR
+        // einer Antwort ab → keine Kosten → Reserve wird freigegeben.
+        signal: AbortSignal.timeout(GEN_TIMEOUT_MS),
       });
       if (!res.ok) {
         errorCode = "upstream";
       } else {
+        // Ab hier ist eine (kostenpflichtige) Antwort erreicht.
+        charged = true;
         const json = await res.json();
         cost = typeof json.usage?.cost === "number" ? json.usage.cost : null;
         result = parseLoose(json.choices?.[0]?.message?.content ?? "");
@@ -105,20 +138,29 @@ export class GenerationJobDO {
     } catch {
       // KEIN Alarm-Retry: der Upstream-Call kann bereits Kosten verursacht haben, ein
       // erneuter Lauf wuerde doppelt abrechnen. Terminal als Fehler markieren.
-      errorCode = "exception";
+      errorCode = errorCode || "exception";
     }
 
-    if (result) await this.finish("done", result, null, reserveId, cost);
-    else await this.finish("error", null, errorCode || "unknown", reserveId, cost);
+    // Settle-Betrag bestimmen: bei erreichter Antwort den ECHTEN usage.cost, sonst
+    // (Kosten unbekannt trotz 200, z. B. Lese-/Parse-Fehler) konservativ den Worst-Case
+    // der Reserve buchen — niemals freigeben. Nur ohne erreichte Antwort freigeben.
+    const settleCost = charged ? (cost != null ? cost : (reserveAmount ?? null)) : null;
+    // Eine erreichte Antwort ohne jegliche Kostenangabe (auch kein Worst-Case bekannt)
+    // NICHT freigeben — die Reserve stehen lassen, das BudgetDO-TTL-Reconcile bucht sie
+    // konservativ runter. Nur ohne erreichte Antwort wird wirklich freigegeben.
+    const leaveReserve = charged && settleCost == null;
+    if (result) await this.finish("done", result, null, reserveId, settleCost, leaveReserve);
+    else await this.finish("error", null, errorCode || "unknown", reserveId, settleCost, leaveReserve);
   }
 
   // Terminalen Zustand festschreiben: Status/Ergebnis ablegen, Budget abschliessen
-  // (settle auf Ist ODER release), sensiblen Input (jobText) + interne Felder sofort
-  // loeschen und einen Raeum-Alarm setzen, der das Ergebnis nach der TTL entfernt.
-  async finish(status, result, errorCode, reserveId, cost) {
+  // (settle auf Ist/Estimate ODER release ODER — bei charged-ohne-Kosten — stehen
+  // lassen), sensiblen Input (jobText) + interne Felder sofort loeschen und einen
+  // Raeum-Alarm setzen, der das Ergebnis nach der TTL entfernt.
+  async finish(status, result, errorCode, reserveId, cost, leaveReserve = false) {
     await this.state.storage.put({ status, result: result || null, errorCode: errorCode || null });
-    await settleBudget(this.env, reserveId, cost);
-    await this.state.storage.delete(["params", "tier", "reserveId"]);
+    if (!leaveReserve) await settleBudget(this.env, reserveId, cost);
+    await this.state.storage.delete(["params", "tier", "reserveId", "reserveAmount"]);
     await this.state.storage.setAlarm(Date.now() + RESULT_TTL_MS);
   }
 }
