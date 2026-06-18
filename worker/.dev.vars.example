@@ -1,6 +1,12 @@
 # Kopieren nach .dev.vars (gitignored) für `wrangler dev`.
 # Für den Last-Test reichen die Dev-Flags — Secrets werden im Mock-/Skip-Modus nicht gelesen.
+#
+# WICHTIG: ENV=development ist PFLICHT, damit die Dev-Bypässe unten überhaupt greifen.
+# Der Worker honoriert SKIP_TURNSTILE/MOCK_UPSTREAM nur, wenn ENV explizit eine Dev-
+# Umgebung markiert (fail-closed). Ohne diese Zeile läuft `wrangler dev` gegen echtes
+# Turnstile/Upstream. In Prod ist ENV nicht gesetzt → Bypässe bleiben aus.
 
+ENV=development
 MOCK_UPSTREAM=1
 SKIP_TURNSTILE=1
 MOCK_COST=0.08

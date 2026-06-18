@@ -8,6 +8,7 @@
 // speichert sie; der Client braucht keinen offenen Stream zu halten.
 
 import { buildQuizMessages, QUESTIONS_SCHEMA } from "./prompts.js";
+import { devEnabled } from "./env.js";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
@@ -140,8 +141,10 @@ export class GenerationJobDO {
     // freigeben, sondern konservativ den Worst-Case settlen (Codex-Review R3).
     let charged = false;
     try {
-      if (this.env.MOCK_UPSTREAM === "1") {
-        // Dev: gültiges Mock-Quiz ohne echten OpenRouter-Call (Last-/Flow-Test).
+      if (devEnabled(this.env) && this.env.MOCK_UPSTREAM === "1") {
+        // Dev: gültiges Mock-Quiz ohne echten OpenRouter-Call (Last-/Flow-Test). Fail-closed
+        // an dev gekoppelt: ein in Prod gesetztes MOCK_UPSTREAM darf die echte Generierung nicht
+        // durch Mock-Daten ersetzen.
         result = {
           titel: "Mock-Test", arbeitgeber: "Mock GmbH", arbeitsort: "Berlin", empfohlene_zeit_minuten: 10,
           fragen: [{ id: 1, typ: "offen", kategorie: "Allgemein", schwierigkeit: "mittel", frage: "Mock-Frage: Nenne eine Stärke.", optionen: [], korrekte_antwort: "Teamfähigkeit, belegt.", erklaerungen: [], lerninfo: "Soft Skills belegen.", quellen: [] }],

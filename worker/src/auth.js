@@ -9,6 +9,7 @@
 
 import { corsHeaders } from "./cors.js";
 import { verifyTurnstile } from "./turnstile.js";
+import { devEnabled } from "./env.js";
 
 const MAGIC_TTL_DEFAULT = 900;       // 15 min
 const SESSION_TTL_DEFAULT = 2592000; // 30 Tage
@@ -139,8 +140,9 @@ async function magicStart(req, env, ctx, origin) {
   // Anti-Bot: Magic-Link liegt seit der Login-Pflicht auf dem kritischen Pfad. Ohne
   // Bot-Schutz koennte ein Skript beliebige Adressen durchiterieren (Mail-Bombing, Resend-
   // Kontingent/Reputation, Spam mit Login-Links — Codex-Review R5). Turnstile wie /api/*,
-  // an die Aktion gebunden. Dev-Bypass via SKIP_TURNSTILE.
-  if (env.SKIP_TURNSTILE !== "1") {
+  // an die Aktion gebunden. Dev-Bypass via SKIP_TURNSTILE, fail-closed an dev gekoppelt
+  // (devEnabled): ein in Prod gesetztes SKIP_TURNSTILE darf den Login-Bot-Schutz nicht abschalten.
+  if (!(devEnabled(env) && env.SKIP_TURNSTILE === "1")) {
     const ip = req.headers.get("CF-Connecting-IP") || "0.0.0.0";
     const token = req.headers.get("CF-Turnstile-Token") || "";
     const tv = await verifyTurnstile(token, { action: "magic-link", secret: env.TURNSTILE_SECRET, ip });
@@ -208,8 +210,9 @@ async function googleStart(req, env, origin) {
   if (!env.GOOGLE_CLIENT_ID) return json({ error: "oauth-unconfigured" }, 503, env, origin);
   // Anti-Bot wie bei magic-link (Codex-Review R10): /auth/google/start schreibt unauth in
   // oauth_states; ohne Bot-Schutz koennte ein Flood die Tabelle/D1-Writes belasten und den
-  // Google-Login (kritischer Pfad) degradieren. Turnstile an die Aktion gebunden; Dev-Bypass.
-  if (env.SKIP_TURNSTILE !== "1") {
+  // Google-Login (kritischer Pfad) degradieren. Turnstile an die Aktion gebunden; Dev-Bypass
+  // fail-closed an dev gekoppelt (devEnabled) – in Prod (ENV ungesetzt) immer erzwungen.
+  if (!(devEnabled(env) && env.SKIP_TURNSTILE === "1")) {
     const ip = req.headers.get("CF-Connecting-IP") || "0.0.0.0";
     const token = req.headers.get("CF-Turnstile-Token") || "";
     const tv = await verifyTurnstile(token, { action: "google-start", secret: env.TURNSTILE_SECRET, ip });

@@ -29,6 +29,10 @@ pattern = "api.jobreif.de"
 custom_domain = true
 
 [vars]
+# ENV bewusst NICHT gesetzt: Die Dev-Bypässe (SKIP_TURNSTILE/MOCK_UPSTREAM) werden nur
+# honoriert, wenn ENV explizit "development"/"dev"/"local" ist (fail-closed). Ein fehlendes
+# oder beliebig getipptes ENV in Prod hält die Bypässe damit garantiert AUS. ENV NIE hier
+# auf einen Dev-Wert setzen. Lokal kommt ENV=development aus .dev.vars (nicht eingecheckt).
 ALLOWED_ORIGINS = "https://jobreif.de"
 DAY_BUDGET_USD = "5"          # harte Tagesgrenze (USD), bewusst niedrig starten
 HARD_CAP_TOKENS = "24000"     # Output-Cap je Call; bestimmt die Worst-Case-Reserve.
