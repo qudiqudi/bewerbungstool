@@ -4686,6 +4686,34 @@ function clip(str, max) {
   return s.length > max ? s.slice(0, max) : s;
 }
 
+// Importierten Report auf die gebundene, erwartete Form bringen (gleiche Grenzen
+// wie beim eigenen Melden). Verhindert, dass fremde/riesige Felder aus einem
+// Backup den Speicher sprengen und beim Import bestehende Reports verdraengen.
+// Gibt null bei unbrauchbarem Eintrag.
+function sanitizeReport(rep) {
+  if (!rep || typeof rep !== "object" || rep.id == null) return null;
+  const orNull = (v, max) => (typeof v === "string" ? clip(v, max) : null);
+  return {
+    id: clip(String(rep.id), 64),
+    date: Number.isFinite(Number(rep.date)) ? Number(rep.date) : Date.now(),
+    fragenKey: typeof rep.fragenKey === "string" ? clip(rep.fragenKey, 2000) : "",
+    frage: clip(rep.frage, 600),
+    typ: rep.typ === "multiple_choice" ? "multiple_choice" : "offen",
+    kategorie_fachlich: clip(rep.kategorie_fachlich, 200),
+    korrekte_antwort: clip(rep.korrekte_antwort, 300),
+    optionen: Array.isArray(rep.optionen) ? rep.optionen.slice(0, 8).map((o) => clip(o, 200)) : [],
+    gruende: Array.isArray(rep.gruende)
+      ? rep.gruende.slice(0, 10).map((g) => clip(g, 40)).filter(Boolean)
+      : [],
+    notiz: clip(rep.notiz, 500),
+    jobKey: orNull(rep.jobKey, 200),
+    stellenTitel: orNull(rep.stellenTitel, 200),
+    provider: orNull(rep.provider, 40),
+    tier: orNull(rep.tier, 40),
+    model: orNull(rep.model, 80),
+  };
+}
+
 // Schreibt einen Report (fuellt id/date). Gibt das gespeicherte Objekt zurueck,
 // oder null, wenn das Speichern fehlschlug (localStorage voll/gesperrt). Der
 // Aufrufer darf eine Meldung nur dann als erfolgt ausgeben, wenn != null.
@@ -6248,29 +6276,44 @@ function importData(text) {
     saveHistory(h);
   }
 
-  // Gemeldete Fragen defensiv und nicht-destruktiv mergen: per id dedupen,
-  // beschaedigte Eintraege ueberspringen, den Import nie daran abbrechen lassen.
+  // Gemeldete Fragen defensiv und STRENG nicht-destruktiv mergen: importierte
+  // Reports auf die gebundene Form kappen (sonst koennte ein einzelner riesiger
+  // Eintrag ueber den FIFO-Retry in saveReports bestehende Reports verdraengen),
+  // per id dedupen, nie bestehende Reports verlieren, den Import nie abbrechen.
   let newReports = 0;
   let reportsDropped = 0;
   if (data.reports && Array.isArray(data.reports.reports)) {
-    const r = loadReports();
-    const seen = new Set(r.reports.map((x) => x && x.id).filter(Boolean));
-    const importedIds = [];
+    const existing = loadReports();
+    const ids = new Set(existing.reports.map((x) => x && x.id).filter(Boolean));
+    const sanitizedNew = [];
     data.reports.reports.forEach((rep) => {
-      if (!rep || typeof rep !== "object" || !rep.id || seen.has(rep.id)) return;
-      seen.add(rep.id);
-      r.reports.push(rep);
-      importedIds.push(rep.id);
+      const s = sanitizeReport(rep);
+      if (!s || ids.has(s.id)) return;
+      ids.add(s.id);
+      sanitizedNew.push(s);
     });
-    if (importedIds.length) {
-      saveReports(r);
-      // Persistenz verifizieren: saveReports kann auf REPORTS_MAX kappen oder bei
-      // vollem/gesperrtem Speicher Eintraege verwerfen. Nur die tatsaechlich
-      // gespeicherten Meldungen als "neu" zaehlen, den Rest als verworfen melden -
-      // sonst taeuscht der Import bei der Geraetemigration Datenerhalt vor.
-      const persisted = new Set(loadReports().reports.map((x) => x && x.id).filter(Boolean));
-      newReports = importedIds.filter((id) => persisted.has(id)).length;
-      reportsDropped = importedIds.length - newReports;
+    if (sanitizedNew.length) {
+      // Nie bestehende Reports verdraengen: nur so viele neue uebernehmen, wie
+      // unter REPORTS_MAX Platz ist (Rest gilt als verworfen).
+      const available = Math.max(0, REPORTS_MAX - existing.reports.length);
+      const toAdd = sanitizedNew.slice(0, available);
+      reportsDropped = sanitizedNew.length - toAdd.length;
+      if (toAdd.length) {
+        saveReports({ version: 1, reports: existing.reports.concat(toAdd) });
+        const after = new Set(loadReports().reports.map((x) => x && x.id).filter(Boolean));
+        // Wurde unter Speicherdruck ein BESTEHENDER Report verdraengt, verletzt das
+        // das nicht-destruktive Versprechen -> alten Stand wiederherstellen (er hat
+        // vorher gepasst) und den Import komplett als verworfen ausweisen.
+        const existingLost = existing.reports.some((x) => x && x.id && !after.has(x.id));
+        if (existingLost) {
+          saveReports({ version: 1, reports: existing.reports.slice() });
+          newReports = 0;
+          reportsDropped = sanitizedNew.length;
+        } else {
+          newReports = toAdd.filter((s) => after.has(s.id)).length;
+          reportsDropped = sanitizedNew.length - newReports;
+        }
+      }
     }
   }
 
