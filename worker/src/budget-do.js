@@ -78,11 +78,18 @@ export class BudgetDO {
     }
   }
 
-  reserve({ amount, subject, ip }) {
+  reserve({ amount, subject, ip, exclusive }) {
     const dayBudget = Number(this.env.DAY_BUDGET_USD);
     const maxInflight = Number(this.env.MAX_INFLIGHT);
     const subjectShare = Number(this.env.PER_SUBJECT_SHARE) * dayBudget;
     const perIpDay = Number(this.env.PER_IP_DAY);
+
+    // Pro-Nutzer-Gate für Hintergrund-Jobs: nur EIN offener Job je Subjekt gleichzeitig
+    // (verhindert Parallel-Generierung und deckelt Kosten). Gilt nur für exclusive-Reserven
+    // (Async-Generierung), nicht für die kurzen synchronen Aufrufe (Auswertung).
+    if (exclusive && Object.values(this.reservations).some((r) => r.subject === subject)) {
+      return { ok: false, reason: "active-job" };
+    }
 
     const committed = this.dayReserved + this.daySpent;
     if (committed + amount > dayBudget) return { ok: false, reason: "budget" };

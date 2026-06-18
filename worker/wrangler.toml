@@ -43,6 +43,14 @@ ALLOW_PAID = "0"            # Phase A: "Beste"/Opus hinter der Paywall → 402
 name = "BUDGET_DO"
 class_name = "BudgetDO"
 
+[[durable_objects.bindings]]
+name = "GENJOB_DO"
+class_name = "GenerationJobDO"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["BudgetDO"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["GenerationJobDO"]
