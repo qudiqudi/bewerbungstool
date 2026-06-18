@@ -868,7 +868,14 @@ function normalizeQuizData(result) {
           .filter((s) => s.titel || s.url)
       : [];
     fragen.push({
-      id: Number.isFinite(Number(q.id)) ? Number(q.id) : i + 1,
+      // Eigene, garantiert eindeutige id (Position) statt der modellgelieferten:
+      // Modelle vergeben ids nicht zwingend eindeutig (und bei Batch-Generierung
+      // wiederholen sie sich ueber Batches hinweg als 1..n). Da Auswertung und
+      // Anzeige Ergebnisse per id den Fragen zuordnen (runEvaluation-Merge,
+      // renderResult), wuerde eine doppelte id ein fremdes Ergebnis auf die
+      // falsche Frage schreiben - inkl. Historie/Prozent/Abzeichen. Eindeutige
+      // 1..n-ids schliessen das aus. (Der lokale Batch-Pfad renummeriert ohnehin.)
+      id: i + 1,
       typ,
       kategorie: typeof q.kategorie === "string" ? q.kategorie : "",
       schwierigkeit: validDiff(q.schwierigkeit),
