@@ -6999,6 +6999,11 @@ $("btn-new-job").addEventListener("click", () => {
   // (bewerbungstool.draft) dabei bewusst NICHT ueberschreiben - sonst ginge ein
   // noch nicht abgeschickter Entwurf unwiderruflich verloren. Sobald hier etwas
   // eingegeben wird, sichert scheduleDraftSave den neuen Stand ohnehin.
+  // Zuerst einen evtl. noch ausstehenden (debounced) Speichervorgang abbrechen:
+  // sonst liefe er nach dem Leeren und schriebe die jetzt leeren Felder doch noch
+  // in den Entwurf (Race im 400ms-Fenster, Codex-Review).
+  clearTimeout(draftSaveTimer);
+  draftSaveTimer = 0;
   $("job-url").value = "";
   $("job-text").value = "";
   lastFetch = { url: "", text: "" };
