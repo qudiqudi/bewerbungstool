@@ -3366,6 +3366,7 @@ function renderQuestion() {
           if (s.has(idx)) s.delete(idx);
           else s.add(idx);
           answers[current] = s.size ? serializeMultiSelection(s) : "";
+          saveLearnSession();
           renderQuestion();
           // Fokus auf die geklickte Option zurueck. Die Options liegen in
           // einem eigenen Container, daher dort indexieren.
@@ -3491,6 +3492,7 @@ function renderReihenfolge(q, area, locked, isRevealed) {
   const commit = (newOrder, fokusIdx, fokusSel) => {
     sortDisplay[current] = newOrder.slice();
     answers[current] = JSON.stringify(newOrder);
+    saveLearnSession();
     renderQuestion();
     if (fokusIdx != null && fokusSel) {
       const items = $("answer-area").querySelectorAll(".sort-item");
