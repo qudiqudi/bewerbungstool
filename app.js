@@ -4205,11 +4205,23 @@ function renderResult(result, durationMs) {
 // aus job.attempts neu berechnen und bleibt damit abwaertskompatibel. Spielt
 // absichtlich nur je Stelle, nicht stellenuebergreifend.
 
-// XP eines Versuchs: das erreichte Prozentergebnis (0-100), strikt als Zahl
-// behandelt (alte/importierte Versuche koennen krumme oder fehlende Werte haben).
+// Erreichtes Prozentergebnis eines Versuchs (0-100), defensiv normalisiert: zuerst
+// das top-level Spiegel-Feld att.prozent, sonst der echte Score aus
+// result.gesamt.prozent (dieselbe Quelle wie die Review-Ansicht), sonst 0; auf 0-100
+// geklemmt. ZENTRAL fuer Anzeige UND Fortschritt/Badges/Freischaltungen, damit ein
+// alter Versuch ohne att.prozent ueberall denselben Wert ergibt (kein 80 % in der
+// Anzeige, aber 0 XP im Fortschritt).
+function attemptPct(att) {
+  if (!att) return 0;
+  let p = Number(att.prozent);
+  if (!Number.isFinite(p)) p = Number(att.result && att.result.gesamt && att.result.gesamt.prozent);
+  if (!Number.isFinite(p)) return 0;
+  return Math.max(0, Math.min(100, p));
+}
+
+// XP eines Versuchs: das erreichte Prozentergebnis (0-100) als ganze Zahl.
 function attemptXp(att) {
-  const p = Math.round(Number(att && att.prozent));
-  return Number.isFinite(p) ? Math.max(0, Math.min(100, p)) : 0;
+  return Math.round(attemptPct(att));
 }
 
 // Stufentitel (ohne Emoji, nuechtern-motivierend).
@@ -5274,19 +5286,12 @@ function renderJobBlock(job, opts) {
 
   // Defensiv: eine gespeicherte Stelle koennte (theoretisch) keine Versuche
   // tragen - dann nicht ueber ein leeres Array Math.max (-> -Infinity) bilden.
-  // Versuche aus aelteren Versionen koennen ohne top-level prozent kommen - einmal auf
-  // eine Zahl normalisieren, damit Trend, Tooltip und Score nicht "undefined %"
-  // bzw. "NaNpx" zeigen. Faellt das Spiegel-Feld a.prozent, wird der echte Score aus
-  // result.gesamt.prozent gelesen (dieselbe Quelle wie die Review-Ansicht), damit ein
-  // alter Versuch nicht faelschlich als 0 % erscheint. Auf 0-100 klemmen.
+  // Versuche aus aelteren Versionen koennen ohne top-level prozent kommen - ueber den
+  // zentralen attemptPct normalisieren (Fallback auf result.gesamt.prozent, auf 0-100
+  // geklemmt), damit Trend, Tooltip und Score nicht "undefined %" bzw. "NaNpx" zeigen
+  // und Anzeige UND Fortschritt/Badges denselben Wert verwenden.
   const attempts = Array.isArray(job.attempts) ? job.attempts : [];
-  const pctOf = (a) => {
-    if (!a) return 0;
-    let p = Number(a.prozent);
-    if (!Number.isFinite(p)) p = Number(a.result && a.result.gesamt && a.result.gesamt.prozent);
-    if (!Number.isFinite(p)) return 0;
-    return Math.max(0, Math.min(100, p));
-  };
+  const pctOf = attemptPct;
   const lastAtt = attempts[attempts.length - 1];
   const best = attempts.length ? Math.max(...attempts.map(pctOf)) : 0;
   const last = pctOf(lastAtt);
