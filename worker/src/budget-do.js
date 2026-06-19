@@ -153,9 +153,16 @@ export class BudgetDO {
     // Eine ueber Mitternacht laufende Reserve hat ihren IP-Slot am Vortag belegt (der
     // beim Rollover geleert wurde) — wuerde sie hier dekrementieren, riss sie den
     // perIp-Eintrag eines inzwischen neu eingebuchten Calls vom heutigen Tag faelschlich
-    // herunter und das Pro-IP-Tageslimit liesse sich umgehen. Legacy-Reserven ohne day
-    // (transient waehrend eines Deploys) verhalten sich wie zuvor.
-    if (r.day === undefined || r.day === this.day) {
+    // herunter und das Pro-IP-Tageslimit liesse sich umgehen.
+    //
+    // Legacy-Reserven aus dem alten Storage (von main, vor diesem Feld) haben kein r.day.
+    // Sie als "aktueller Tag" zu behandeln, riss exakt diese Luecke wieder auf: eine alte
+    // Reserve, die ueber Mitternacht laeuft, wuerde beim release den frisch belegten
+    // perIp-Zaehler des neuen Tages herunterreissen (Pro-IP-Limit umgehbar). Deshalb den
+    // Belegungs-Tag aus r.ts ableiten (gleiches UTC-Format wie today()); fehlt auch ts,
+    // konservativ NICHT dekrementieren (Limit bleibt hart).
+    const occupancyDay = r.day ?? (typeof r.ts === "number" ? new Date(r.ts).toISOString().slice(0, 10) : null);
+    if (occupancyDay === this.day) {
       this.perIp[r.ip] = Math.max(0, (this.perIp[r.ip] || 0) - 1);
     }
     this.inflight = Math.max(0, this.inflight - 1);

@@ -164,6 +164,47 @@ async function run() {
     eq(over.reason, "ip", "9. Call derselben IP korrekt durch 'ip' geblockt");
   }
 
+  console.log("Test 5: Legacy-Reserve ohne r.day (alter Storage) verfaelscht perIp nach Mitternacht NICHT");
+  {
+    FAKE_NOW = RealDate.parse("2026-06-19T23:59:00.000Z");
+    const bd = new BudgetDO(makeState(), makeEnv());
+    await bd.load();
+    // Reserve simulieren, wie sie aus altem Storage (main, vor dem day-Feld) stammt:
+    // KEIN day-Feld, aber ts vom Vortag. Direkt einschleusen und perIp wie am Vortag belegt.
+    const legacyId = "legacy-1";
+    bd.reservations[legacyId] = {
+      amount: 1, subject: "alt", ip: "8.8.8.8",
+      ts: RealDate.parse("2026-06-19T23:50:00.000Z"), exclusive: true,
+    };
+    bd.perIp["8.8.8.8"] = 1;
+    bd.dayReserved = 1;
+    bd.perSubject["alt"] = 1;
+
+    // Rollover: perIp wird geleert.
+    FAKE_NOW = RealDate.parse("2026-06-20T00:01:00.000Z");
+    bd.rolloverIfNeeded();
+    assert(!("8.8.8.8" in bd.perIp), "perIp am neuen Tag geleert (Legacy-Fall)");
+
+    // Neue, erfolgreiche Reserve derselben IP am neuen Tag.
+    const fresh = bd.reserve({ amount: 0.5, subject: "neu", ip: "8.8.8.8", exclusive: false });
+    assert(fresh.ok, "neue Reserve derselben IP akzeptiert (Legacy-Fall)");
+    eq(bd.perIp["8.8.8.8"], 1, "perIp am neuen Tag = 1 (nur der neue Call)");
+
+    // Legacy-Reserve (ohne day) loest sich per release auf — der Belegungs-Tag wird aus ts
+    // abgeleitet (19.06.) und stimmt NICHT mit dem aktuellen Tag ueberein → perIp bleibt
+    // unveraendert (vorher wurde r.day===undefined als aktueller Tag behandelt → Bypass).
+    bd.release({ reserveId: legacyId });
+    eq(bd.perIp["8.8.8.8"], 1, "Legacy-release (Tag aus ts) laesst perIp des neuen Tages unveraendert");
+
+    // Pro-IP-Tageslimit (8) bleibt scharf: nach diesem 1 Call genau 7 weitere, der 9. blockt.
+    for (let i = 0; i < 7; i++) {
+      const r = bd.reserve({ amount: 0.1, subject: "y" + i, ip: "8.8.8.8", exclusive: false });
+      assert(r.ok, `Folge-Reserve ${i} akzeptiert (innerhalb des Limits)`);
+    }
+    const over = bd.reserve({ amount: 0.1, subject: "zuviel", ip: "8.8.8.8", exclusive: false });
+    eq(over.reason, "ip", "9. Call derselben IP korrekt durch 'ip' geblockt (Legacy-Fall)");
+  }
+
   globalThis.Date = RealDate;
   if (failures) { console.error(`\n${failures} Assertion(s) fehlgeschlagen.`); process.exit(1); }
   console.log("\nAlle Cross-Midnight-Budget-Asserts gruen.");
