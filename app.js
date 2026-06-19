@@ -4205,11 +4205,37 @@ function renderResult(result, durationMs) {
 // aus job.attempts neu berechnen und bleibt damit abwaertskompatibel. Spielt
 // absichtlich nur je Stelle, nicht stellenuebergreifend.
 
-// XP eines Versuchs: das erreichte Prozentergebnis (0-100), strikt als Zahl
-// behandelt (alte/importierte Versuche koennen krumme oder fehlende Werte haben).
+// Erreichtes Prozentergebnis eines Versuchs (0-100), defensiv normalisiert: zuerst
+// das top-level Spiegel-Feld att.prozent, sonst der echte Score aus
+// result.gesamt.prozent (dieselbe Quelle wie die Review-Ansicht), sonst 0; auf 0-100
+// geklemmt. ZENTRAL fuer Anzeige UND Fortschritt/Badges/Freischaltungen, damit ein
+// alter Versuch ohne att.prozent ueberall denselben Wert ergibt (kein 80 % in der
+// Anzeige, aber 0 XP im Fortschritt).
+// Strikter Prozent-Leser: nur echte endliche Zahlen oder nicht-leere numerische
+// Strings zaehlen als vorhandener Score; null/undefined/""/Whitespace/NaN ergeben
+// null ("nicht vorhanden"). WICHTIG gegen Number("")===0 / Number(null)===0: ein
+// leeres/null top-level prozent darf NICHT als echte 0 durchgehen und so den echten
+// Score aus result.gesamt.prozent maskieren.
+function readPct(v) {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+function attemptPct(att) {
+  if (!att) return 0;
+  let p = readPct(att.prozent);
+  if (p === null) p = readPct(att.result && att.result.gesamt && att.result.gesamt.prozent);
+  if (p === null) return 0;
+  return Math.max(0, Math.min(100, p));
+}
+
+// XP eines Versuchs: das erreichte Prozentergebnis (0-100) als ganze Zahl.
 function attemptXp(att) {
-  const p = Math.round(Number(att && att.prozent));
-  return Number.isFinite(p) ? Math.max(0, Math.min(100, p)) : 0;
+  return Math.round(attemptPct(att));
 }
 
 // Stufentitel (ohne Emoji, nuechtern-motivierend).
@@ -5272,8 +5298,17 @@ function renderJobBlock(job, opts) {
   const block = document.createElement("div");
   block.className = "job-block";
 
-  const best = Math.max(...job.attempts.map((a) => a.prozent || 0));
-  const last = job.attempts[job.attempts.length - 1].prozent || 0;
+  // Defensiv: eine gespeicherte Stelle koennte (theoretisch) keine Versuche
+  // tragen - dann nicht ueber ein leeres Array Math.max (-> -Infinity) bilden.
+  // Versuche aus aelteren Versionen koennen ohne top-level prozent kommen - ueber den
+  // zentralen attemptPct normalisieren (Fallback auf result.gesamt.prozent, auf 0-100
+  // geklemmt), damit Trend, Tooltip und Score nicht "undefined %" bzw. "NaNpx" zeigen
+  // und Anzeige UND Fortschritt/Badges denselben Wert verwenden.
+  const attempts = Array.isArray(job.attempts) ? job.attempts : [];
+  const pctOf = attemptPct;
+  const lastAtt = attempts[attempts.length - 1];
+  const best = attempts.length ? Math.max(...attempts.map(pctOf)) : 0;
+  const last = pctOf(lastAtt);
 
   const head = document.createElement("div");
   head.className = "job-head";
@@ -5290,7 +5325,7 @@ function renderJobBlock(job, opts) {
   }
   const sub = document.createElement("p");
   sub.className = "hint";
-  sub.textContent = `${job.attempts.length} Versuch${job.attempts.length === 1 ? "" : "e"} · Bester: ${best} % · Letzter: ${last} %`;
+  sub.textContent = `${attempts.length} Versuch${attempts.length === 1 ? "" : "e"} · Bester: ${best} % · Letzter: ${last} %`;
   title.appendChild(sub);
   head.appendChild(title);
   const actions = document.createElement("div");
@@ -5311,11 +5346,12 @@ function renderJobBlock(job, opts) {
   // Verlauf als Balken (chronologisch, max. die letzten 12)
   const trend = document.createElement("div");
   trend.className = "trend";
-  job.attempts.slice(-12).forEach((a) => {
+  attempts.slice(-12).forEach((a) => {
+    const pct = pctOf(a);
     const bar = document.createElement("div");
-    bar.className = "trend-bar " + scoreClass(a.prozent);
-    bar.style.height = Math.max(4, Math.round(a.prozent * 0.44)) + "px";
-    bar.title = `${formatDate(a.date)}: ${a.prozent} %`;
+    bar.className = "trend-bar " + scoreClass(pct);
+    bar.style.height = Math.max(4, Math.round(pct * 0.44)) + "px";
+    bar.title = `${formatDate(a.date)}: ${pct} %`;
     trend.appendChild(bar);
   });
   block.appendChild(trend);
@@ -5326,12 +5362,13 @@ function renderJobBlock(job, opts) {
   // Versuche, neueste zuerst
   const ul = document.createElement("ul");
   ul.className = "attempt-list";
-  job.attempts.slice().reverse().forEach((att) => {
+  attempts.slice().reverse().forEach((att) => {
     const li = document.createElement("li");
     const info = document.createElement("span");
     info.textContent = `${formatDate(att.date)} · ${att.mode === "pruefung" ? "Prüfung" : "Lernen"}` +
       (att.schwierigkeitsgrad ? ` · ${difficultyLabel(att.schwierigkeitsgrad)}` : "") +
-      ` · ${att.quiz.fragen.length} Fragen` +
+      // quiz/fragen koennen bei sehr alten Versuchen fehlen (defensiv lesen).
+      ` · ${att.quiz && Array.isArray(att.quiz.fragen) ? att.quiz.fragen.length : 0} Fragen` +
       // Vertiefungs-Versuche kennzeichnen; aeltere/normale Versuche haben kein
       // vertiefung-Feld (defensiv).
       (att.vertiefung && Array.isArray(att.vertiefung.felder) && att.vertiefung.felder.length
@@ -5345,12 +5382,24 @@ function renderJobBlock(job, opts) {
         : att.tokens && typeof att.tokens.total === "number" && att.tokens.total > 0
         ? ` · ${formatTokens(att.tokens.total)}`
         : "");
+    const attPct = pctOf(att);
     const score = document.createElement("span");
-    score.className = "attempt-score " + scoreClass(att.prozent);
-    score.textContent = att.prozent + " %";
+    score.className = "attempt-score " + scoreClass(attPct);
+    score.textContent = attPct + " %";
     const openBtn = document.createElement("button");
     openBtn.textContent = "Ansehen";
-    openBtn.addEventListener("click", () => openAttempt(job, att));
+    // openAttempt klont att.quiz (liest quiz.fragen) und reicht att.result an
+    // renderResult, das result.gesamt liest. Fehlt eines davon bei sehr alten
+    // Versuchen, wuerde "Ansehen" abstuerzen. Solche Versuche bleiben sichtbar,
+    // aber der Knopf wird deaktiviert (degradierter Zustand statt Crash).
+    const canReview = att.quiz && Array.isArray(att.quiz.fragen) &&
+      att.result && typeof att.result === "object";
+    if (canReview) {
+      openBtn.addEventListener("click", () => openAttempt(job, att));
+    } else {
+      openBtn.disabled = true;
+      openBtn.title = "Ansehen nicht möglich: Daten dieses Versuchs sind unvollständig.";
+    }
     li.appendChild(info);
     li.appendChild(score);
     li.appendChild(openBtn);
@@ -5379,7 +5428,11 @@ const HOME_MAX = 5;
 // Kompakte Karte einer Stelle fuer die Startliste: Titel, Arbeitgeber/Ort,
 // kurze Kennzahlen, Bestwert und ein Mini-Trend. Tippen oeffnet die Subpage.
 function buildHomeCard(job) {
-  const best = Math.max(...job.attempts.map((a) => a.prozent || 0));
+  // Score/Trend ueber den zentralen attemptPct normalisieren (Fallback auf
+  // result.gesamt.prozent, 0-100 geklemmt), damit die Startseite alte Versuche ohne
+  // top-level prozent genauso anzeigt wie die Detailansicht (kein 0 % / NaNpx).
+  const attempts = Array.isArray(job.attempts) ? job.attempts : [];
+  const best = attempts.length ? Math.max(...attempts.map(attemptPct)) : 0;
   const prog = computeJobProgress(job);
   // Bewusst ein div mit role/tabindex statt <button>: die Karte enthaelt
   // Block-Inhalte (Titel, Untertitel, Kennzahlen, Mini-Trend), die im
@@ -5404,7 +5457,7 @@ function buildHomeCard(job) {
   }
   const meta = document.createElement("p");
   meta.className = "hint";
-  meta.textContent = `${job.attempts.length} Versuch${job.attempts.length === 1 ? "" : "e"} · Level ${prog.level}`;
+  meta.textContent = `${attempts.length} Versuch${attempts.length === 1 ? "" : "e"} · Level ${prog.level}`;
   main.appendChild(meta);
 
   const side = document.createElement("div");
@@ -5415,10 +5468,11 @@ function buildHomeCard(job) {
   side.appendChild(score);
   const trend = document.createElement("div");
   trend.className = "trend mini";
-  job.attempts.slice(-8).forEach((a) => {
+  attempts.slice(-8).forEach((a) => {
+    const p = attemptPct(a);
     const bar = document.createElement("div");
-    bar.className = "trend-bar " + scoreClass(a.prozent);
-    bar.style.height = Math.max(3, Math.round(a.prozent * 0.28)) + "px";
+    bar.className = "trend-bar " + scoreClass(p);
+    bar.style.height = Math.max(3, Math.round(p * 0.28)) + "px";
     trend.appendChild(bar);
   });
   side.appendChild(trend);
@@ -6520,20 +6574,36 @@ function importData(text) {
       if (!impJob || !impJob.key || !Array.isArray(impJob.attempts)) return;
       // Nur Versuche mit verwertbarem Zeitstempel UND den tragenden Feldern
       // uebernehmen. Es reicht nicht, dass quiz/result irgendein Objekt sind:
-      // der Verlauf liest att.quiz.fragen.length und att.prozent, die Detail-/
+      // der Verlauf liest att.quiz.fragen.length und den Score, die Detail-/
       // Review-Ansicht iteriert ueber quiz.fragen. Ein Versuch mit gueltigem
-      // date, aber leerem quiz ({}) oder fehlendem prozent wuerde die Historie
+      // date, aber leerem quiz ({}) oder ohne brauchbaren Score wuerde die Historie
       // vergiften und Verlauf/openAttempt/Rendern zum Absturz bringen. result
       // selbst wird ueberall defensiv gelesen (gesamt/ergebnisse optional),
       // muss also nur ein Objekt sein. Stellen ohne brauchbare Versuche werden
       // uebersprungen - ein leeres attempts-Array wuerde sonst beim Rendern
       // abstuerzen.
-      const incoming = impJob.attempts.filter(
-        (a) =>
-          a && typeof a === "object" && Number.isFinite(a.date) && Number.isFinite(a.prozent) &&
-          a.quiz && typeof a.quiz === "object" && Array.isArray(a.quiz.fragen) && a.quiz.fragen.length &&
-          a.result && typeof a.result === "object"
-      );
+      //
+      // Score-Pruefung dieselbe Vertrags-Quelle wie Anzeige/Fortschritt (attemptPct):
+      // ein brauchbarer Score ist top-level prozent ODER result.gesamt.prozent. Aelteren
+      // Backups fehlt das top-level Spiegel-Feld - sie wuerden sonst beim Restore still
+      // verworfen (Datenverlust). Nach der Pruefung das top-level prozent normalisieren,
+      // damit der restaurierte Versuch ueberall denselben Score liefert wie ein frisch
+      // gespeicherter.
+      const incoming = impJob.attempts
+        .filter(
+          (a) =>
+            a && typeof a === "object" && Number.isFinite(a.date) &&
+            (readPct(a.prozent) !== null ||
+              readPct(a.result && a.result.gesamt && a.result.gesamt.prozent) !== null) &&
+            a.quiz && typeof a.quiz === "object" && Array.isArray(a.quiz.fragen) && a.quiz.fragen.length &&
+            a.result && typeof a.result === "object"
+        )
+        // Immer ein normalisiertes numerisches top-level prozent schreiben (readPct +
+        // Fallback auf result.gesamt.prozent, geklemmt). So wird ein leeres/null/krummes
+        // Spiegel-Feld nicht als echte 0 uebernommen, sondern aus dem kanonischen
+        // result-Score gefuellt; Versuche ohne jeden brauchbaren Score sind oben schon
+        // herausgefiltert (kein stilles 0 %).
+        .map((a) => ({ ...a, prozent: attemptPct(a) }));
       if (!incoming.length) return;
       // Stelle zusammenführen wie beim normalen Speichern: zuerst über die
       // stabile URL-Identität, dann über die Stellen-Identität (Titel+Arbeit-
