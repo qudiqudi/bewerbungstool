@@ -5044,11 +5044,18 @@ function saveHistory(h) {
       // ZUERST den entbehrlichen Komfort-Cache (Kernpunkte-Vorschau) opfern, BEVOR
       // echte Versuche verworfen werden - beide teilen sich dasselbe Origin-Quota, und
       // die autoritative Versuchs-Historie ist wichtiger als die nicht-autoritative
-      // Vorschau. Nur einmal noetig (danach ist der Key weg).
-      if (localStorage.getItem(KP_CACHE_KEY) != null) {
-        try { localStorage.removeItem(KP_CACHE_KEY); } catch { /* egal */ }
-        continue; // erneut versuchen, ohne einen Versuch zu loeschen
-      }
+      // Vorschau. ALLE localStorage-Zugriffe hier selbst absichern: in storage-denied-
+      // Umgebungen kann auch getItem/removeItem werfen, saveHistory muss aber ein
+      // Soft-Fail-API bleiben (nie werfen). Scheitert die Cache-Probe, regulaer weiter
+      // zum Versuch-Trimmen.
+      let cacheDropped = false;
+      try {
+        if (localStorage.getItem(KP_CACHE_KEY) != null) {
+          localStorage.removeItem(KP_CACHE_KEY);
+          cacheDropped = true;
+        }
+      } catch { /* Cache-Probe/-Entfernung fehlgeschlagen: ignorieren */ }
+      if (cacheDropped) continue; // erneut versuchen, ohne einen Versuch zu loeschen
       let oldest = null;
       let oldestJob = null;
       h.jobs.forEach((j) => j.attempts.forEach((a) => {
