@@ -1206,10 +1206,16 @@ function regroundImportedKernpunkte(impJob) {
   if (!kp || typeof kp !== "object") return undefined;
   const data = regroundKernpunkteData(kp.data, impJob.jobText);
   if (!data) return undefined;
+  // Provenienz-URL aus dem Backup uebernehmen, damit der "Original-Anzeige"-Link
+  // ein Export/Import (anderer Browser/Geraet) ueberlebt. Nur eine echte http(s)-URL
+  // akzeptieren; sonst leer lassen (dann zeigt das Panel keinen Link, kein falscher).
+  const impSrcUrl =
+    typeof kp.srcUrl === "string" && /^https?:\/\//i.test(kp.srcUrl.trim()) ? kp.srcUrl.trim() : "";
   return {
     v: 1,
     generatedAt: Number.isFinite(Number(kp.generatedAt)) ? Number(kp.generatedAt) : Date.now(),
     srcKey: typeof kp.srcKey === "string" ? kp.srcKey : null,
+    srcUrl: impSrcUrl,
     data,
   };
 }
