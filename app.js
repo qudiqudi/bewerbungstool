@@ -1106,36 +1106,55 @@ function normalizeKernpunkte(k, jobText) {
 // denselben Punkt gern mehrfach (mehrfach identisch in EINER Kategorie) und listen
 // ihn zusaetzlich unter mehreren Kategorien.
 //
-// Zwei Stufen, beide auf dem ANZEIGE-STRING (dem bereinigten Beleg-Zitat), denn nur
-// dieser String wird gerendert UND nur dieser steht auf dem Import-/Render-Pfad
-// ueberhaupt zur Verfuegung (item.text existiert dort nicht mehr):
+// Verglichen wird der ANZEIGE-STRING (das bereinigte Beleg-Zitat), denn nur dieser
+// wird gerendert UND nur dieser steht auf dem Import-/Render-Pfad ueberhaupt zur
+// Verfuegung (item.text existiert dort nicht mehr):
 //   1) INNERHALB einer Kategorie: exakte Dubletten raus - unzweideutig sicher und
 //      genau der gemeldete Defekt ("dasselbe Zitat 3x unter Aufgaben").
-//   2) UEBER Kategorien hinweg (feste Reihenfolge aufgaben -> anforderungen_muss ->
-//      anforderungen_optional -> besonderheiten, erstes Vorkommen gewinnt): ein
-//      WOERTLICH identisches Zitat erscheint nicht ein zweites Mal unter einer
-//      anderen Ueberschrift. Bewusste Abwaegung: das Panel zeigt ausschliesslich das
-//      Zitat (nicht die Modell-Kategorisierung), also waeren zwei Karten mit exakt
-//      demselben Satz fuer den Nutzer nicht unterscheidbares Rauschen - genau der
-//      Fall aus dem gemeldeten Screenshot (dasselbe Zitat unter Aufgaben UND
-//      Muss-Anforderung). Theoretisch kann ein Satz zwei verschiedene Fakten
-//      belegen; in der Praxis liefert das Modell dann unterschiedliche, fokussierte
-//      Belege je Punkt, sodass die Zitate nicht WOERTLICH gleich sind und beide
-//      ueberleben. Nur exakt deckungsgleiche Anzeige-Strings werden zusammengefasst.
-// Die Eingabe-Reihenfolge bleibt sonst erhalten. Die Strings selbst bleiben
-// unveraendert (bereits bereinigt aus cleanKernpunktText).
+//   2) UEBER Kategorien hinweg: ein WOERTLICH identisches Zitat erscheint nur in
+//      EINER Kategorie. Das Panel zeigt ausschliesslich das Zitat (nicht die Modell-
+//      Kategorisierung); zwei Karten mit exakt demselben Satz unter verschiedenen
+//      Ueberschriften waeren fuer den Nutzer nicht unterscheidbares Rauschen - genau
+//      der gemeldete Screenshot-Fall (dasselbe Zitat unter Aufgaben UND Muss-
+//      Anforderung). Nur exakt deckungsgleiche Anzeige-Strings werden zusammengefasst.
+//
+// Welche Kategorie ein geteiltes Zitat behaelt, entscheidet eine PRIORITAET, NICHT
+// die Render-Reihenfolge: anforderungen_muss > anforderungen_optional > aufgaben >
+// besonderheiten. So kann eine Aufgabe NIE eine Muss-Anforderung verdraengen - eine
+// Pflichtanforderung verschwindet also nicht zugunsten einer (weniger kritischen)
+// Taetigkeitsbeschreibung. Innerhalb jeder Kategorie und die Sektions-Reihenfolge im
+// Panel bleiben unveraendert; nur die Karte mit dem doppelten Zitat wandert in die
+// hoeher priorisierte Kategorie. Die Strings selbst bleiben unveraendert (bereits
+// bereinigt aus cleanKernpunktText).
 const KERNPUNKT_CATEGORIES = ["aufgaben", "anforderungen_muss", "anforderungen_optional", "besonderheiten"];
+const KERNPUNKT_DEDUP_PRIORITY = ["anforderungen_muss", "anforderungen_optional", "aufgaben", "besonderheiten"];
 function dedupeKernpunkte(obj) {
   const o = obj && typeof obj === "object" ? obj : {};
-  const seen = new Set();
+  const norm = (item) => String(item == null ? "" : item).toLowerCase().replace(/\s+/g, " ").trim();
+  // Pro normalisiertem Zitat die Kategorie mit der hoechsten Prioritaet bestimmen,
+  // in der es vorkommt. Diese "Gewinner"-Kategorie behaelt das Zitat; in allen
+  // anderen Kategorien faellt es als Dublette weg.
+  const winner = new Map();
+  KERNPUNKT_DEDUP_PRIORITY.forEach((cat) => {
+    const arr = Array.isArray(o[cat]) ? o[cat] : [];
+    arr.forEach((item) => {
+      const key = norm(item);
+      if (key && !winner.has(key)) winner.set(key, cat);
+    });
+  });
+  // In Render-/Speicher-Reihenfolge ausgeben; je Kategorie nur die Eintraege, deren
+  // Gewinner diese Kategorie ist, und dort auch nur das erste Vorkommen (Inner-
+  // Kategorie-Dublette).
   const result = {};
   KERNPUNKT_CATEGORIES.forEach((cat) => {
     const arr = Array.isArray(o[cat]) ? o[cat] : [];
+    const seenHere = new Set();
     const kept = [];
     arr.forEach((item) => {
-      const key = String(item == null ? "" : item).toLowerCase().replace(/\s+/g, " ").trim();
-      if (!key || seen.has(key)) return;
-      seen.add(key);
+      const key = norm(item);
+      if (!key || seenHere.has(key)) return;
+      if (winner.get(key) !== cat) return;
+      seenHere.add(key);
       kept.push(item);
     });
     result[cat] = kept;
