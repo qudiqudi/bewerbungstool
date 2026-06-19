@@ -37,6 +37,9 @@ export class BudgetDO {
     this.alertedDay = (await s.get("alertedDay")) || null;
     this.alertPending = (await s.get("alertPending")) || false;
     this.alertTries = (await s.get("alertTries")) || 0;
+    // Snapshot (Tag + committed) vom Zeitpunkt der Schwellen-Ueberschreitung, damit die
+    // (ggf. nach Mitternacht zugestellte) Meldung den korrekten Tag/Betrag nennt.
+    this.alertSnapshot = (await s.get("alertSnapshot")) || null;
     this.loaded = true;
   }
 
@@ -52,6 +55,7 @@ export class BudgetDO {
       alertedDay: this.alertedDay,
       alertPending: this.alertPending,
       alertTries: this.alertTries,
+      alertSnapshot: this.alertSnapshot,
     });
   }
 
@@ -180,8 +184,14 @@ export class BudgetDO {
     return { ok: true };
   }
 
+  // NaN-safe: fehlt/vermurkst ALERT_AT oder DAY_BUDGET_USD, liefert dies Infinity,
+  // sodass committed < Infinity immer true bleibt und NIEMALS faelschlich alarmiert
+  // (eine fehlkonfigurierte Schwelle darf keinen Dauer-Alert ausloesen).
   alertThreshold() {
-    return Number(this.env.ALERT_AT) * Number(this.env.DAY_BUDGET_USD);
+    const at = Number(this.env.ALERT_AT);
+    const budget = Number(this.env.DAY_BUDGET_USD);
+    if (!Number.isFinite(at) || !Number.isFinite(budget)) return Infinity;
+    return at * budget;
   }
 
   stats() {
@@ -207,11 +217,17 @@ export class BudgetDO {
     if (!this.env.BUDGET_ALERT_WEBHOOK) return;
     if (this.alertedDay === this.day) return;
     if (this.dayReserved + this.daySpent < this.alertThreshold()) return;
+    // ZUERST den Alarm scharf schalten, DANN den Latch setzen: schlaegt setAlarm fehl,
+    // bleibt der Latch ungesetzt und die naechste Buchung versucht es erneut (statt den
+    // Tag still ohne geplante Zustellung zu verbrennen). Snapshot von committed/Tag zum
+    // Ueberschreitungs-Zeitpunkt festhalten, damit eine nach Mitternacht zugestellte
+    // Meldung den richtigen Tag/Betrag nennt (alarm() rollt sonst auf den neuen Tag).
+    try { await this.state.storage.setAlarm(Date.now() + 1000); }
+    catch { return; } // Alarm nicht planbar → NICHT latchen, spaeter erneut versuchen
     this.alertedDay = this.day;
     this.alertPending = true;
     this.alertTries = 0;
-    // Sofort zustellen versuchen (kurze Verzoegerung, damit persist() zuerst greift).
-    try { await this.state.storage.setAlarm(Date.now() + 1000); } catch { /* Alarm best-effort */ }
+    this.alertSnapshot = { day: this.day, committed: round(this.dayReserved + this.daySpent) };
   }
 
   // Durable Zustellung des Budget-Alerts. Sendet awaited an den generischen Webhook
@@ -226,12 +242,16 @@ export class BudgetDO {
       await this.persist();
       return;
     }
-    const committed = this.dayReserved + this.daySpent;
+    // Aus dem Snapshot melden (Tag/Betrag zur Ueberschreitung), NICHT aus den nach einem
+    // moeglichen Rollover veraenderten Live-Werten — sonst nennt eine um 00:01 zugestellte
+    // Meldung faelschlich den neuen Tag mit fast-Null-committed.
+    const snap = this.alertSnapshot || { day: this.day, committed: this.dayReserved + this.daySpent };
     const budget = Number(this.env.DAY_BUDGET_USD);
-    const pct = budget > 0 ? Math.round((committed / budget) * 100) : 0;
+    const committed = snap.committed;
+    const pct = Number.isFinite(budget) && budget > 0 ? Math.round((committed / budget) * 100) : 0;
     const msg =
       `jobreif Budget-Warnung: Tagesbudget zu ${pct}% ausgeschoepft ` +
-      `(${round(committed)} von ${budget} USD, UTC-Tag ${this.day}). ` +
+      `(${round(committed)} von ${budget} USD, UTC-Tag ${snap.day}). ` +
       `Bei 100% liefert der Hosted-Modus 503, bis das Budget um UTC-Mitternacht zuruecksetzt.`;
     let ok = false;
     try {
@@ -244,12 +264,14 @@ export class BudgetDO {
     } catch { ok = false; }
     if (ok) {
       this.alertPending = false;
+      this.alertSnapshot = null;
     } else {
       this.alertTries = (this.alertTries || 0) + 1;
       if (this.alertTries >= 5) {
         // Aufgeben: Latch bleibt fuer den Tag gesetzt (kein Dauer-Retry-Sturm), aber
         // die Outbox wird geleert. Der naechste Tag meldet wieder frisch.
         this.alertPending = false;
+        this.alertSnapshot = null;
       } else {
         const backoff = Math.min(60000 * this.alertTries, 300000); // 1..5 min
         try { await this.state.storage.setAlarm(Date.now() + backoff); } catch { /* best-effort */ }

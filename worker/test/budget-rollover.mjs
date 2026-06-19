@@ -239,6 +239,7 @@ async function run() {
       eq(sends.length, 1, "Alarm sendet genau einen Webhook");
       assert(sends[0].body.content && sends[0].body.text, "Body hat content UND text");
       assert(!/@|\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/.test(sends[0].body.text), "Body enthaelt keine E-Mail/IP");
+      assert(sends[0].body.text.includes("2026-06-19"), "Meldung nennt den Tag der Ueberschreitung");
       assert(!bd.alertPending, "Outbox nach Erfolg geleert");
 
       // Weitere Buchungen am selben Tag: KEIN zweiter Alert.
@@ -278,6 +279,46 @@ async function run() {
       eq(sends.length, 1, "Fehlversuch hat gesendet");
       assert(bd3.alertPending, "nach Fehlschlag Outbox weiter scharf (Retry geplant)");
       eq(bd3.alertTries, 1, "Retry-Zaehler erhoeht");
+
+      // Cross-midnight: Schwelle am Vortag ueberschritten, Zustellung erst nach Mitternacht
+      // → Meldung nennt den SNAPSHOT-Tag/-Betrag, nicht die rollover-veraenderten Werte.
+      sends = [];
+      failNext = false;
+      FAKE_NOW = RealDate.parse("2026-06-19T23:59:00.000Z");
+      const bd4 = new BudgetDO(makeState(), makeEnv({ BUDGET_ALERT_WEBHOOK: "https://hook.example/x" }));
+      await bd4.load();
+      bd4.reserve({ amount: 5, subject: "a", ip: "1.1.1.1", exclusive: false });
+      bd4.settle({ reserveId: bd4.reserve({ amount: 4, subject: "b", ip: "2.2.2.2", exclusive: false }).reserveId, cost: 4 });
+      await bd4.maybeArmAlert();
+      assert(bd4.alertPending, "Vortag ueber Schwelle scharf");
+      // Mitternacht ueberschreiten, DANN zustellen.
+      FAKE_NOW = RealDate.parse("2026-06-20T00:01:00.000Z");
+      await bd4.alarm();
+      eq(sends.length, 1, "Cross-midnight: genau ein Webhook");
+      assert(sends[0].body.text.includes("2026-06-19"), "Cross-midnight: Meldung nennt den Vortag (Snapshot)");
+      assert(!sends[0].body.text.includes("2026-06-20"), "Cross-midnight: Meldung nennt NICHT den neuen Tag");
+
+      // NaN-safe: fehlende ALERT_AT/DAY_BUDGET_USD → Schwelle Infinity → NIE Alarm.
+      sends = [];
+      FAKE_NOW = RealDate.parse("2026-06-19T12:00:00.000Z");
+      const bd5 = new BudgetDO(makeState(), makeEnv({ ALERT_AT: undefined, BUDGET_ALERT_WEBHOOK: "https://hook.example/x" }));
+      await bd5.load();
+      eq(bd5.alertThreshold(), Infinity, "fehlkonfigurierte Schwelle = Infinity");
+      bd5.reserve({ amount: 4, subject: "a", ip: "1.1.1.1", exclusive: false });
+      bd5.reserve({ amount: 1, subject: "b", ip: "2.2.2.2", exclusive: false });
+      await bd5.maybeArmAlert();
+      assert(!bd5.alertPending, "fehlkonfigurierte Schwelle loest KEINEN Alert aus");
+
+      // setAlarm wirft → Latch NICHT gesetzt (naechste Buchung versucht erneut, kein Verlust).
+      sends = [];
+      const stateThrow = makeState();
+      stateThrow.storage.setAlarm = async () => { throw new Error("kein Alarm"); };
+      const bd6 = new BudgetDO(stateThrow, makeEnv({ BUDGET_ALERT_WEBHOOK: "https://hook.example/x" }));
+      await bd6.load();
+      bd6.reserve({ amount: 5, subject: "a", ip: "1.1.1.1", exclusive: false });
+      bd6.reserve({ amount: 4, subject: "b", ip: "2.2.2.2", exclusive: false });
+      await bd6.maybeArmAlert();
+      assert(!bd6.alertPending && bd6.alertedDay !== bd6.day, "setAlarm-Fehler latcht NICHT (Tag nicht verbrannt)");
     } finally {
       globalThis.fetch = realFetch;
     }

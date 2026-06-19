@@ -11,7 +11,7 @@ const CHANGELOG = [
     version: "1.8.7",
     date: "19.06.2026",
     items: [
-      "Gemeldete Fragen erreichen jetzt auch uns: Wenn du eine Frage meldest, wird die Meldung weiterhin lokal gespeichert und zusätzlich anonym an den Betreiber übermittelt, damit wir schwache Fragen verbessern können.",
+      "Gemeldete Fragen erreichen jetzt auch uns: Wenn du eine Frage meldest, wird die Meldung weiterhin lokal gespeichert und zusätzlich an den Betreiber übermittelt (ohne IP-Adresse), damit wir schwache Fragen verbessern können.",
       "Anonyme Nutzungsstatistik: Im gehosteten Modus zählen wir cookielos und ohne persönliche Daten mit, welche Funktionen genutzt werden (z. B. Lern- oder Prüfungsmodus), um das Tool zu verbessern.",
     ],
   },
@@ -2803,8 +2803,6 @@ async function generateQuiz(opts = {}) {
   const numQuestions = $("num-questions").value;
   mode = document.querySelector('input[name="mode"]:checked').value;
   let difficulty = document.querySelector('input[name="difficulty"]:checked').value;
-  trackEvent("quiz-generate");
-
   // Vertiefungsbogen: ohne Themenfeld kein Aufruf (Schutz auch hier im Einstieg,
   // nicht nur im UI). Schwierigkeit wird bewusst auf "schwer" erzwungen.
   if (vertiefung) {
@@ -2849,6 +2847,10 @@ async function generateQuiz(opts = {}) {
     if (uk) { urlKey = uk; jobUrl = lastFetch.url; }
   }
   const vertiefungFelder = vertiefung ? vertiefung.felder.map((f) => ({ id: f.id, label: f.label })) : null;
+
+  // Erst hier zaehlen: nach der Ersetzen-Rueckfrage und allen Vor-Checks, unmittelbar
+  // vor dem tatsaechlichen Generierungs-Dispatch (kein Zaehlen fuer abgebrochene Laeufe).
+  trackEvent("quiz-generate");
 
   // Hosted (Punkt 1): Generierung laeuft serverseitig als Hintergrund-Job. Der Client
   // startet den Job und pollt; der Test bricht NICHT ab, wenn der Tab in den Hintergrund
