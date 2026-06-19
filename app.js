@@ -2258,6 +2258,8 @@ function jsonLdLocation(v, stripFn) {
   const parts = [addr.addressLocality, addr.addressRegion, addr.postalCode, addr.addressCountry]
     .map((p) => (typeof p === "string" ? stripFn(p) : (jsonLdName(p) || "")))
     .filter(Boolean);
+  // Place ohne Adressfelder, aber mit Name (z. B. nur "Berlin"): Name nutzen.
+  if (!parts.length) return jsonLdName(v);
   return parts.join(", ");
 }
 
@@ -2319,19 +2321,33 @@ function stripHtmlToText(html) {
 // Holt das rohe HTML einer URL ueber Jina (HTML-Modus), parst alle
 // JSON-LD-Bloecke tolerant und liefert bei Fund eines brauchbaren JobPosting
 // den zusammengesetzten Text - sonst "".
+// Obergrenze fuer das geparste HTML: schuetzt den DOMParser vor uebergrossen
+// oder boesartigen Antworten, bevor der bewaehrte Markdown-Pfad greift.
+const JSONLD_HTML_MAX = 4 * 1024 * 1024; // 4 MB
+const JSONLD_FETCH_TIMEOUT_MS = 15000;
+
 async function fetchJobPostingJsonLd(u) {
   if (typeof DOMParser === "undefined") return "";
   let html;
+  // Timeout, damit ein haengender HTML-Abruf den Import nicht blockiert -
+  // bei Abbruch faellt fetchJobFromUrl auf den Markdown-Pfad zurueck.
+  const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), JSONLD_FETCH_TIMEOUT_MS) : 0;
   try {
     const res = await fetch("https://r.jina.ai/" + u, {
       headers: { "X-Return-Format": "html" },
+      signal: ctrl ? ctrl.signal : undefined,
     });
     if (!res.ok) return "";
     html = await res.text();
   } catch {
     return "";
+  } finally {
+    if (timer) clearTimeout(timer);
   }
   if (!html) return "";
+  // Uebergrosses HTML gar nicht erst parsen - lieber der Markdown-Pfad.
+  if (html.length > JSONLD_HTML_MAX) return "";
   let doc;
   try {
     doc = new DOMParser().parseFromString(html, "text/html");
@@ -2352,14 +2368,18 @@ async function fetchJobPostingJsonLd(u) {
     collectJobPostings(parsed, jobs, 0);
   });
   if (!jobs.length) return "";
-  // Mehrere JobPostings (z. B. Detail + verwandte Stellen): den mit der
-  // laengsten Beschreibung nehmen.
-  let bestText = "";
+  // Mehrere JobPostings (z. B. die Detailanzeige plus verwandte Stellen):
+  // collectJobPostings liefert sie in Dokumentreihenfolge - die primaere
+  // Anzeige (oft im ersten/mainEntity-Block) steht typischerweise vorn. Den
+  // ERSTEN Block mit brauchbarer Beschreibung nehmen statt blind den laengsten
+  // (eine ausfuehrliche "verwandte Stelle" wuerde sonst die eigentliche Anzeige
+  // verdraengen). jobPostingToText gibt "" zurueck, wenn die Beschreibung zu
+  // duenn ist, also ueberspringen wir solche Bloecke automatisch.
   for (const job of jobs) {
     const text = jobPostingToText(job, stripHtmlToText);
-    if (text.length > bestText.length) bestText = text;
+    if (text) return text;
   }
-  return bestText;
+  return "";
 }
 
 async function fetchJobFromUrl(url) {
@@ -2367,7 +2387,10 @@ async function fetchJobFromUrl(url) {
   // HTML. Best-effort - bei jedem Fehlschlag still weiter zum Markdown-Pfad.
   try {
     const jsonLd = await fetchJobPostingJsonLd(url);
-    if (jsonLd && jsonLd.length > 300) return jsonLd;
+    // Dieselbe Schwelle wie der Aufrufer (looksLikeRealContent): so faellt ein
+    // duenner JSON-LD-Treffer auf den Markdown-Pfad zurueck, statt ihn als
+    // unvollstaendigen Text zu uebernehmen (Konsistenz der Fallback-Kette).
+    if (jsonLd && looksLikeRealContent(jsonLd)) return jsonLd;
   } catch {
     // egal was schiefgeht: unten der bewaehrte Markdown-Pfad
   }
