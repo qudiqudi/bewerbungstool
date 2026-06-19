@@ -4375,8 +4375,10 @@ function dayOrdinal(ts) {
   return Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
 }
 
-// Aktuelle (am letzten Uebungstag endende) und laengste Serie aufeinander-
-// folgender Uebungstage.
+// Aktuelle (AKTIVE) und laengste Serie aufeinanderfolgender Uebungstage.
+// current ist die noch laufende Serie: 0, sobald der letzte Uebungstag aelter als
+// gestern ist (Serie unterbrochen). best (Rekord) bleibt davon unberuehrt - eine
+// frueher erreichte Serie zaehlt weiter als Bestwert/Abzeichen.
 function computeStreaks(attempts) {
   const days = [...new Set(attempts.map((a) => dayOrdinal(a.date)))].sort((a, b) => a - b);
   if (!days.length) return { current: 0, best: 0 };
@@ -4389,6 +4391,9 @@ function computeStreaks(attempts) {
   for (let i = days.length - 1; i > 0; i--) {
     if (days[i] - days[i - 1] === 1) current++; else break;
   }
+  // Nur eine noch aktive Serie zaehlt: ist der letzte Uebungstag aelter als gestern
+  // (Differenz > 1 zum heutigen Tag), ist die Serie gerissen -> current = 0.
+  if (dayOrdinal(Date.now()) - days[days.length - 1] > 1) current = 0;
   return { current, best };
 }
 
