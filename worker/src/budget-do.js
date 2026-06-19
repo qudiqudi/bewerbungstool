@@ -49,16 +49,36 @@ export class BudgetDO {
     const d = today();
     if (d === this.day) return;
     this.day = d;
-    // Echte Tageswerte zuruecksetzen: Ausgaben + Pro-Tag-Kontingente.
+    // Echte Tageswerte zuruecksetzen: Ausgaben starten bei 0.
     this.daySpent = 0;
-    this.perSubject = {};
-    this.perIp = {};
     // ABER offene Reservierungen NICHT verwerfen: ein Stream, der ueber Mitternacht
     // laeuft, muss seine Reserve behalten, sonst findet sein settle die Reservierung
     // nicht mehr und der echte usage.cost ginge verloren — und der In-flight-Zaehler
-    // wuerde mitten im Stream auf 0 gesetzt (kurzzeitige Ueber-Concurrency). dayReserved
-    // konsistent auf die Summe der noch offenen Reserven neu setzen; inflight bleibt.
-    this.dayReserved = Object.values(this.reservations).reduce((sum, r) => sum + r.amount, 0);
+    // wuerde mitten im Stream auf 0 gesetzt (kurzzeitige Ueber-Concurrency).
+    //
+    // perSubject und dayReserved werden von settle/release/reconcile spaeter wieder
+    // abgebucht (Netto: settle +cost, release 0, reconcile +est). Deshalb sie NICHT
+    // leeren, sondern aus den ueberlebenden Reserven NEU AUFBAUEN — sonst clampt die
+    // spaetere Abbuchung gegen den genullten Bucket auf 0 und der Pro-Subjekt-Anteil
+    // dieses Calls ginge am neuen Tag still verloren.
+    //
+    // perIp ist ANDERS: ein Pro-Tag-Nutzungszaehler, den NUR release (Vor-Generierungs-
+    // Fehler) dekrementiert; settle/reconcile lassen ihn stehen, weil ein erfolgreicher
+    // Call dauerhaft gegen das Tageslimit zaehlen soll. Wuerden wir ihn aus den
+    // ueberlebenden Reserven neu aufbauen, bliebe der Eintrag nach dem settle den
+    // ganzen neuen Tag stehen (settle entfernt ihn nicht) — der ueber Mitternacht
+    // laufende Call zaehlte dann gegen alten UND neuen Tag und koennte das Pro-IP-
+    // Tageslimit faelschlich erschoepfen. Also bewusst leeren. Damit ein spaeteres
+    // release einer Vortags-Reserve nicht den neu belegten perIp-Eintrag des heutigen
+    // Tages herunterreisst, traegt jede Reserve ihren Belegungs-Tag (r.day); release
+    // dekrementiert perIp nur fuer Reserven des aktuellen Tages (siehe release()).
+    this.perSubject = {};
+    this.perIp = {};
+    this.dayReserved = 0;
+    for (const r of Object.values(this.reservations)) {
+      this.perSubject[r.subject] = (this.perSubject[r.subject] || 0) + r.amount;
+      this.dayReserved += r.amount;
+    }
   }
 
   // Abgelaufene Reserven ohne Settle konservativ runterbuchen (Hälfte des Worst-Case)
@@ -103,7 +123,11 @@ export class BudgetDO {
     this.inflight += 1;
     this.perSubject[subject] = (this.perSubject[subject] || 0) + amount;
     this.perIp[ip] = (this.perIp[ip] || 0) + 1;
-    this.reservations[reserveId] = { amount, subject, ip, ts: Date.now(), exclusive: !!exclusive };
+    // day = Tag, dessen perIp-Zaehler diese Reserve belegt hat. release darf perIp nur
+    // dann dekrementieren, wenn die Reserve noch zum aktuellen Zaehler-Tag gehoert — sonst
+    // wuerde eine ueber Mitternacht laufende Reserve beim release den (geleerten und
+    // moeglicherweise schon neu belegten) perIp-Zaehler des NEUEN Tages verfaelschen.
+    this.reservations[reserveId] = { amount, subject, ip, day: this.day, ts: Date.now(), exclusive: !!exclusive };
     return { ok: true, reserveId };
   }
 
@@ -125,7 +149,22 @@ export class BudgetDO {
     if (!r) return { ok: true };
     this.dayReserved = Math.max(0, this.dayReserved - r.amount);
     this.perSubject[r.subject] = Math.max(0, (this.perSubject[r.subject] || 0) - r.amount);
-    this.perIp[r.ip] = Math.max(0, (this.perIp[r.ip] || 0) - 1);
+    // perIp nur dekrementieren, wenn die Reserve zum aktuellen Zaehler-Tag gehoert.
+    // Eine ueber Mitternacht laufende Reserve hat ihren IP-Slot am Vortag belegt (der
+    // beim Rollover geleert wurde) — wuerde sie hier dekrementieren, riss sie den
+    // perIp-Eintrag eines inzwischen neu eingebuchten Calls vom heutigen Tag faelschlich
+    // herunter und das Pro-IP-Tageslimit liesse sich umgehen.
+    //
+    // Legacy-Reserven aus dem alten Storage (von main, vor diesem Feld) haben kein r.day.
+    // Sie als "aktueller Tag" zu behandeln, riss exakt diese Luecke wieder auf: eine alte
+    // Reserve, die ueber Mitternacht laeuft, wuerde beim release den frisch belegten
+    // perIp-Zaehler des neuen Tages herunterreissen (Pro-IP-Limit umgehbar). Deshalb den
+    // Belegungs-Tag aus r.ts ableiten (gleiches UTC-Format wie today()); fehlt auch ts,
+    // konservativ NICHT dekrementieren (Limit bleibt hart).
+    const occupancyDay = r.day ?? (typeof r.ts === "number" ? new Date(r.ts).toISOString().slice(0, 10) : null);
+    if (occupancyDay === this.day) {
+      this.perIp[r.ip] = Math.max(0, (this.perIp[r.ip] || 0) - 1);
+    }
     this.inflight = Math.max(0, this.inflight - 1);
     delete this.reservations[reserveId];
     return { ok: true };
