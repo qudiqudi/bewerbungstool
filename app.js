@@ -5250,7 +5250,19 @@ function saveAttempt(result, durationMs, evalCost, evalTokens) {
       let curKey = null;
       try { curKey = jobKey(quiz.jobText); } catch { /* egal */ }
       if (curKey && curKey === job.key) {
-        job.kernpunkte = { v: 1, generatedAt: Date.now(), srcKey: curKey, data: quiz.kernpunkte };
+        // Quell-URL der Kernpunkte MIT in den Wrapper schreiben (Provenienz). Der
+        // "Original-Anzeige"-Link im Panel wird hieraus gerendert, NICHT aus job.url:
+        // job.url kann bei einem identityKey-Merge mit abweichendem Text nachgetragen
+        // werden (s. oben), ohne dass jobText/kernpunkte wechseln - dann zeigte job.url
+        // auf eine andere Anzeige als die angezeigten Kernpunkte. srcUrl = die URL, aus
+        // deren Text DIESE Kernpunkte stammen. Fehlt quiz.jobUrl (Text eingefuegt), eine
+        // bereits bekannte srcUrl desselben Texts bewahren, damit der Link nicht flackert.
+        const prevSrcUrl =
+          job.kernpunkte && job.kernpunkte.srcKey === curKey && typeof job.kernpunkte.srcUrl === "string"
+            ? job.kernpunkte.srcUrl
+            : "";
+        const srcUrl = typeof quiz.jobUrl === "string" && quiz.jobUrl ? quiz.jobUrl : prevSrcUrl;
+        job.kernpunkte = { v: 1, generatedAt: Date.now(), srcKey: curKey, srcUrl, data: quiz.kernpunkte };
       }
     }
   }
@@ -5746,7 +5758,14 @@ function buildKernpunktePanel(job) {
   // zeigt (nur wenn Text vorhanden). Beide optional - fehlt beides, kein Balken.
   const actions = document.createElement("div");
   actions.className = "kernpunkte-actions";
-  const srcUrl = job && typeof job.url === "string" ? job.url.trim() : "";
+  // Link NUR aus der Kernpunkte-Provenienz (srcUrl), nicht aus job.url: nur so ist
+  // garantiert, dass die verlinkte Anzeige genau die ist, aus der diese Kernpunkte
+  // (und der Anzeigentext unten) extrahiert wurden. Aeltere Kernpunkte ohne srcUrl
+  // bekommen den Link erst beim naechsten Test aus einer URL-Quelle - lieber kein
+  // Link als ein moeglicherweise falscher.
+  const srcUrl = job && job.kernpunkte && typeof job.kernpunkte.srcUrl === "string"
+    ? job.kernpunkte.srcUrl.trim()
+    : "";
   if (/^https?:\/\//i.test(srcUrl)) {
     const link = document.createElement("a");
     link.className = "kernpunkte-action";
