@@ -4211,11 +4211,25 @@ function renderResult(result, durationMs) {
 // geklemmt. ZENTRAL fuer Anzeige UND Fortschritt/Badges/Freischaltungen, damit ein
 // alter Versuch ohne att.prozent ueberall denselben Wert ergibt (kein 80 % in der
 // Anzeige, aber 0 XP im Fortschritt).
+// Strikter Prozent-Leser: nur echte endliche Zahlen oder nicht-leere numerische
+// Strings zaehlen als vorhandener Score; null/undefined/""/Whitespace/NaN ergeben
+// null ("nicht vorhanden"). WICHTIG gegen Number("")===0 / Number(null)===0: ein
+// leeres/null top-level prozent darf NICHT als echte 0 durchgehen und so den echten
+// Score aus result.gesamt.prozent maskieren.
+function readPct(v) {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
 function attemptPct(att) {
   if (!att) return 0;
-  let p = Number(att.prozent);
-  if (!Number.isFinite(p)) p = Number(att.result && att.result.gesamt && att.result.gesamt.prozent);
-  if (!Number.isFinite(p)) return 0;
+  let p = readPct(att.prozent);
+  if (p === null) p = readPct(att.result && att.result.gesamt && att.result.gesamt.prozent);
+  if (p === null) return 0;
   return Math.max(0, Math.min(100, p));
 }
 
@@ -6579,12 +6593,17 @@ function importData(text) {
         .filter(
           (a) =>
             a && typeof a === "object" && Number.isFinite(a.date) &&
-            (Number.isFinite(Number(a.prozent)) ||
-              Number.isFinite(Number(a.result && a.result.gesamt && a.result.gesamt.prozent))) &&
+            (readPct(a.prozent) !== null ||
+              readPct(a.result && a.result.gesamt && a.result.gesamt.prozent) !== null) &&
             a.quiz && typeof a.quiz === "object" && Array.isArray(a.quiz.fragen) && a.quiz.fragen.length &&
             a.result && typeof a.result === "object"
         )
-        .map((a) => (Number.isFinite(Number(a.prozent)) ? a : { ...a, prozent: attemptPct(a) }));
+        // Immer ein normalisiertes numerisches top-level prozent schreiben (readPct +
+        // Fallback auf result.gesamt.prozent, geklemmt). So wird ein leeres/null/krummes
+        // Spiegel-Feld nicht als echte 0 uebernommen, sondern aus dem kanonischen
+        // result-Score gefuellt; Versuche ohne jeden brauchbaren Score sind oben schon
+        // herausgefiltert (kein stilles 0 %).
+        .map((a) => ({ ...a, prozent: attemptPct(a) }));
       if (!incoming.length) return;
       // Stelle zusammenführen wie beim normalen Speichern: zuerst über die
       // stabile URL-Identität, dann über die Stellen-Identität (Titel+Arbeit-
