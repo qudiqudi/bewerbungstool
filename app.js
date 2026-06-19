@@ -6994,19 +6994,19 @@ $("btn-history-back").addEventListener("click", goReturn);
 
 // Startliste und Stellen-Subpage
 $("btn-new-job").addEventListener("click", () => {
-  // Neue Stelle: Eingabefelder fuer einen frischen Start leeren (kein zuvor
-  // geoeffneter Stellentext/-Link bleibt stehen). Den persistierten Entwurf
-  // (bewerbungstool.draft) dabei bewusst NICHT ueberschreiben - sonst ginge ein
-  // noch nicht abgeschickter Entwurf unwiderruflich verloren. Sobald hier etwas
-  // eingegeben wird, sichert scheduleDraftSave den neuen Stand ohnehin.
-  // Zuerst einen evtl. noch ausstehenden (debounced) Speichervorgang abbrechen:
-  // sonst liefe er nach dem Leeren und schriebe die jetzt leeren Felder doch noch
-  // in den Entwurf (Race im 400ms-Fenster, Codex-Review).
+  // Neue Stelle = bewusster Frischstart (vom Nutzer so entschieden): Felder leeren
+  // UND den Entwurf zuruecksetzen, damit kein zuvor geoeffneter Stellentext/-Link
+  // und kein alter Entwurf mehr auftaucht - auch nicht nach einem Reload oder ueber
+  // einen anderen Save-Pfad (z. B. Tab-Wechsel). Der Entwurf ist bewusst nur Komfort
+  // (s. saveDraft), daher ist das Verwerfen hier vertretbar.
+  // 1) ausstehenden debounced Save abbrechen, 2) Felder + lastFetch leeren,
+  // 3) persistierten Entwurf entfernen.
   clearTimeout(draftSaveTimer);
   draftSaveTimer = 0;
   $("job-url").value = "";
   $("job-text").value = "";
   lastFetch = { url: "", text: "" };
+  try { localStorage.removeItem(DRAFT_KEY); } catch { /* Entwurf ist nur Komfort */ }
   showView("view-input");
 });
 $("active-job-start").addEventListener("click", startReadyJob);
