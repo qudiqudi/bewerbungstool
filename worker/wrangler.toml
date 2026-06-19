@@ -80,15 +80,9 @@ migrations_dir = "migrations"
 # Workers Analytics Engine: anonyme, personenunabhaengige Produkt-Nutzungsstatistik
 # (Flow-Name/Anbieter/Stufe als Diskriminatoren, KEINE IP/Texte/E-Mail/IDs). Geschrieben
 # ueber POST /api/event (env.AE.writeDataPoint). Free-Tier, keine zusaetzliche Infra.
-#
-# VORUEBERGEHEND DEAKTIVIERT: Das Analytics-Engine-Entitlement ist auf dem Account
-# nicht aktiv (Deploy scheitert mit code 10089) und der Dashboard-"Enable"-Button ist
-# kaputt (Click feuert keinen Request). /api/event no-opt sauber, wenn env.AE fehlt
-# (siehe handleEvent-Guard in src/index.js). Sobald AE per Support aktiviert ist, die
-# folgenden drei Zeilen wieder einkommentieren und neu deployen. Siehe [[ae-binding-deploy-gate]].
-# [[analytics_engine_datasets]]
-# binding = "AE"
-# dataset = "jobreif_events"
+[[analytics_engine_datasets]]
+binding = "AE"
+dataset = "jobreif_events"
 
 [[durable_objects.bindings]]
 name = "BUDGET_DO"
