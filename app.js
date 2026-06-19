@@ -3015,7 +3015,17 @@ function persistKernpunkteForActiveJob(q) {
       : "";
   const srcUrl = typeof q.jobUrl === "string" && q.jobUrl ? q.jobUrl : prevSrcUrl;
   job.kernpunkte = { v: 1, generatedAt: Date.now(), srcKey: key, srcUrl, data: q.kernpunkte };
-  saveHistory(h);
+  // WICHTIG: NICHT ueber saveHistory schreiben - dessen Quota-Pfad verwirft bei vollem
+  // Speicher aelteste Versuche/leere Stellen. Diese Aktualisierung ist nur Komfort
+  // (Panel frueher sichtbar) und darf NIE gespeicherte Ergebnisse verdraengen. Daher
+  // ein einzelner, nicht-verdraengender Schreibversuch; bei Quota-Fehler still
+  // auslassen - saveAttempt schreibt die Kernpunkte beim Abschluss ohnehin (und darf
+  // dann, an ein echtes Speichern gekoppelt, evicten). h ist eine frische Kopie aus
+  // loadHistory; scheitert der Schreibversuch, wird sie verworfen, der gespeicherte
+  // Verlauf bleibt unveraendert.
+  try {
+    localStorage.setItem("bewerbungstool.history", JSON.stringify(h));
+  } catch { /* Speicher voll/blockiert: Komfort-Update auslassen, keine Daten verwerfen */ }
 }
 
 function finalizeQuiz(result, ctx) {
