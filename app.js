@@ -5036,11 +5036,19 @@ function loadHistory() {
 // das Ergebnis pruefen.
 function saveHistory(h) {
   // Bei vollem Speicher aelteste Versuche verwerfen und erneut versuchen
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 6; i++) {
     try {
       localStorage.setItem("bewerbungstool.history", JSON.stringify(h));
       return true;
     } catch {
+      // ZUERST den entbehrlichen Komfort-Cache (Kernpunkte-Vorschau) opfern, BEVOR
+      // echte Versuche verworfen werden - beide teilen sich dasselbe Origin-Quota, und
+      // die autoritative Versuchs-Historie ist wichtiger als die nicht-autoritative
+      // Vorschau. Nur einmal noetig (danach ist der Key weg).
+      if (localStorage.getItem(KP_CACHE_KEY) != null) {
+        try { localStorage.removeItem(KP_CACHE_KEY); } catch { /* egal */ }
+        continue; // erneut versuchen, ohne einen Versuch zu loeschen
+      }
       let oldest = null;
       let oldestJob = null;
       h.jobs.forEach((j) => j.attempts.forEach((a) => {
@@ -5076,6 +5084,14 @@ function cachedKernpunkte(key) {
 }
 function cacheKernpunkte(key, wrapper) {
   if (!key) return;
+  // Footprint begrenzen: pro Kategorie hoechstens so viele Eintraege speichern, wie das
+  // Panel ohnehin rendert (KERNPUNKTE_LIST_MAX). Mehr waere verschwendetes Quota.
+  if (wrapper && wrapper.data && typeof wrapper.data === "object") {
+    const d = wrapper.data;
+    for (const cat of ["aufgaben", "anforderungen_muss", "anforderungen_optional", "besonderheiten"]) {
+      if (Array.isArray(d[cat]) && d[cat].length > KERNPUNKTE_LIST_MAX) d[cat] = d[cat].slice(0, KERNPUNKTE_LIST_MAX);
+    }
+  }
   const m = loadKpCache();
   m[key] = wrapper;
   // Groesse begrenzen: aelteste Eintraege (kleinste generatedAt) zuerst verwerfen.
