@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.8.4";
+const APP_VERSION = "1.8.5";
 
 const CHANGELOG = [
+  {
+    version: "1.8.5",
+    date: "19.06.2026",
+    items: [
+      "Stellenseite: Die Kernpunkte-Übersicht („Das Wichtigste auf einen Blick“) führt jetzt direkt zur Original-Anzeige (sofern die Stelle per Link angelegt wurde) und zeigt den gespeicherten Anzeigentext auf Wunsch in einem Fenster – so lässt sich der extrahierte Inhalt schnell im Original gegenprüfen.",
+    ],
+  },
   {
     version: "1.8.4",
     date: "18.06.2026",
@@ -5734,6 +5741,32 @@ function buildKernpunktePanel(job) {
   hint.textContent = "Automatisch aus der Anzeige extrahiert - bitte im Original prüfen.";
   panel.appendChild(hint);
 
+  // Aktionsleiste zum Gegenpruefen: Link zur Original-Anzeige (nur bei echter
+  // http(s)-URL) und Knopf, der den gespeicherten Anzeigentext in einem Fenster
+  // zeigt (nur wenn Text vorhanden). Beide optional - fehlt beides, kein Balken.
+  const actions = document.createElement("div");
+  actions.className = "kernpunkte-actions";
+  const srcUrl = job && typeof job.url === "string" ? job.url.trim() : "";
+  if (/^https?:\/\//i.test(srcUrl)) {
+    const link = document.createElement("a");
+    link.className = "kernpunkte-action";
+    link.href = srcUrl;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = "↗ Original-Anzeige";
+    actions.appendChild(link);
+  }
+  const srcText = job && typeof job.jobText === "string" ? job.jobText.trim() : "";
+  if (srcText) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "kernpunkte-action";
+    btn.textContent = "Anzeigentext ansehen";
+    btn.addEventListener("click", () => openJobTextModal(job));
+    actions.appendChild(btn);
+  }
+  if (actions.children.length) panel.appendChild(actions);
+
   const grid = document.createElement("div");
   grid.className = "kernpunkte-grid";
 
@@ -7273,6 +7306,31 @@ $("report-modal").addEventListener("click", (e) => {
   if (e.target === $("report-modal")) closeReportModal();
 });
 
+// Anzeigentext-Fenster: zeigt den gespeicherten jobText einer Stelle (Grundlage
+// der Kernpunkte) read-only. textContent statt innerHTML -> kein HTML aus dem
+// (ggf. gescrapten) Text; Zeilenumbrueche bewahrt die CSS-Regel white-space.
+let jobTextReturnFocus = null;
+function openJobTextModal(job) {
+  const text = job && typeof job.jobText === "string" ? job.jobText : "";
+  $("jobtext-body").textContent = text;
+  $("jobtext-body").scrollTop = 0;
+  jobTextReturnFocus = document.activeElement;
+  $("jobtext-modal").classList.remove("hidden");
+  $("btn-jobtext-close").focus();
+}
+function closeJobTextModal() {
+  $("jobtext-modal").classList.add("hidden");
+  $("jobtext-body").textContent = ""; // Speicher freigeben, kein Reststand
+  if (jobTextReturnFocus && typeof jobTextReturnFocus.focus === "function") {
+    jobTextReturnFocus.focus();
+  }
+  jobTextReturnFocus = null;
+}
+$("btn-jobtext-close").addEventListener("click", closeJobTextModal);
+$("jobtext-modal").addEventListener("click", (e) => {
+  if (e.target === $("jobtext-modal")) closeJobTextModal();
+});
+
 // Kontext fuer einen Report aus der gerade aktiven Stelle ableiten (Settings +
 // quiz). Hosted hat kein Nutzer-Modell -> model bleibt leer, provider/tier
 // zaehlen. Defensiv: alle Felder optional.
@@ -7423,6 +7481,7 @@ const ESCAPE_CLOSERS = [
   ["badge-modal", closeBadgeModal],
   ["confirm-delete-modal", closeConfirmDelete],
   ["report-modal", closeReportModal],
+  ["jobtext-modal", closeJobTextModal],
   ["levelup-overlay", closeLevelUp],
 ];
 document.addEventListener("keydown", (e) => {

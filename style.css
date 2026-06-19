@@ -1388,6 +1388,48 @@ button.danger:hover { background: var(--red-soft); border-color: var(--red); }
 @media (max-width: 600px) {
   .kernpunkte-grid { grid-template-columns: 1fr; }
 }
+/* Aktionsleiste unter dem Hinweis: Link zur Original-Anzeige + Anzeigentext-Knopf.
+   <a> und <button> teilen .kernpunkte-action, damit beide identisch aussehen. */
+.kernpunkte-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0 0 0.7rem;
+}
+.kernpunkte-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font: inherit;
+  font-size: 0.82rem;
+  line-height: 1.2;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card-2);
+  color: var(--text-strong);
+  text-decoration: none;
+  cursor: pointer;
+}
+.kernpunkte-action:hover { border-color: var(--primary); color: var(--primary); }
+.kernpunkte-action:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+/* Anzeigentext-Fenster: gespeicherten jobText scrollbar und mit erhaltenen
+   Zeilenumbruechen zeigen. */
+.jobtext-modal { max-width: min(680px, 92vw); }
+.jobtext-body {
+  margin: 0.2rem 0 0.9rem;
+  max-height: 60vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.7rem 0.8rem;
+}
 
 /* Vertiefungen-Teaser im Start-Panel: gesperrter Hinweis ab Stufe 3. */
 .vertiefung-teaser {
