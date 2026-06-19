@@ -1103,13 +1103,27 @@ function normalizeKernpunkte(k, jobText) {
 }
 
 // Entfernt Dubletten aus den vier Kernpunkt-Kategorien. Modelle wiederholen
-// denselben Punkt gern mehrfach und listen ihn zusaetzlich unter mehreren
-// Kategorien (z. B. dasselbe Zitat unter Aufgaben UND Muss-Anforderung). Es wird
-// in der festen Reihenfolge aufgaben -> anforderungen_muss ->
-// anforderungen_optional -> besonderheiten dedupliziert; das ERSTE Vorkommen
-// gewinnt, spaetere identische Eintraege (bereinigt + normalisiert verglichen)
-// fallen raus. Die Eingabe-Reihenfolge bleibt sonst erhalten. Die Strings selbst
-// werden unveraendert uebernommen (bereits bereinigt aus cleanKernpunktText).
+// denselben Punkt gern mehrfach (mehrfach identisch in EINER Kategorie) und listen
+// ihn zusaetzlich unter mehreren Kategorien.
+//
+// Zwei Stufen, beide auf dem ANZEIGE-STRING (dem bereinigten Beleg-Zitat), denn nur
+// dieser String wird gerendert UND nur dieser steht auf dem Import-/Render-Pfad
+// ueberhaupt zur Verfuegung (item.text existiert dort nicht mehr):
+//   1) INNERHALB einer Kategorie: exakte Dubletten raus - unzweideutig sicher und
+//      genau der gemeldete Defekt ("dasselbe Zitat 3x unter Aufgaben").
+//   2) UEBER Kategorien hinweg (feste Reihenfolge aufgaben -> anforderungen_muss ->
+//      anforderungen_optional -> besonderheiten, erstes Vorkommen gewinnt): ein
+//      WOERTLICH identisches Zitat erscheint nicht ein zweites Mal unter einer
+//      anderen Ueberschrift. Bewusste Abwaegung: das Panel zeigt ausschliesslich das
+//      Zitat (nicht die Modell-Kategorisierung), also waeren zwei Karten mit exakt
+//      demselben Satz fuer den Nutzer nicht unterscheidbares Rauschen - genau der
+//      Fall aus dem gemeldeten Screenshot (dasselbe Zitat unter Aufgaben UND
+//      Muss-Anforderung). Theoretisch kann ein Satz zwei verschiedene Fakten
+//      belegen; in der Praxis liefert das Modell dann unterschiedliche, fokussierte
+//      Belege je Punkt, sodass die Zitate nicht WOERTLICH gleich sind und beide
+//      ueberleben. Nur exakt deckungsgleiche Anzeige-Strings werden zusammengefasst.
+// Die Eingabe-Reihenfolge bleibt sonst erhalten. Die Strings selbst bleiben
+// unveraendert (bereits bereinigt aus cleanKernpunktText).
 const KERNPUNKT_CATEGORIES = ["aufgaben", "anforderungen_muss", "anforderungen_optional", "besonderheiten"];
 function dedupeKernpunkte(obj) {
   const o = obj && typeof obj === "object" ? obj : {};
