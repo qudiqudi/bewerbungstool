@@ -5274,11 +5274,19 @@ function renderJobBlock(job, opts) {
 
   // Defensiv: eine gespeicherte Stelle koennte (theoretisch) keine Versuche
   // tragen - dann nicht ueber ein leeres Array Math.max (-> -Infinity) bilden.
-  // Versuche aus aelteren Versionen koennen ohne prozent kommen - einmal auf
+  // Versuche aus aelteren Versionen koennen ohne top-level prozent kommen - einmal auf
   // eine Zahl normalisieren, damit Trend, Tooltip und Score nicht "undefined %"
-  // bzw. "NaNpx" zeigen.
+  // bzw. "NaNpx" zeigen. Faellt das Spiegel-Feld a.prozent, wird der echte Score aus
+  // result.gesamt.prozent gelesen (dieselbe Quelle wie die Review-Ansicht), damit ein
+  // alter Versuch nicht faelschlich als 0 % erscheint. Auf 0-100 klemmen.
   const attempts = Array.isArray(job.attempts) ? job.attempts : [];
-  const pctOf = (a) => (a && Number.isFinite(Number(a.prozent)) ? Number(a.prozent) : 0);
+  const pctOf = (a) => {
+    if (!a) return 0;
+    let p = Number(a.prozent);
+    if (!Number.isFinite(p)) p = Number(a.result && a.result.gesamt && a.result.gesamt.prozent);
+    if (!Number.isFinite(p)) return 0;
+    return Math.max(0, Math.min(100, p));
+  };
   const lastAtt = attempts[attempts.length - 1];
   const best = attempts.length ? Math.max(...attempts.map(pctOf)) : 0;
   const last = pctOf(lastAtt);
