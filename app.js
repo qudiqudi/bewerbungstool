@@ -7051,7 +7051,22 @@ $("btn-home").addEventListener("click", goHome);
 $("btn-history-back").addEventListener("click", goReturn);
 
 // Startliste und Stellen-Subpage
-$("btn-new-job").addEventListener("click", () => showView("view-input"));
+$("btn-new-job").addEventListener("click", () => {
+  // Neue Stelle = bewusster Frischstart (vom Nutzer so entschieden): Felder leeren
+  // UND den Entwurf zuruecksetzen, damit kein zuvor geoeffneter Stellentext/-Link
+  // und kein alter Entwurf mehr auftaucht - auch nicht nach einem Reload oder ueber
+  // einen anderen Save-Pfad (z. B. Tab-Wechsel). Der Entwurf ist bewusst nur Komfort
+  // (s. saveDraft), daher ist das Verwerfen hier vertretbar.
+  // 1) ausstehenden debounced Save abbrechen, 2) Felder + lastFetch leeren,
+  // 3) persistierten Entwurf entfernen.
+  clearTimeout(draftSaveTimer);
+  draftSaveTimer = 0;
+  $("job-url").value = "";
+  $("job-text").value = "";
+  lastFetch = { url: "", text: "" };
+  try { localStorage.removeItem(DRAFT_KEY); } catch { /* Entwurf ist nur Komfort */ }
+  showView("view-input");
+});
 $("active-job-start").addEventListener("click", startReadyJob);
 $("resume-continue").addEventListener("click", resumeLearnSession);
 $("resume-discard").addEventListener("click", discardLearnSession);
