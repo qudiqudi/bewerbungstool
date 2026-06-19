@@ -47,9 +47,12 @@ function makeEnv(overrides = {}) {
 function makeState() {
   const map = new Map();
   return {
+    _alarm: null,
     storage: {
       async get(k) { return map.get(k); },
       async put(obj) { for (const [k, v] of Object.entries(obj)) map.set(k, v); },
+      // Alarm-Stub fuer den Budget-Alert-Outbox-Pfad.
+      async setAlarm(ts) { this._ts = ts; },
     },
   };
 }
@@ -203,6 +206,81 @@ async function run() {
     }
     const over = bd.reserve({ amount: 0.1, subject: "zuviel", ip: "8.8.8.8", exclusive: false });
     eq(over.reason, "ip", "9. Call derselben IP korrekt durch 'ip' geblockt (Legacy-Fall)");
+  }
+
+  console.log("Test 6: Budget-Alert feuert genau einmal pro UTC-Tag, durable, reset bei Rollover");
+  {
+    const realFetch = globalThis.fetch;
+    let sends = [];
+    let failNext = false;
+    globalThis.fetch = async (url, opts) => {
+      sends.push({ url, body: JSON.parse(opts.body) });
+      return { ok: !failNext };
+    };
+    try {
+      FAKE_NOW = RealDate.parse("2026-06-19T12:00:00.000Z");
+      // ALERT_AT 0.8 * DAY_BUDGET 10 = Schwelle 8.
+      const bd = new BudgetDO(makeState(), makeEnv({ BUDGET_ALERT_WEBHOOK: "https://hook.example/x" }));
+      await bd.load();
+
+      // Unter der Schwelle: kein Alarm scharf.
+      bd.reserve({ amount: 5, subject: "s1", ip: "1.1.1.1", exclusive: false });
+      await bd.maybeArmAlert();
+      assert(!bd.alertPending, "unter 80% kein Alert scharf");
+
+      // Schwelle ueberschreiten (committed 5+4=9 >= 8): Latch + Outbox scharf.
+      bd.reserve({ amount: 4, subject: "s2", ip: "2.2.2.2", exclusive: false });
+      await bd.maybeArmAlert();
+      assert(bd.alertPending, "ueber 80% Outbox scharf");
+      eq(bd.alertedDay, "2026-06-19", "Latch traegt aktuellen UTC-Tag");
+
+      // Alarm liefert zu -> Webhook EINMAL, beide Felder, nur aggregierte Zahlen.
+      await bd.alarm();
+      eq(sends.length, 1, "Alarm sendet genau einen Webhook");
+      assert(sends[0].body.content && sends[0].body.text, "Body hat content UND text");
+      assert(!/@|\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/.test(sends[0].body.text), "Body enthaelt keine E-Mail/IP");
+      assert(!bd.alertPending, "Outbox nach Erfolg geleert");
+
+      // Weitere Buchungen am selben Tag: KEIN zweiter Alert.
+      bd.settle({ reserveId: bd.reserve({ amount: 0.5, subject: "s3", ip: "3.3.3.3", exclusive: false }).reserveId, cost: 0.5 });
+      await bd.maybeArmAlert();
+      assert(!bd.alertPending, "kein erneutes Scharfschalten am selben Tag");
+      eq(sends.length, 1, "kein zweiter Webhook am selben Tag");
+
+      // Rollover: neuer Tag meldet wieder frisch.
+      FAKE_NOW = RealDate.parse("2026-06-20T00:01:00.000Z");
+      bd.rolloverIfNeeded();
+      // Am neuen Tag wieder ueber die Schwelle bringen (offene Reserven leben weiter).
+      bd.reserve({ amount: 8, subject: "s4", ip: "4.4.4.4", exclusive: false });
+      await bd.maybeArmAlert();
+      assert(bd.alertPending, "neuer Tag schaltet erneut scharf");
+      eq(bd.alertedDay, "2026-06-20", "Latch auf neuen Tag aktualisiert");
+
+      // Ohne Secret: kompletter No-op.
+      sends = [];
+      const bd2 = new BudgetDO(makeState(), makeEnv()); // kein BUDGET_ALERT_WEBHOOK
+      await bd2.load();
+      bd2.reserve({ amount: 5, subject: "a", ip: "1.2.3.4", exclusive: false });
+      bd2.reserve({ amount: 4, subject: "b", ip: "1.2.3.5", exclusive: false });
+      await bd2.maybeArmAlert();
+      assert(!bd2.alertPending, "ohne Secret kein Alert (fail-safe)");
+      eq(sends.length, 0, "ohne Secret kein Webhook");
+
+      // Zustellfehler: Outbox bleibt scharf, Retry-Zaehler steigt (kein stiller Verlust).
+      sends = [];
+      failNext = true;
+      const bd3 = new BudgetDO(makeState(), makeEnv({ BUDGET_ALERT_WEBHOOK: "https://hook.example/x" }));
+      await bd3.load();
+      bd3.reserve({ amount: 5, subject: "a", ip: "1.2.3.4", exclusive: false });
+      bd3.reserve({ amount: 4, subject: "b", ip: "1.2.3.5", exclusive: false });
+      await bd3.maybeArmAlert();
+      await bd3.alarm();
+      eq(sends.length, 1, "Fehlversuch hat gesendet");
+      assert(bd3.alertPending, "nach Fehlschlag Outbox weiter scharf (Retry geplant)");
+      eq(bd3.alertTries, 1, "Retry-Zaehler erhoeht");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   }
 
   globalThis.Date = RealDate;

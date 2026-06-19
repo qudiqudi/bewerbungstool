@@ -30,6 +30,13 @@ export class BudgetDO {
     this.reservations = (await s.get("reservations")) || {};
     this.perSubject = (await s.get("perSubject")) || {};
     this.perIp = (await s.get("perIp")) || {};
+    // Alert-Latch (Budget-Webhook): an welchem UTC-Tag wurde die ALERT_AT-Schwelle
+    // schon einmal gemeldet (max. eine Benachrichtigung pro Tag). alertPending +
+    // alertTries bilden eine kleine durable Outbox: die Zustellung laeuft ueber den
+    // DO-Alarm (at-least-once mit Backoff), nicht ueber einen fire-and-forget-fetch.
+    this.alertedDay = (await s.get("alertedDay")) || null;
+    this.alertPending = (await s.get("alertPending")) || false;
+    this.alertTries = (await s.get("alertTries")) || 0;
     this.loaded = true;
   }
 
@@ -42,6 +49,9 @@ export class BudgetDO {
       reservations: this.reservations,
       perSubject: this.perSubject,
       perIp: this.perIp,
+      alertedDay: this.alertedDay,
+      alertPending: this.alertPending,
+      alertTries: this.alertTries,
     });
   }
 
@@ -170,6 +180,10 @@ export class BudgetDO {
     return { ok: true };
   }
 
+  alertThreshold() {
+    return Number(this.env.ALERT_AT) * Number(this.env.DAY_BUDGET_USD);
+  }
+
   stats() {
     return {
       day: this.day,
@@ -179,8 +193,69 @@ export class BudgetDO {
       committed: round(this.dayReserved + this.daySpent),
       inflight: this.inflight,
       openReservations: Object.keys(this.reservations).length,
-      alert: this.dayReserved + this.daySpent >= Number(this.env.ALERT_AT) * Number(this.env.DAY_BUDGET_USD),
+      alert: this.dayReserved + this.daySpent >= this.alertThreshold(),
     };
+  }
+
+  // Prueft nach jeder Buchung, ob committed (Reserven + Ist) erstmals an diesem UTC-Tag
+  // die ALERT_AT-Schwelle erreicht hat. Wenn ja: Latch setzen (max. EINE Meldung/Tag)
+  // und die Zustellung ueber den DO-Alarm anstossen (durable Outbox, kein verlierbarer
+  // fire-and-forget-fetch). Eine Reserve, die committed kurzzeitig ueber die Schwelle
+  // treibt und sich spaeter wieder aufloest, erzeugt bewusst eine Fruehwarnung (kein
+  // verpasster Alert, da daySpent monoton waechst). Ohne Webhook-Secret: No-op.
+  async maybeArmAlert() {
+    if (!this.env.BUDGET_ALERT_WEBHOOK) return;
+    if (this.alertedDay === this.day) return;
+    if (this.dayReserved + this.daySpent < this.alertThreshold()) return;
+    this.alertedDay = this.day;
+    this.alertPending = true;
+    this.alertTries = 0;
+    // Sofort zustellen versuchen (kurze Verzoegerung, damit persist() zuerst greift).
+    try { await this.state.storage.setAlarm(Date.now() + 1000); } catch { /* Alarm best-effort */ }
+  }
+
+  // Durable Zustellung des Budget-Alerts. Sendet awaited an den generischen Webhook
+  // (Discord: content / Slack & Telegram-Bridge: text — beide Felder im selben Body,
+  // jede Seite nimmt ihr Feld). Nur aggregierte Zahlen, KEINE PII. Erfolg → Latch
+  // aufloesen; Fehler → erneuter Alarm mit Backoff, bounded auf 5 Versuche.
+  async alarm() {
+    await this.load();
+    this.rolloverIfNeeded();
+    if (!this.alertPending || !this.env.BUDGET_ALERT_WEBHOOK) {
+      this.alertPending = false;
+      await this.persist();
+      return;
+    }
+    const committed = this.dayReserved + this.daySpent;
+    const budget = Number(this.env.DAY_BUDGET_USD);
+    const pct = budget > 0 ? Math.round((committed / budget) * 100) : 0;
+    const msg =
+      `jobreif Budget-Warnung: Tagesbudget zu ${pct}% ausgeschoepft ` +
+      `(${round(committed)} von ${budget} USD, UTC-Tag ${this.day}). ` +
+      `Bei 100% liefert der Hosted-Modus 503, bis das Budget um UTC-Mitternacht zuruecksetzt.`;
+    let ok = false;
+    try {
+      const r = await fetch(this.env.BUDGET_ALERT_WEBHOOK, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: msg, text: msg }),
+      });
+      ok = r.ok;
+    } catch { ok = false; }
+    if (ok) {
+      this.alertPending = false;
+    } else {
+      this.alertTries = (this.alertTries || 0) + 1;
+      if (this.alertTries >= 5) {
+        // Aufgeben: Latch bleibt fuer den Tag gesetzt (kein Dauer-Retry-Sturm), aber
+        // die Outbox wird geleert. Der naechste Tag meldet wieder frisch.
+        this.alertPending = false;
+      } else {
+        const backoff = Math.min(60000 * this.alertTries, 300000); // 1..5 min
+        try { await this.state.storage.setAlarm(Date.now() + backoff); } catch { /* best-effort */ }
+      }
+    }
+    await this.persist();
   }
 
   async fetch(req) {
@@ -212,6 +287,9 @@ export class BudgetDO {
       }
     }
 
+    // Nach jeder Buchung pruefen, ob die Alert-Schwelle erstmals erreicht ist (eine
+    // Codestelle deckt reserve/settle/release/reconcile ab). persist() danach.
+    await this.maybeArmAlert();
     await this.persist();
     return new Response(JSON.stringify(result), { headers: { "Content-Type": "application/json" } });
   }
