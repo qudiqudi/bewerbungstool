@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.8.5";
+const APP_VERSION = "1.8.6";
 
 const CHANGELOG = [
+  {
+    version: "1.8.6",
+    date: "19.06.2026",
+    items: [
+      "Die Kernpunkte-Übersicht („Das Wichtigste auf einen Blick“) erscheint bei bestehenden Stellen jetzt schon, sobald ein neuer Test fertig erstellt ist – du musst den Test nicht mehr erst komplett durchspielen.",
+    ],
+  },
   {
     version: "1.8.5",
     date: "19.06.2026",
@@ -2982,6 +2989,35 @@ async function generateQuiz(opts = {}) {
 // Baut die Quiz-Session aus dem Generierungsergebnis auf — gemeinsam genutzt vom
 // synchronen (BYOK/lokal) und vom asynchronen Hosted-Pfad. ctx traegt den zur
 // Fertigstellung noetigen Kontext (zur Startzeit festgehalten).
+// Kernpunkte schon beim FERTIGSTELLEN der Generierung an eine BESTEHENDE Stelle
+// schreiben (nicht erst beim Abschluss via saveAttempt), damit die Uebersicht
+// "Das Wichtigste auf einen Blick" sofort erscheint, ohne dass man den Test erst
+// komplett durchspielen muss. Nur fuer bereits existierende Stellen: eine brandneue
+// Stelle entsteht weiterhin erst beim ersten Abschluss (saveAttempt legt den Job an)
+// und ihre Subpage ist vorher ohnehin nicht erreichbar. Vertiefungsboegen werden
+// uebersprungen (wie in saveAttempt) - ihr verengtes Quiz darf die Stellen-Kernpunkte
+// nicht ueberschreiben. Treffer ueber key === jobKey(q.jobText) garantiert, dass die
+// Kernpunkte zum job.jobText passen; die Job-Identitaet wird NICHT veraendert.
+function persistKernpunkteForActiveJob(q) {
+  if (!q || !q.kernpunkte || typeof q.kernpunkte !== "object") return;
+  if (Array.isArray(q.vertiefungFelder) && q.vertiefungFelder.length) return;
+  let key;
+  try { key = jobKey(q.jobText); } catch { return; }
+  if (!key) return;
+  const h = loadHistory();
+  const job = h.jobs.find((j) => j && j.key === key);
+  if (!job) return; // neue Stelle: Job entsteht erst beim Abschluss (saveAttempt)
+  // srcUrl-Provenienz exakt wie in saveAttempt: aktuelle Quell-URL, sonst eine bereits
+  // bekannte srcUrl desselben Textes bewahren (kein Flackern des Original-Links).
+  const prevSrcUrl =
+    job.kernpunkte && job.kernpunkte.srcKey === key && typeof job.kernpunkte.srcUrl === "string"
+      ? job.kernpunkte.srcUrl
+      : "";
+  const srcUrl = typeof q.jobUrl === "string" && q.jobUrl ? q.jobUrl : prevSrcUrl;
+  job.kernpunkte = { v: 1, generatedAt: Date.now(), srcKey: key, srcUrl, data: q.kernpunkte };
+  saveHistory(h);
+}
+
 function finalizeQuiz(result, ctx) {
   quiz = normalizeQuizData(result, ctx.jobText);
   quiz.jobText = ctx.jobText;
@@ -2999,6 +3035,10 @@ function finalizeQuiz(result, ctx) {
     tier: ctx.tier || null,
     model: ctx.model || null,
   };
+  // Kernpunkte sofort an eine bereits bestehende Stelle schreiben, damit die
+  // Uebersicht ohne Test-Abschluss erscheint (saveAttempt schreibt sie beim
+  // Abschluss ohnehin erneut - idempotent).
+  persistKernpunkteForActiveJob(quiz);
   answers = new Array(quiz.fragen.length).fill("");
   revealed = new Array(quiz.fragen.length).fill(false);
   sortDisplay = {};
