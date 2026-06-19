@@ -6560,20 +6560,31 @@ function importData(text) {
       if (!impJob || !impJob.key || !Array.isArray(impJob.attempts)) return;
       // Nur Versuche mit verwertbarem Zeitstempel UND den tragenden Feldern
       // uebernehmen. Es reicht nicht, dass quiz/result irgendein Objekt sind:
-      // der Verlauf liest att.quiz.fragen.length und att.prozent, die Detail-/
+      // der Verlauf liest att.quiz.fragen.length und den Score, die Detail-/
       // Review-Ansicht iteriert ueber quiz.fragen. Ein Versuch mit gueltigem
-      // date, aber leerem quiz ({}) oder fehlendem prozent wuerde die Historie
+      // date, aber leerem quiz ({}) oder ohne brauchbaren Score wuerde die Historie
       // vergiften und Verlauf/openAttempt/Rendern zum Absturz bringen. result
       // selbst wird ueberall defensiv gelesen (gesamt/ergebnisse optional),
       // muss also nur ein Objekt sein. Stellen ohne brauchbare Versuche werden
       // uebersprungen - ein leeres attempts-Array wuerde sonst beim Rendern
       // abstuerzen.
-      const incoming = impJob.attempts.filter(
-        (a) =>
-          a && typeof a === "object" && Number.isFinite(a.date) && Number.isFinite(a.prozent) &&
-          a.quiz && typeof a.quiz === "object" && Array.isArray(a.quiz.fragen) && a.quiz.fragen.length &&
-          a.result && typeof a.result === "object"
-      );
+      //
+      // Score-Pruefung dieselbe Vertrags-Quelle wie Anzeige/Fortschritt (attemptPct):
+      // ein brauchbarer Score ist top-level prozent ODER result.gesamt.prozent. Aelteren
+      // Backups fehlt das top-level Spiegel-Feld - sie wuerden sonst beim Restore still
+      // verworfen (Datenverlust). Nach der Pruefung das top-level prozent normalisieren,
+      // damit der restaurierte Versuch ueberall denselben Score liefert wie ein frisch
+      // gespeicherter.
+      const incoming = impJob.attempts
+        .filter(
+          (a) =>
+            a && typeof a === "object" && Number.isFinite(a.date) &&
+            (Number.isFinite(Number(a.prozent)) ||
+              Number.isFinite(Number(a.result && a.result.gesamt && a.result.gesamt.prozent))) &&
+            a.quiz && typeof a.quiz === "object" && Array.isArray(a.quiz.fragen) && a.quiz.fragen.length &&
+            a.result && typeof a.result === "object"
+        )
+        .map((a) => (Number.isFinite(Number(a.prozent)) ? a : { ...a, prozent: attemptPct(a) }));
       if (!incoming.length) return;
       // Stelle zusammenführen wie beim normalen Speichern: zuerst über die
       // stabile URL-Identität, dann über die Stellen-Identität (Titel+Arbeit-
