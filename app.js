@@ -2514,7 +2514,7 @@ async function enrichQuestionLocal(q) {
 // Felder schon da sind (z. B. aus der Cloud-Generierung oder bereits geladen),
 // und je Frage nur einmal versucht. Kostet bei lokalen Modellen nichts.
 function maybeEnrichRevealed(idx) {
-  if ((settings.provider || "anthropic") !== "local" || reviewing) return;
+  if ((settings.provider || "hosted") !== "local" || reviewing) return;
   const q = quiz && quiz.fragen && quiz.fragen[idx];
   if (!q || enrichTried.has(idx)) return;
   if (q.lerninfo || (q.quellen && q.quellen.length)) return;
@@ -2683,7 +2683,7 @@ async function generateQuiz(opts = {}) {
   // Lokale Modelle bekommen ein schlankeres Schema (ohne lerninfo/quellen) und
   // entsprechend einen Prompt ohne die teuren Quellen-Anweisungen - beides wird
   // erst beim Aufloesen einer Frage nachgeladen.
-  const isLocal = (settings.provider || "anthropic") === "local";
+  const isLocal = (settings.provider || "hosted") === "local";
   const isHosted = (settings.provider || "hosted") === "hosted";
 
   // Stabile URL-Identitaet jetzt festhalten (lastFetch kann sich bis zur
@@ -5753,7 +5753,7 @@ function buildVertiefungTeaser(title, sub) {
 function buildVertiefungSection(job) {
   const wrap = document.createElement("div");
   wrap.className = "vertiefung-section";
-  const provider = settings.provider || "anthropic";
+  const provider = settings.provider || "hosted";
   const prog = computeJobProgress(job);
 
   if (provider === "local") {
