@@ -63,6 +63,10 @@ MAGIC_FROM = "login@mail.jobreif.de"  # Resend-Absender (Subdomain mail.jobreif.
 # Dev-Flags (in Produktion NICHT setzen): MOCK_UPSTREAM, SKIP_TURNSTILE, MOCK_COST
 # Auth-Secrets via `wrangler secret put` (NIE hier): RESEND_KEY, GOOGLE_CLIENT_ID,
 # GOOGLE_CLIENT_SECRET. Ohne RESEND_KEY loggt der Worker den Magic-Link nur (Dev).
+# Budget-Alert-Webhook (optional): `wrangler secret put BUDGET_ALERT_WEBHOOK`. Eine
+# generische Webhook-URL (Discord/Slack/Telegram-Bridge). Erreicht das committed
+# Tagesbudget erstmals ALERT_AT (70%), feuert das BudgetDO einen einmaligen Alert pro
+# UTC-Tag (durable via Alarm). Ohne dieses Secret passiert nichts (fail-safe).
 
 # D1 für Konten/Sessions (Phase B). Anlegen: `wrangler d1 create jobreif-auth`,
 # dann die ausgegebene database_id hier eintragen. Migrationen im Ordner migrations/
@@ -72,6 +76,13 @@ binding = "DB"
 database_name = "jobreif-auth"
 database_id = "bdfa39da-e0cf-4263-bf21-b5cad7f6fd95"
 migrations_dir = "migrations"
+
+# Workers Analytics Engine: anonyme, personenunabhaengige Produkt-Nutzungsstatistik
+# (Flow-Name/Anbieter/Stufe als Diskriminatoren, KEINE IP/Texte/E-Mail/IDs). Geschrieben
+# ueber POST /api/event (env.AE.writeDataPoint). Free-Tier, keine zusaetzliche Infra.
+[[analytics_engine_datasets]]
+binding = "AE"
+dataset = "jobreif_events"
 
 [[durable_objects.bindings]]
 name = "BUDGET_DO"

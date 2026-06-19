@@ -67,6 +67,13 @@ export default {
       return await pollJob(path.slice("/api/jobs/".length), req, env, origin);
     }
 
+    // Anonyme Produkt-Nutzungsstatistik (Topic #2): nur nicht-personenbezogene
+    // Diskriminatoren, kein LLM/Budget, kein Auth/Turnstile. Immer 204.
+    if (path === "/api/event" && req.method === "POST") return await handleEvent(req, env, origin);
+
+    // "Fragen melden" an den Betreiber (Topic #2): zusaetzlich zum lokalen Save.
+    if (path === "/api/report" && req.method === "POST") return await handleReport(req, env, origin);
+
     const route = ROUTES[path];
     if (req.method !== "POST" || !route) return json({ error: "not-found" }, 404, env, origin);
     const ip = req.headers.get("CF-Connecting-IP") || "0.0.0.0";
@@ -274,7 +281,119 @@ async function pollJob(jobId, req, env, origin) {
   return json({ status: "pending" }, 200, env, origin);
 }
 
+// --- Analytics (Topic #2) -------------------------------------------------
+
+// Erlaubte, nicht-personenbezogene Diskriminatoren. Unbekannte Werte werden NICHT
+// gespeichert (auf "other"/"unknown" geklemmt), damit ein gespooftes oder zukuenftiges
+// Feld die Auswertung nicht aufblaeht. Bewusst klein und geschlossen.
+const EVENT_FLOWS = new Set([
+  "exam-start", "learn-start", "quiz-generate", "resolve", "history-open", "report",
+]);
+const EVENT_PROVIDERS = new Set(["hosted", "byok", "local"]);
+const EVENT_TIERS = new Set(["standard", "guenstig", "beste"]);
+
+// POST /api/event: schreibt EINEN anonymen Datenpunkt (Flow/Anbieter/Stufe) in die
+// Analytics Engine. KEINE IP, kein Text, keine E-Mail, kein Identifier. Kein Auth,
+// kein Turnstile (kostenneutral, kein LLM, kein Budget). Antwort IMMER 204 — kein
+// Info-Leak, kein Retry-Sog. Fehlt das AE-Binding, ist es ein No-op (z. B. lokal).
+async function handleEvent(req, env, origin) {
+  try {
+    if (!env.AE || typeof env.AE.writeDataPoint !== "function") return noContent(env, origin);
+    const body = await req.json().catch(() => ({}));
+    const flow = EVENT_FLOWS.has(body && body.flow) ? body.flow : null;
+    if (!flow) return noContent(env, origin); // ohne gueltigen Flow nichts schreiben
+    const provider = EVENT_PROVIDERS.has(body && body.provider) ? body.provider : "other";
+    const tier = EVENT_TIERS.has(body && body.tier) ? body.tier : "none";
+    env.AE.writeDataPoint({ blobs: [flow, provider, tier], indexes: [flow] });
+  } catch {
+    /* Analytics darf nie etwas brechen */
+  }
+  return noContent(env, origin);
+}
+
+// --- Report-Routing (Topic #2) --------------------------------------------
+
+const REPORT_HOURLY_CAP = 500; // reiner D1-Write-Volumen-Schutz, kein Fairness-Limit
+const REPORT_TYPES = new Set(["multiple_choice", "offen"]);
+
+function clip(v, max) {
+  return typeof v === "string" ? (v.length > max ? v.slice(0, max) : v) : "";
+}
+function clipOrNull(v, max) {
+  return typeof v === "string" && v ? clip(v, max) : null;
+}
+
+// POST /api/report: nimmt einen vom Client bereits sanitisierten Report entgegen und
+// legt ihn in D1 (question_reports) ab — zusaetzlich zum lokalen Save im Browser.
+// user_id nur, wenn der Melder angemeldet war (sonst NULL), NIE eine IP. korrekte_antwort
+// kommt 1:1 vom Client: bei answersSecret (Pruefung) ist sie bereits leer, der Server
+// rekonstruiert NICHTS. Kein Budget-Reserve. Leichtes Stundencap als bedingter INSERT.
+// Antwort IMMER 202 (auch bei Muell/fehlender Tabelle) — Report ist fire-and-forget und
+// darf die Client-UX nie beeinflussen.
+async function handleReport(req, env, origin) {
+  try {
+    if (!env.DB) return accepted(env, origin);
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== "object") return accepted(env, origin);
+
+    const fragenKey = clip(body.fragenKey, 2000);
+    const frage = clip(body.frage, 600);
+    const typ = REPORT_TYPES.has(body.typ) ? body.typ : "offen";
+    if (!fragenKey || !frage) return accepted(env, origin); // Pflichtfelder leer → verwerfen
+
+    const optionen = Array.isArray(body.optionen)
+      ? JSON.stringify(body.optionen.slice(0, 8).map((o) => clip(o, 200)))
+      : null;
+    const gruende = Array.isArray(body.gruende)
+      ? JSON.stringify(body.gruende.slice(0, 10).map((g) => clip(g, 40)).filter(Boolean))
+      : null;
+
+    // user_id nur bei gueltiger Session; haeufiger Pfad nicht touchen.
+    let userId = null;
+    try {
+      const u = await getSessionUser(req, env, { touch: false });
+      if (u) userId = u.id;
+    } catch { /* Schema-Drift o. ae.: anonym weiter */ }
+
+    const id = crypto.randomUUID();
+    const t = Math.floor(Date.now() / 1000);
+    const since = t - 3600;
+    // Bedingter INSERT: nur schreiben, wenn der globale Stundencap nicht erreicht ist
+    // (atomar unter SQLite-Schreibsperre). Kein IP noetig → keine PII fuers Limit.
+    await env.DB.prepare(
+      `INSERT INTO question_reports
+         (id, created_at, fragen_key, frage, typ, kategorie, korrekte_antwort,
+          optionen, gruende, notiz, job_key, stellen_titel, provider, tier, model, user_id)
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+       WHERE (SELECT COUNT(*) FROM question_reports WHERE created_at > ?) < ?`
+    ).bind(
+      id, t, fragenKey, frage, typ,
+      clipOrNull(body.kategorie_fachlich, 200),
+      clip(body.korrekte_antwort, 300), // bei answersSecret bereits "" → bleibt ""
+      optionen, gruende,
+      clipOrNull(body.notiz, 500),
+      clipOrNull(body.jobKey, 200),
+      clipOrNull(body.stellenTitel, 200),
+      clipOrNull(body.provider, 40),
+      clipOrNull(body.tier, 40),
+      clipOrNull(body.model, 80),
+      userId,
+      since, REPORT_HOURLY_CAP,
+    ).run();
+  } catch {
+    /* fehlende Tabelle / D1-Fehler → still ignorieren, Client merkt nichts */
+  }
+  return accepted(env, origin);
+}
+
 // --- Helfer ---------------------------------------------------------------
+
+function noContent(env, origin) {
+  return new Response(null, { status: 204, headers: corsHeaders(env, origin) });
+}
+function accepted(env, origin) {
+  return new Response(null, { status: 202, headers: corsHeaders(env, origin) });
+}
 
 function budgetStub(env) {
   return env.BUDGET_DO.get(env.BUDGET_DO.idFromName("global"));

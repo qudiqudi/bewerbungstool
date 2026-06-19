@@ -425,7 +425,7 @@
         </fieldset>
         <label for="report-note">Anmerkung (optional)</label>
         <textarea id="report-note" rows="3" maxlength="500" placeholder="Optional: kurz beschreiben, was nicht passt ..."></textarea>
-        <p class="hint">Deine Meldung wird nur lokal in diesem Browser gespeichert und nicht automatisch versendet.</p>
+        <p class="hint">Deine Meldung wird lokal in diesem Browser gespeichert und an den Betreiber übermittelt, damit schwache Fragen verbessert werden können – ohne IP-Adresse. Wenn du angemeldet bist, wird sie deinem Konto zugeordnet, sonst anonym. Details im Datenschutzhinweis.</p>
         <p id="report-error" class="hint hidden" role="alert">Speichern fehlgeschlagen (Speicher voll oder gesperrt). Bitte Speicher freigeben und erneut versuchen.</p>
         <div class="row">
           <button id="btn-report-submit" class="primary" disabled>Melden</button>
@@ -498,6 +498,12 @@
         <h3>Speicherung</h3>
         <p>Unser Server speichert die Inhalte deiner Anfragen nicht dauerhaft und protokolliert sie nicht; geführt wird nur ein anonymer Zähler für das Tageskontingent (Schutz vor Missbrauch und Kostenausreißern). Wie die genannten Anbieter die Daten behandeln, richtet sich nach deren eigenen Bestimmungen.</p>
         <p>Dein Verlauf (erstellte Tests, Ergebnisse) und deine Einstellungen werden ausschließlich lokal in deinem Browser gespeichert und nicht an uns übertragen. Du kannst sie jederzeit über die Einstellungen exportieren oder löschen.</p>
+
+        <h3>Anonyme Nutzungsstatistik</h3>
+        <p>Im gehosteten Modus erheben wir cookielos eine anonyme, personenunabhängige Nutzungsstatistik: gezählt wird nur, welche Funktion verwendet wurde (z. B. Lern- oder Prüfungsmodus, Test erstellen), zusammen mit der gewählten Betriebsart und Qualitätsstufe. Es werden dabei keine IP-Adresse, keine Texte, keine E-Mail-Adresse und keine Kennung gespeichert; ein Rückschluss auf einzelne Personen ist nicht möglich. Mit eigenem Schlüssel oder lokalem Modell wird keine solche Statistik erhoben.</p>
+
+        <h3>Gemeldete Fragen</h3>
+        <p>Wenn du eine Frage über „Melden“ beanstandest, wird die Meldung lokal in deinem Browser gespeichert und zusätzlich an uns übermittelt, damit wir schwache Fragen verbessern können. Übertragen werden die beanstandete Frage, die gewählten Gründe und deine optionale Anmerkung – jedoch keine IP-Adresse. Bist du angemeldet, ordnen wir die Meldung deinem Konto zu; ohne Anmeldung bleibt sie anonym.</p>
 
         <h3>Konto im gehosteten Modus</h3>
         <p>Um den gehosteten Modus zu nutzen, meldest du dich per Anmeldelink (E-Mail) oder über Google an. Dabei speichern wir deine E-Mail-Adresse sowie technische Sitzungsdaten in einer Datenbank bei Cloudflare, um dein Konto wiederzuerkennen. Beim Anmeldelink versendet <strong>Resend</strong> die E-Mail in unserem Auftrag; beim Google-Login erhalten wir von Google nur deine E-Mail-Adresse und eine Kennung. Du kannst dich jederzeit in den Einstellungen wieder abmelden. Eine Konto-Löschung auf Anfrage ist über die unten genannte Kontaktadresse möglich. Wenn du dich nicht anmelden möchtest, nutze stattdessen einen eigenen API-Schlüssel oder ein lokales Modell – dann werden keine Kontodaten erhoben.</p>

@@ -4,9 +4,17 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.8.6";
+const APP_VERSION = "1.8.7";
 
 const CHANGELOG = [
+  {
+    version: "1.8.7",
+    date: "19.06.2026",
+    items: [
+      "Gemeldete Fragen erreichen jetzt auch uns: Wenn du eine Frage meldest, wird die Meldung weiterhin lokal gespeichert und zusätzlich an den Betreiber übermittelt (ohne IP-Adresse), damit wir schwache Fragen verbessern können.",
+      "Anonyme Nutzungsstatistik: Im gehosteten Modus zählen wir cookielos und ohne persönliche Daten mit, welche Funktionen genutzt werden (z. B. Lern- oder Prüfungsmodus), um das Tool zu verbessern.",
+    ],
+  },
   {
     version: "1.8.6",
     date: "19.06.2026",
@@ -1525,6 +1533,26 @@ function hostedBase() {
   }
 }
 
+// --- Anonyme Nutzungsstatistik (Topic #2) --------------------------------
+// Cookieloses, personenunabhaengiges Mitzaehlen: NUR Flow-Name + Anbieter + Stufe,
+// keine IP/Texte/E-Mail/IDs (die IP sieht der Server ohnehin technisch, speichert sie
+// aber nicht). Bewusst NUR im gehosteten Modus — fuer BYOK/lokal bleibt das
+// Datenschutzversprechen "es bleibt alles bei dir" unangetastet (kein neuer Datenfluss
+// zu uns). Komplett fire-and-forget: niemals blockierend, Fehler werden verschluckt.
+function trackEvent(flow) {
+  try {
+    const provider = settings.provider || "hosted";
+    if (provider !== "hosted") return; // kein Beacon fuer BYOK/lokal
+    const tier = settings.tier || "standard";
+    fetch(hostedBase() + "/api/event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ flow, provider, tier }),
+      keepalive: true,
+    }).catch(() => { /* egal */ });
+  } catch { /* egal */ }
+}
+
 // --- Konto / Auth (Phase B, Schritt 1) -----------------------------------
 // Rein additiv: ohne Anmeldung laeuft alles wie bisher (anonymer Hosted-Modus). Das
 // Session-Token liegt additiv in settings.authToken; es wird, wenn vorhanden, als Bearer
@@ -2711,6 +2739,7 @@ function buildSchwaechenSummary(job) {
 // nur per ausdruecklichem Klick (Kostenregel). Gibt Felder samt Kosten/Token
 // zurueck; das Persistieren uebernimmt saveThemenfelder.
 async function deriveThemenfelder(job) {
+  trackEvent("resolve");
   const system =
     "Du bist ein erfahrener Recruiter und Fachexperte. Leite aus einer Stellenausschreibung " +
     "4 bis 6 trennscharfe, stellenspezifische Themenfelder ab, in denen sich ein Bewerber gezielt " +
@@ -2774,7 +2803,6 @@ async function generateQuiz(opts = {}) {
   const numQuestions = $("num-questions").value;
   mode = document.querySelector('input[name="mode"]:checked').value;
   let difficulty = document.querySelector('input[name="difficulty"]:checked').value;
-
   // Vertiefungsbogen: ohne Themenfeld kein Aufruf (Schutz auch hier im Einstieg,
   // nicht nur im UI). Schwierigkeit wird bewusst auf "schwer" erzwungen.
   if (vertiefung) {
@@ -2819,6 +2847,10 @@ async function generateQuiz(opts = {}) {
     if (uk) { urlKey = uk; jobUrl = lastFetch.url; }
   }
   const vertiefungFelder = vertiefung ? vertiefung.felder.map((f) => ({ id: f.id, label: f.label })) : null;
+
+  // Erst hier zaehlen: nach der Ersetzen-Rueckfrage und allen Vor-Checks, unmittelbar
+  // vor dem tatsaechlichen Generierungs-Dispatch (kein Zaehlen fuer abgebrochene Laeufe).
+  trackEvent("quiz-generate");
 
   // Hosted (Punkt 1): Generierung laeuft serverseitig als Hintergrund-Job. Der Client
   // startet den Job und pollt; der Test bricht NICHT ab, wenn der Tab in den Hintergrund
@@ -5212,6 +5244,26 @@ function addReport(partial) {
   return persisted ? report : null;
 }
 
+// Schickt einen bereits lokal gespeicherten Report zusaetzlich an den Betreiber
+// (POST /api/report). Fire-and-forget: kein await, Fehler werden verschluckt, die
+// UX haengt allein am lokalen Save. Gesendet wird das schon sanitisierte Objekt -
+// insbesondere ist korrekte_antwort bei einer Meldung mitten in der Pruefung
+// (answersSecret) bereits leer; der Server rekonstruiert sie nie. Auth-Token wird,
+// falls vorhanden, mitgeschickt, damit der Server die Meldung optional einem Konto
+// zuordnen kann (sonst anonym). Reports gehen aus ALLEN Modi raus (der Betreiber
+// braucht sie anbieterunabhaengig) - daher der ehrliche Dialog-Hinweis im Modal.
+function postReport(report) {
+  if (!report) return;
+  try {
+    fetch(hostedBase() + "/api/report", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(report),
+      keepalive: true,
+    }).catch(() => { /* egal - lokal ist gespeichert */ });
+  } catch { /* egal */ }
+}
+
 // Wurde diese Frage in DIESEM Stellen-Kontext schon gemeldet? Der Status ist pro
 // (fragenKey, jobKey)-Paar: dieselbe generische Frage kann in einer Stelle
 // passen und in einer anderen unpassend sein ("thematisch irrelevant"), daher
@@ -6282,6 +6334,7 @@ function goHome() {
 // frische Test wieder denselben urlKey traegt und bei dieser Stelle landet.
 function startTestForJob(job, testMode, cfg) {
   if (actionRunning) return;
+  trackEvent(testMode === "pruefung" ? "exam-start" : "learn-start");
   $("job-text").value = job.jobText;
   if (job.url) {
     $("job-url").value = job.url;
@@ -7220,6 +7273,7 @@ $("btn-all-jobs").addEventListener("click", () => {
   rememberReturnView();
   renderHistory();
   showView("view-history");
+  trackEvent("history-open");
 });
 
 // Farbschema-Schalter (Auto -> Hell -> Dunkel -> Auto)
@@ -7469,6 +7523,12 @@ $("btn-report-submit").addEventListener("click", () => {
     $("report-error").classList.remove("hidden");
     return;
   }
+
+  // Zusaetzlich an den Betreiber schicken (fire-and-forget; lokal ist bereits
+  // gespeichert, ein Fehler hier aendert nichts an "Gemeldet"). saved traegt das
+  // sanitisierte Objekt inkl. ggf. geleerter korrekte_antwort (answersSecret).
+  postReport(saved);
+  trackEvent("report");
 
   // Knopf der gemeldeten Frage wird zu "Gemeldet" (disabled) - keine
   // Doppelmeldung. Bei erneutem Render leitet appendReportButton denselben
