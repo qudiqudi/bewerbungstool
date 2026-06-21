@@ -2,7 +2,7 @@
 
 Wenn du eine Sicherheitslücke findest, melde sie bitte nicht über ein
 öffentliches Issue, sondern vertraulich über GitHubs Private Vulnerability
-Reporting: [Security Advisory erstellen](https://github.com/qudiqudi/bewerbungstool/security/advisories/new).
+Reporting: [Security Advisory erstellen](https://github.com/qudiqudi/jobreif/security/advisories/new).
 
 Unterstützt wird ausschließlich der aktuelle Stand auf `main`
 (deployt auf https://jobreif.de).
