@@ -46,7 +46,7 @@ Beliebigen statischen Server starten, z. B. `python3 -m http.server 8000`, dann 
 
 ## Changelog
 
-Die wichtigsten Neuerungen zeigt das „Was ist neu"-Fenster in der App; der vollständige Verlauf liegt in den [GitHub-Releases](https://github.com/qudiqudi/bewerbungstool/releases).
+Die wichtigsten Neuerungen zeigt das „Was ist neu"-Fenster in der App; der vollständige Verlauf liegt in den [GitHub-Releases](https://github.com/qudiqudi/jobreif/releases).
 
 ## Lizenz
 
