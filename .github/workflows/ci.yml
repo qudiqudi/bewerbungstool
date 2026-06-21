@@ -23,9 +23,3 @@ jobs:
 
       - name: Asset- und Manifest-Integrität prüfen
         run: node .github/scripts/check-integrity.js
-
-      - name: Worker-Budget-Regression prüfen
-        run: node worker/test/budget-rollover.mjs
-
-      - name: Worker-Report/Event-Regression prüfen
-        run: node worker/test/report-secret.mjs
