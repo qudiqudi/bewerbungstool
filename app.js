@@ -3024,7 +3024,7 @@ async function deriveThemenfelder(job) {
 // sofort schreiben. Zwischen loadHistory und saveHistory steht bewusst kein
 // await (synchron = atomar je Tab). Nicht ueberschreiben, falls inzwischen ein
 // neuerer Stand da ist. Aktualisiert zusaetzlich das in-memory job-Objekt.
-function saveThemenfelder(job, derived, level) {
+async function saveThemenfelder(job, derived, level) {
   const themenfelder = {
     v: 1,
     generatedAt: Date.now(),
@@ -3033,15 +3033,22 @@ function saveThemenfelder(job, derived, level) {
     cost: derived.cost,
     tokens: derived.tokens,
   };
-  const h = loadHistory();
-  const target =
-    (job.urlKey && h.jobs.find((j) => j.urlKey === job.urlKey)) ||
-    (job.key && h.jobs.find((j) => j.key === job.key)) ||
-    (job.identityKey && h.jobs.find((j) => j.identityKey === job.identityKey));
-  if (target && !(target.themenfelder && target.themenfelder.generatedAt > themenfelder.generatedAt)) {
+  await mutateHistory((h) => {
+    const target =
+      (job.urlKey && h.jobs.find((j) => j.urlKey === job.urlKey)) ||
+      (job.key && h.jobs.find((j) => j.key === job.key)) ||
+      (job.identityKey && h.jobs.find((j) => j.identityKey === job.identityKey));
+    // Nur schreiben, wenn es die Stelle gibt UND wir keine gleich neuen oder
+    // neueren Themenfelder ueberschreiben. >= statt >: bei exakt gleichem
+    // generatedAt (Same-Millisecond-Race zweier Tabs) ist der gespeicherte Stand
+    // gleich frisch - dann nicht ueberschreiben. Sonst false zurueckliefern: kein
+    // No-op-Write (s. mutateHistory), damit ein bloss abgeleiteter, aber nicht
+    // uebernommener Stand unter Quota-Druck keine echten Versuche verdraengt.
+    if (!target || (target.themenfelder && target.themenfelder.generatedAt >= themenfelder.generatedAt)) {
+      return false;
+    }
     target.themenfelder = themenfelder;
-    saveHistory(h);
-  }
+  });
   job.themenfelder = themenfelder;
   return themenfelder;
 }
@@ -4492,7 +4499,7 @@ async function runEvaluation() {
         `Du hast ${result.gesamt.prozent}% der automatisch bewerteten Aufgaben erreicht.`;
     }
 
-    const saved = saveAttempt(result, durationMs, evalCost, evalTokens);
+    const saved = await saveAttempt(result, durationMs, evalCost, evalTokens);
     // Den fortsetzbaren Lerntest erst verwerfen, wenn der Versuch WIRKLICH gespeichert
     // wurde — sonst koennten bei vollem/blockiertem Speicher beide verloren gehen.
     if (saved) clearLearnSession();
@@ -5323,6 +5330,13 @@ function loadHistory() {
 // abhaengig machen (z. B. eine offene Lern-Sitzung erst danach verwerfen), muessen
 // das Ergebnis pruefen.
 function saveHistory(h) {
+  // rev (additiv, optional) bei jedem Schreibvorgang hochzaehlen. Erlaubt der
+  // serialisierten Schreibsektion (mutateHistory) und anderen Tabs, eine
+  // Fremdaenderung zu erkennen. Defensiv: fehlt rev (Daten aus aelteren
+  // Versionen), bei 0 beginnen. Nur eine Zahl - alte Leser ignorieren das Feld,
+  // also abwaertskompatibel. Vor der Retry-Schleife, damit ein Quota-Retry rev
+  // nicht mehrfach hochzaehlt.
+  if (h && typeof h === "object") h.rev = (Number.isFinite(h.rev) ? h.rev : 0) + 1;
   // Bei vollem Speicher aelteste Versuche verwerfen und erneut versuchen
   for (let i = 0; i < 6; i++) {
     try {
@@ -5355,6 +5369,52 @@ function saveHistory(h) {
     }
   }
   return false;
+}
+
+// Serialisierter Schreibzugriff auf die History. Liest die History INNERHALB der
+// kritischen Sektion frisch, laesst den mutator sie in place aendern und schreibt
+// sie zurueck - das Ganze unter einem origin-weiten Web-Lock, sodass mehrere
+// offene Browser-Tabs sich nicht gegenseitig ueberschreiben (lost update: zwei
+// Tabs lesen denselben Stand, beide schreiben, der spaetere gewinnt). Der Lock
+// serialisiert die read-modify-write-Sektion ueber alle Tabs desselben Origins.
+//
+// Ohne Web Locks (sehr alte Browser) faellt es auf einen synchronen
+// read-modify-write zurueck: best effort, exakt das fruehere Verhalten, kein
+// Regress gegenueber vorher. localStorage kennt kein atomares Compare-and-Swap;
+// der Lock ist die einzige verlaessliche Serialisierung, das frueher angedachte
+// rev-Feld allein wuerde Drift nur erkennen, nicht verhindern.
+//
+// Der mutator MUSS synchron sein - kein await zwischen Lesen und Schreiben, sonst
+// reisst die Atomaritaet der Sektion auf. Rueckgabe: { ok, out } mit
+// ok = saveHistory-Ergebnis (true = wirklich geschrieben) und out = Rueckgabewert
+// des mutators.
+async function mutateHistory(mutator) {
+  let ran = false;
+  const run = () => {
+    ran = true;
+    const h = loadHistory();
+    const out = mutator(h);
+    // Gibt der mutator explizit false zurueck, war nichts zu schreiben: dann KEIN
+    // saveHistory. Ein No-op-Write wuerde sonst unter Quota-Druck die Bereinigung
+    // (Cache/aelteste Versuche verwerfen) ausloesen und echte Daten verdraengen,
+    // obwohl sich nichts geaendert hat. ok = true, da nichts fehlgeschlagen ist.
+    if (out === false) return { ok: true, out };
+    return { ok: saveHistory(h), out };
+  };
+  const locks = typeof navigator !== "undefined" && navigator.locks;
+  if (locks && typeof locks.request === "function") {
+    try {
+      return await locks.request("bewerbungstool.history", run);
+    } catch (e) {
+      // Lief der mutator schon (Fehler kam aus mutator/saveHistory), NICHT erneut
+      // ausfuehren - der Fehler propagiert wie bei direktem Aufruf. Scheitert die
+      // Lock-Mechanik selbst (ran === false, z. B. SecurityError in restriktiven
+      // Umgebungen), einmaliger best-effort-Write als Rueckfall.
+      if (ran) throw e;
+      return run();
+    }
+  }
+  return run();
 }
 
 // Komfort-Cache fuer Kernpunkte, die schon BEI der Generierung feststehen (vor dem
@@ -5633,8 +5693,12 @@ function buildTokens(genTokens, evalTokens) {
   return { gen, eval: ev, total: gen + ev };
 }
 
-function saveAttempt(result, durationMs, evalCost, evalTokens) {
-  const h = loadHistory();
+async function saveAttempt(result, durationMs, evalCost, evalTokens) {
+  // Schreiben unter dem History-Lock (mutateHistory), damit ein in einem anderen
+  // Tab parallel laufender Schreibvorgang (z. B. eine Themenfeld-Ableitung)
+  // diesen Versuch nicht ueberschreibt. Der gesamte Block liest/mutiert die
+  // frische History h und laeuft synchron innerhalb der Sektion.
+  return (await mutateHistory((h) => {
   const key = jobKey(quiz.jobText);
   const uKey = quiz.urlKey || null;
   const iKey = identityKeyOf(quiz.titel, quiz.arbeitgeber, quiz.arbeitsort);
@@ -5784,7 +5848,7 @@ function saveAttempt(result, durationMs, evalCost, evalTokens) {
 
   if (job.attempts.length > HISTORY_MAX_ATTEMPTS) job.attempts = job.attempts.slice(-HISTORY_MAX_ATTEMPTS);
   if (h.jobs.length > HISTORY_MAX_JOBS) h.jobs.length = HISTORY_MAX_JOBS;
-  return saveHistory(h); // true, wenn der Versuch wirklich gespeichert wurde
+  })).ok; // true, wenn der Versuch wirklich gespeichert wurde
 }
 
 function formatDate(ts) {
@@ -5813,12 +5877,12 @@ function jobSubtitle(job) {
 // Eintrag), zusaetzlich der urlKey als Rueckfall. Eine Referenzgleichheit
 // hilft nicht: loadHistory parst frisch, das uebergebene job-Objekt ist nie
 // dasselbe wie ein geladenes. Destruktiv und unwiderruflich.
-function deleteJob(job) {
-  const h = loadHistory();
-  h.jobs = h.jobs.filter((j) =>
-    !(job.key && j.key === job.key) &&
-    !(job.urlKey && j.urlKey === job.urlKey));
-  saveHistory(h);
+async function deleteJob(job) {
+  await mutateHistory((h) => {
+    h.jobs = h.jobs.filter((j) =>
+      !(job.key && j.key === job.key) &&
+      !(job.urlKey && j.urlKey === job.urlKey));
+  });
   // Komfort-Cache-Eintrag der Stelle mitloeschen, sonst bliebe er verwaist liegen.
   if (job.key) dropKpCache(job.key);
   // Zugehoerige Meldungen mitloeschen: Reports liegen in einem eigenen Key, der
@@ -6418,7 +6482,7 @@ function buildVertiefungSection(job) {
       showLoading("Themenfelder werden abgeleitet...");
       try {
         const derived = await deriveThemenfelder(job);
-        saveThemenfelder(job, derived, prog.level);
+        await saveThemenfelder(job, derived, prog.level);
       } catch (e) {
         showError(e.message);
         actionRunning = false;
@@ -6461,7 +6525,7 @@ function buildVertiefungPicker(job) {
       showLoading("Themenfelder werden neu abgeleitet...");
       try {
         const derived = await deriveThemenfelder(job);
-        saveThemenfelder(job, derived, prog.level);
+        await saveThemenfelder(job, derived, prog.level);
       } catch (e) {
         showError(e.message);
         actionRunning = false;
@@ -7164,7 +7228,7 @@ function exportData() {
 // Fuehrt eine Sicherung wieder ein. Bewusst nicht-destruktiv: Einstellungen
 // werden feldweise ergaenzt, Stellen per key und Versuche per Datum
 // zusammengefuehrt - vorhandene Daten gehen nie verloren.
-function importData(text) {
+async function importData(text) {
   let data;
   try {
     data = JSON.parse(text);
@@ -7211,7 +7275,7 @@ function importData(text) {
   let newJobs = 0;
   let newAttempts = 0;
   if (data.history && Array.isArray(data.history.jobs)) {
-    const h = loadHistory();
+    await mutateHistory((h) => {
     data.history.jobs.forEach((impJob) => {
       if (!impJob || !impJob.key || !Array.isArray(impJob.attempts)) return;
       // Nur Versuche mit verwertbarem Zeitstempel UND den tragenden Feldern
@@ -7319,7 +7383,7 @@ function importData(text) {
       if (j.attempts.length > HISTORY_MAX_ATTEMPTS) j.attempts = j.attempts.slice(-HISTORY_MAX_ATTEMPTS);
     });
     if (h.jobs.length > HISTORY_MAX_JOBS) h.jobs.length = HISTORY_MAX_JOBS;
-    saveHistory(h);
+    });
   }
 
   // Gemeldete Fragen defensiv und STRENG nicht-destruktiv mergen: importierte
@@ -7390,7 +7454,7 @@ $("import-file").addEventListener("change", async (e) => {
   const status = $("data-status");
   status.textContent = "Datei wird gelesen...";
   try {
-    const summary = importData(await file.text());
+    const summary = await importData(await file.text());
     status.textContent = "Import erfolgreich: " + summary + " Die Seite wird neu geladen...";
     setTimeout(() => location.reload(), 1500);
   } catch (err) {
@@ -7662,7 +7726,7 @@ function closeConfirmDelete() {
   }
   confirmDeleteReturnFocus = null;
 }
-$("btn-confirm-delete").addEventListener("click", () => {
+$("btn-confirm-delete").addEventListener("click", async () => {
   const job = confirmDeleteJob;
   const after = confirmDeleteAfter;
   // Beim Loeschen wird der ausloesende Knopf gleich aus dem DOM entfernt
@@ -7672,7 +7736,13 @@ $("btn-confirm-delete").addEventListener("click", () => {
   confirmDeleteReturnFocus = null;
   closeConfirmDelete();
   if (job) {
-    deleteJob(job);
+    // Erst loeschen (await: Schreiben laeuft unter dem History-Lock), dann die
+    // Ansicht neu aufbauen - sonst zeigte after() noch den alten Stand. Ein Lock-/
+    // Schreibfehler ist sehr selten; die Ansicht trotzdem neu aufbauen, damit sie
+    // konsistent bleibt (Rejection wird nicht unbehandelt).
+    try {
+      await deleteJob(job);
+    } catch { /* Loeschen fehlgeschlagen: Ansicht dennoch konsistent aufbauen */ }
     if (typeof after === "function") after();
     focusVisibleViewHeading();
   }
