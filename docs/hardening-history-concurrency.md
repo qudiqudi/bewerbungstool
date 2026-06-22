@@ -34,6 +34,13 @@ Alle vier Schreibstellen laufen darüber: `saveAttempt`, `saveThemenfelder`,
 `deleteJob` und der History-Teil von `importData`. Ihre Aufrufer sind bereits in
 asynchronen Kontexten und `await`-en den Write.
 
+Gibt ein `mutator` explizit `false` zurück, war nichts zu ändern – dann
+unterbleibt der Write. Das vermeidet No-op-Schreibvorgänge, die unter Quota-Druck
+sonst die Bereinigung (ältesten Versuch verwerfen) auslösen und echte Daten
+verdrängen könnten, obwohl sich nichts geändert hat (relevant z. B. für
+`saveThemenfelder`, wenn keine passende Stelle existiert oder bereits neuere
+Themenfelder vorliegen).
+
 Ergänzend trägt `saveHistory` ein additives `rev`-Feld (Zähler) auf dem
 History-Objekt. Es ist optional und abwärtskompatibel (alte Leser ignorieren es)
 und macht eine Fremdänderung für künftige Erweiterungen erkennbar.

@@ -3038,9 +3038,14 @@ async function saveThemenfelder(job, derived, level) {
       (job.urlKey && h.jobs.find((j) => j.urlKey === job.urlKey)) ||
       (job.key && h.jobs.find((j) => j.key === job.key)) ||
       (job.identityKey && h.jobs.find((j) => j.identityKey === job.identityKey));
-    if (target && !(target.themenfelder && target.themenfelder.generatedAt > themenfelder.generatedAt)) {
-      target.themenfelder = themenfelder;
+    // Nur schreiben, wenn es die Stelle gibt UND wir keine neueren Themenfelder
+    // ueberschreiben. Sonst false zurueckliefern: kein No-op-Write (s.
+    // mutateHistory), damit ein bloss abgeleiteter, aber nicht uebernommener Stand
+    // unter Quota-Druck keine echten Versuche verdraengt.
+    if (!target || (target.themenfelder && target.themenfelder.generatedAt > themenfelder.generatedAt)) {
+      return false;
     }
+    target.themenfelder = themenfelder;
   });
   job.themenfelder = themenfelder;
   return themenfelder;
@@ -5387,6 +5392,11 @@ async function mutateHistory(mutator) {
     ran = true;
     const h = loadHistory();
     const out = mutator(h);
+    // Gibt der mutator explizit false zurueck, war nichts zu schreiben: dann KEIN
+    // saveHistory. Ein No-op-Write wuerde sonst unter Quota-Druck die Bereinigung
+    // (Cache/aelteste Versuche verwerfen) ausloesen und echte Daten verdraengen,
+    // obwohl sich nichts geaendert hat. ok = true, da nichts fehlgeschlagen ist.
+    if (out === false) return { ok: true, out };
     return { ok: saveHistory(h), out };
   };
   const locks = typeof navigator !== "undefined" && navigator.locks;
@@ -7714,7 +7724,7 @@ function closeConfirmDelete() {
   }
   confirmDeleteReturnFocus = null;
 }
-$("btn-confirm-delete").addEventListener("click", () => {
+$("btn-confirm-delete").addEventListener("click", async () => {
   const job = confirmDeleteJob;
   const after = confirmDeleteAfter;
   // Beim Loeschen wird der ausloesende Knopf gleich aus dem DOM entfernt
@@ -7725,11 +7735,14 @@ $("btn-confirm-delete").addEventListener("click", () => {
   closeConfirmDelete();
   if (job) {
     // Erst loeschen (await: Schreiben laeuft unter dem History-Lock), dann die
-    // Ansicht neu aufbauen - sonst zeigte after() noch den alten Stand.
-    deleteJob(job).then(() => {
-      if (typeof after === "function") after();
-      focusVisibleViewHeading();
-    });
+    // Ansicht neu aufbauen - sonst zeigte after() noch den alten Stand. Ein Lock-/
+    // Schreibfehler ist sehr selten; die Ansicht trotzdem neu aufbauen, damit sie
+    // konsistent bleibt (Rejection wird nicht unbehandelt).
+    try {
+      await deleteJob(job);
+    } catch { /* Loeschen fehlgeschlagen: Ansicht dennoch konsistent aufbauen */ }
+    if (typeof after === "function") after();
+    focusVisibleViewHeading();
   }
 });
 
