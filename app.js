@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.8.9";
+const APP_VERSION = "1.8.10";
 
 const CHANGELOG = [
+  {
+    version: "1.8.10",
+    date: "22.06.2026",
+    items: [
+      "Sicherheit: Die Bot-Schutz-Prüfung beim Anmelden und Test-Erstellen ist jetzt fest an die jeweilige Anfrage gebunden.",
+    ],
+  },
   {
     version: "1.8.9",
     date: "22.06.2026",
@@ -1780,7 +1787,11 @@ function ensureTurnstileWidget() {
 
 // Frisches, einmaliges Token fuer genau diese Aktion. Leerer String, wenn Turnstile
 // nicht konfiguriert/bereit ist (dann muss der Worker SKIP_TURNSTILE gesetzt haben).
-async function getTurnstileToken(action) {
+// cData (optional) bindet das Token an genau diesen Request: der Aufrufer uebergibt den
+// SHA-256-Hex des exakt geposteten Bodys (bzw. des vh-Werts bei google-start); der Worker
+// prueft data.cdata gegen den serverseitig neu berechneten Hash. So laesst sich ein
+// abgegriffenes Token nicht auf eine andere Payload umhaengen.
+async function getTurnstileToken(action, cData) {
   if (!turnstileSitekey()) return "";
   if (!(await turnstileReady())) return "";
   setTurnstileVisible(true); // VOR render/execute einblenden (Render braucht sichtbaren Host)
@@ -1791,7 +1802,9 @@ async function getTurnstileToken(action) {
     _tsPending = finish;
     try {
       window.turnstile.reset(_tsWidgetId); // vorheriges Token verwerfen → frisches erzwingen
-      window.turnstile.execute(_tsWidgetId, { action });
+      const execOpts = { action };
+      if (cData) execOpts.cData = cData;
+      window.turnstile.execute(_tsWidgetId, execOpts);
     } catch {
       if (_tsPending === finish) _tsPending = null;
       finish("");
@@ -1832,7 +1845,8 @@ async function callHosted(hosted, onProgress, opts = {}) {
   const tier = settings.tier || "standard";
   const body = JSON.stringify({ ...hosted.payload, tier });
   const headers = { "Content-Type": "application/json", ...authHeaders() };
-  const token = await getTurnstileToken(hosted.action);
+  // cData an genau diesen Body binden (Hash des exakt gesendeten Strings).
+  const token = await getTurnstileToken(hosted.action, await sha256hex(body));
   if (token) headers["CF-Turnstile-Token"] = token;
 
   let res;
@@ -3384,19 +3398,21 @@ async function startHostedGeneration(ctx) {
   actionRunning = true;
   showLoading("Test wird gestartet...");
   try {
-    const token = await getTurnstileToken("generate-quiz");
+    // Body einmal bauen, damit der cData-Hash exakt die gesendeten Bytes abdeckt.
+    const jobBody = JSON.stringify({
+      jobText: ctx.jobText,
+      numQuestions: ctx.numQuestions,
+      difficulty: ctx.difficulty,
+      vertiefung: ctx.vertiefung,
+      tier: settings.tier || "standard",
+    });
+    const token = await getTurnstileToken("generate-quiz", await sha256hex(jobBody));
     const headers = { "Content-Type": "application/json", ...authHeaders() };
     if (token) headers["CF-Turnstile-Token"] = token;
     const res = await fetch(hostedBase() + "/api/jobs", {
       method: "POST",
       headers,
-      body: JSON.stringify({
-        jobText: ctx.jobText,
-        numQuestions: ctx.numQuestions,
-        difficulty: ctx.difficulty,
-        vertiefung: ctx.vertiefung,
-        tier: settings.tier || "standard",
-      }),
+      body: jobBody,
     });
     if (res.status === 401) { handleHostedUnauthorized(); throw new Error(LOGIN_REDIRECT); }
     if (!res.ok) throw new Error(hostedErrorMessage(res.status));
@@ -6938,14 +6954,15 @@ $("login-magic-form").addEventListener("submit", async (e) => {
   btn.disabled = true;
   $("login-msg").textContent = "Anmeldelink wird gesendet...";
   try {
-    // Turnstile (Anti-Bot) wie bei der Generierung – an die Aktion gebunden.
-    const tkn = await getTurnstileToken("magic-link");
+    // Turnstile (Anti-Bot) wie bei der Generierung – an die Aktion und den Body gebunden.
+    const magicBody = JSON.stringify({ email });
+    const tkn = await getTurnstileToken("magic-link", await sha256hex(magicBody));
     const headers = { "Content-Type": "application/json" };
     if (tkn) headers["CF-Turnstile-Token"] = tkn;
     const res = await fetch(hostedBase() + "/auth/magic/start", {
       method: "POST",
       headers,
-      body: JSON.stringify({ email }),
+      body: magicBody,
     });
     // Auf den Status verzweigen (Codex-Review R6): nur 202 ist „gesendet". Sonst klare
     // Rueckmeldung, statt den Nutzer auf eine nie gesendete Mail warten zu lassen.
@@ -6976,8 +6993,9 @@ $("btn-login-google").addEventListener("click", async () => {
     const verifier = randomVerifier();
     try { sessionStorage.setItem(OAUTH_VERIFIER_KEY, verifier); } catch { /* egal */ }
     const vh = await sha256hex(verifier);
-    // Turnstile (Anti-Bot) wie bei Magic-Link/Generierung – an die Aktion gebunden.
-    const tkn = await getTurnstileToken("google-start");
+    // Turnstile (Anti-Bot) wie bei Magic-Link/Generierung – an die Aktion und den vh-Wert
+    // gebunden (google-start hat keinen Body; der Worker hasht den vh-Query-Wert).
+    const tkn = await getTurnstileToken("google-start", await sha256hex(vh));
     const headers = { Accept: "application/json" };
     if (tkn) headers["CF-Turnstile-Token"] = tkn;
     const r = await fetch(hostedBase() + "/auth/google/start?vh=" + encodeURIComponent(vh), { headers });
