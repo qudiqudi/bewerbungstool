@@ -29,12 +29,25 @@ den Blob anfasst, wäre der falsche Auslöser. Darum als eigenständiges Ticket.
 Optimistische Nebenläufigkeit für die gesamte History:
 
 - Ein `rev`-Feld (Zähler oder Zeitstempel) auf dem History-Objekt.
-- `saveHistory` schreibt nur, wenn der gespeicherte `rev` noch dem entspricht,
-  der beim `loadHistory` gelesen wurde. Bei Drift: frisch lesen, die eigene
-  Mutation neu anwenden (Merge auf Feldebene), erneut versuchen.
+- `saveHistory` liest unmittelbar vor dem Write den aktuell gespeicherten `rev`
+  erneut. Weicht er von dem ab, der beim `loadHistory` gelesen wurde, hat
+  zwischendurch ein anderer Tab geschrieben: frisch lesen, die eigene Mutation
+  neu anwenden (Merge auf Feldebene), `rev` erhöhen, erneut versuchen.
 - Mutationen als kleine, feldgenaue Funktionen ausdrücken (z. B. „setze
   `job.themenfelder`", „füge Versuch an"), damit der Retry die Änderung auf den
   frischen Stand neu anwenden kann, statt einen ganzen Snapshot zurückzuschreiben.
+
+Wichtig: `localStorage` kennt kein atomares Compare-and-Swap. Der Read-Check-Write
+oben ist selbst nicht atomar – zwei Tabs können denselben `rev` lesen, beide den
+Check bestehen und beide schreiben (der spätere gewinnt). Das `rev`-Feld allein
+*erkennt* Drift also nur, es *verhindert* den Lost Update nicht garantiert. Damit
+das Akzeptanzkriterium hält, braucht es zusätzlich eine echte Schreib-Serialisierung,
+z. B.:
+
+- Single-Writer-Koordination über `BroadcastChannel` oder die Web Locks API
+  (`navigator.locks.request`), sodass zu jedem Zeitpunkt nur ein Tab schreibt, oder
+- ein Post-Write-Verify: nach dem Write sofort zurücklesen und bei abweichendem
+  `rev` den Merge-und-Retry-Zyklus wiederholen, bis der eigene Stand stabil steht.
 
 Optional zusätzlich:
 
