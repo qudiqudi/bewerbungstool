@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.8.8";
+const APP_VERSION = "1.8.9";
 
 const CHANGELOG = [
+  {
+    version: "1.8.9",
+    date: "22.06.2026",
+    items: [
+      "Belege zu den Stellen-Kernpunkten werden wieder zuverlässig angezeigt.",
+    ],
+  },
   {
     version: "1.8.8",
     date: "19.06.2026",
@@ -1060,6 +1067,20 @@ function mainAdSegment(text) {
 // ab, daher wird hier nichts Zahlenartiges angetastet.
 function cleanKernpunktText(s) {
   let out = String(s == null ? "" : s).replace(/\s+/g, " ").trim();
+  // Nur ein UMSCHLIESSENDES Quote-Paar entfernen (Anfang UND Ende eine zusammengehoerige
+  // Klammer), damit ein jetzt-groundender, gequoteter beleg im Highlight-Panel ohne „…“
+  // erscheint. NICHT einseitig strippen — sonst verstuemmelt ein beleg wie
+  // 'New Work und agile' mit nur EINEM inneren Quote die Anzeige. Quotes im Text bleiben.
+  const QUOTE_PAIRS = [
+    ['"', '"'], ["'", "'"], ['„', '“'], ['„', '"'], ['“', '”'],
+    ['«', '»'], ['»', '«'], ['‹', '›'], ['‚', '‘'], ['‘', '’'],
+  ];
+  for (const [open, close] of QUOTE_PAIRS) {
+    if (out.length >= 2 && out[0] === open && out[out.length - 1] === close) {
+      out = out.slice(1, -1).trim();
+      break;
+    }
+  }
   // Solange am Anfang ein Marker + Whitespace (oder Marker am Stringende) steht,
   // diesen abtrennen. Marker: nur Spiegelstriche/Bullets/Sternchen. Der nachfolgende
   // Whitespace ist Pflicht, damit Wort-interne Bindestriche nicht getroffen werden.
@@ -1075,6 +1096,19 @@ function cleanKernpunktText(s) {
 function normalizeKernpunkte(k, jobText) {
   if (!k || typeof k !== "object") return null;
   const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+  // Entfernt umschliessende Anfuehrungszeichen (auch deutsche typografische „…“), in
+  // die manche Modell-Laeufe den beleg rahmen, obwohl der Inhalt ein perfektes
+  // woertliches Zitat ist. Ohne dieses Abstreifen scheiterte der Substring-Check nur
+  // am fuehrenden/abschliessenden Quote-Zeichen und der kernpunkt galt faelschlich als
+  // ungrounded. Muss verhaltensgleich zu quiz-quality.js (Backend) bleiben.
+  // Gemeinsame Quote-Klasse fuer BEIDE Enden (ASCII + deutsche/franzoesische typografische
+  // Quotes in beiden Richtungen, inkl. Guillemets «…» UND »…«). Symmetrisches Abstreifen ist
+  // fuer den reinen Substring-Match unschaedlich. MUSS identisch zu quiz-quality.js sein.
+  const stripWrapQuotes = (s) =>
+    String(s || "")
+      .replace(/^["'„“”‟«»‘’‚‹›″′]+/, "")
+      .replace(/["'„“”‟«»‘’‚‹›″′]+$/, "")
+      .trim();
   // Belege werden NUR gegen den Haupt-Anzeigentext geprueft (ohne nachgehaengte
   // Teaser fuer andere Stellen), nicht gegen die ganze gescrapte Seite.
   const hay = norm(mainAdSegment(jobText));
@@ -1095,7 +1129,7 @@ function normalizeKernpunkte(k, jobText) {
     // (`text`): ein Teilstring des Zitats koennte die Bedeutung kippen - etwa
     // "Homeoffice" aus dem Beleg "Kein Homeoffice vorgesehen". Das Zitat bewahrt den
     // Sinn (inkl. Verneinungen) und ist nachweislich aus der Anzeige.
-    const nb = norm(beleg);
+    const nb = stripWrapQuotes(norm(beleg));
     // Mindestlaenge gegen triviale Schnipsel; Hoechstlaenge, damit ein FOKUSSIERTES
     // Zitat erzwungen wird, statt es mitten im Satz zu kuerzen: eine blinde Kuerzung
     // koennte einen nachgestellten Qualifier oder eine Verneinung abschneiden und
