@@ -1095,7 +1095,7 @@ function cleanKernpunktText(s) {
 
 function normalizeKernpunkte(k, jobText) {
   if (!k || typeof k !== "object") return null;
-  const norm = (s) => String(s || "").toLowerCase().replace(/ /g, " ").replace(/\s+/g, " ").trim();
+  const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
   // Entfernt umschliessende Anfuehrungszeichen (auch deutsche typografische „…“), in
   // die manche Modell-Laeufe den beleg rahmen, obwohl der Inhalt ein perfektes
   // woertliches Zitat ist. Ohne dieses Abstreifen scheiterte der Substring-Check nur
