@@ -1,70 +1,62 @@
-# Hardening-Ticket: Nebenläufige Schreibzugriffe auf `bewerbungstool.history`
+# Nebenläufige Schreibzugriffe auf `bewerbungstool.history`
 
-Status: geparkt für später.
+Status: umgesetzt. Dieses Dokument beschreibt das gelöste Problem und die
+Mechanik – kein offenes Ticket mehr.
 
-## Problem
+## Problem (vorher)
 
 Die gesamte App hält ihren Zustand in einem localStorage-Key
-(`bewerbungstool.history`). Jeder Write (`saveAttempt`, `deleteJob`, Import) ist
-ein read-modify-write des gesamten Blobs: `loadHistory()` → mutieren →
-`saveHistory()`.
+(`bewerbungstool.history`). Jeder Write war ein read-modify-write des gesamten
+Blobs: `loadHistory()` → mutieren → `saveHistory()`.
 
 Innerhalb eines Tabs ist das unkritisch, solange zwischen Read und Write kein
 `await` steht – JS ist single-threaded, ein synchroner Block ist atomar.
 
-Das verbleibende Risiko sind **zwei echte Browser-Tabs**: Sie laufen in
-getrennten Event-Loops. Committet Tab B sein `saveHistory` exakt im
-Sub-Millisekunden-Fenster zwischen Tab As synchronem Read und Write, geht Bs
-Schreibvorgang verloren (lost update). Das gilt app-weit für jede Schreibstelle,
-seit Version 1 – es ist keine Eigenheit eines einzelnen Features.
+Das Risiko waren **zwei echte Browser-Tabs**: Sie laufen in getrennten
+Event-Loops. Committet Tab B sein `saveHistory` im Fenster zwischen Tab As
+synchronem Read und Write, ging Bs Schreibvorgang verloren (lost update). Das
+galt app-weit für jede Schreibstelle.
 
-## Warum separat
+## Lösung
 
-Eine saubere Lösung betrifft **alle** Schreibstellen und ist ein app-weiter
-Eingriff. Sie an ein einzelnes Feature zu koppeln, nur weil dieses zufällig auch
-den Blob anfasst, wäre der falsche Auslöser. Darum als eigenständiges Ticket.
+Eine einzige serialisierte Schreibsektion, `mutateHistory(mutator)` in `app.js`:
 
-## Lösungsskizze
+- Liest die History **innerhalb** der kritischen Sektion frisch, lässt den
+  `mutator` sie in place ändern und schreibt zurück.
+- Die Sektion läuft unter einem origin-weiten Lock der **Web Locks API**
+  (`navigator.locks.request("bewerbungstool.history", …)`). Der Lock serialisiert
+  den read-modify-write über alle Tabs desselben Origins – parallele Tabs können
+  sich nicht mehr gegenseitig überschreiben.
+- Der `mutator` ist synchron (kein `await` zwischen Lesen und Schreiben), damit
+  die Atomarität der Sektion innerhalb eines Tabs erhalten bleibt.
 
-Optimistische Nebenläufigkeit für die gesamte History:
+Alle vier Schreibstellen laufen darüber: `saveAttempt`, `saveThemenfelder`,
+`deleteJob` und der History-Teil von `importData`. Ihre Aufrufer sind bereits in
+asynchronen Kontexten und `await`-en den Write.
 
-- Ein `rev`-Feld (Zähler oder Zeitstempel) auf dem History-Objekt.
-- `saveHistory` liest unmittelbar vor dem Write den aktuell gespeicherten `rev`
-  erneut. Weicht er von dem ab, der beim `loadHistory` gelesen wurde, hat
-  zwischendurch ein anderer Tab geschrieben: frisch lesen, die eigene Mutation
-  neu anwenden (Merge auf Feldebene), `rev` erhöhen, erneut versuchen.
-- Mutationen als kleine, feldgenaue Funktionen ausdrücken (z. B. „setze
-  `job.themenfelder`", „füge Versuch an"), damit der Retry die Änderung auf den
-  frischen Stand neu anwenden kann, statt einen ganzen Snapshot zurückzuschreiben.
+Ergänzend trägt `saveHistory` ein additives `rev`-Feld (Zähler) auf dem
+History-Objekt. Es ist optional und abwärtskompatibel (alte Leser ignorieren es)
+und macht eine Fremdänderung für künftige Erweiterungen erkennbar.
 
-Wichtig: `localStorage` kennt kein atomares Compare-and-Swap. Der Read-Check-Write
-oben ist selbst nicht atomar – zwei Tabs können denselben `rev` lesen, beide den
-Check bestehen und beide schreiben (der spätere gewinnt). Das `rev`-Feld allein
-*erkennt* Drift also nur, es *verhindert* den Lost Update nicht garantiert. Damit
-das Akzeptanzkriterium hält, braucht es zusätzlich eine echte Schreib-Serialisierung,
-z. B.:
+## Warum kein reines `rev`-Compare-and-Swap
 
-- Single-Writer-Koordination über `BroadcastChannel` oder die Web Locks API
-  (`navigator.locks.request`), sodass zu jedem Zeitpunkt nur ein Tab schreibt, oder
-- ein Post-Write-Verify: nach dem Write sofort zurücklesen und bei abweichendem
-  `rev` den Merge-und-Retry-Zyklus wiederholen, bis der eigene Stand stabil steht.
+`localStorage` kennt kein atomares Compare-and-Swap. Ein „schreibe nur, wenn
+`rev` noch passt" ist selbst nicht atomar – zwei Tabs können denselben `rev`
+lesen, beide den Check bestehen und beide schreiben. `rev` allein *erkennt* Drift
+also nur, es *verhindert* den Lost Update nicht. Die echte Serialisierung
+liefert der Web-Lock; `rev` ist nur additive Drift-Information.
 
-Optional zusätzlich:
+## Residuales Verhalten ohne Web Locks
 
-- Ein `storage`-Event-Listener, der offene Tabs bei Fremdänderung neu lädt bzw.
-  warnt, damit die sichtbare Ansicht nicht auf einem veralteten Stand weiterläuft.
+In sehr alten Browsern ohne Web Locks API fällt `mutateHistory` auf den früheren
+synchronen read-modify-write zurück (best effort) – dort besteht das
+ursprüngliche Sub-Millisekunden-Fenster theoretisch weiter, aber es gibt keinen
+Regress gegenüber vorher. Web Locks ist in allen aktuellen Browsern verfügbar
+(Chrome/Edge seit 69, Firefox seit 96, Safari seit 15.4).
 
-## Akzeptanzkriterien
+## Optional, nicht umgesetzt
 
-- Zwei-Tab-Test: In Tab A eine länger laufende Aktion (z. B. eine Ableitung)
-  anstoßen, währenddessen in Tab B einen Test abschließen und speichern. Nach
-  Abschluss beider stehen sowohl Bs Versuch als auch As Ergebnis in der Historie.
-- Bestehende Flows (Speichern, Löschen, Import/Export) unverändert; localStorage
-  bleibt abwärtskompatibel (`rev` ist additiv und optional zu lesen).
-
-## Kontext
-
-Ursprünglich aus dem Vertiefungen-Plan ausgelagert (der Plan selbst liegt nicht
-mehr im Repo). Der Kern: der Themenfeld-Write begrenzte das Risiko durch einen
-rein synchronen read-modify-write auf das Niveau der bestehenden Writes – dieses
-Ticket hebt das Niveau für alle Writes gemeinsam an.
+- Ein `storage`-Event-Listener, der offene Tabs bei Fremdänderung neu rendert,
+  damit die sichtbare Liste nicht auf einem veralteten Stand weiterläuft. Das
+  betrifft die *Anzeige*, nicht die Datenintegrität (die der Lock schon sichert),
+  und birgt Risiko, laufende Flows zu stören – daher bewusst separat gelassen.
