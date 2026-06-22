@@ -1385,6 +1385,22 @@ button.danger:hover { background: var(--red-soft); border-color: var(--red); }
   gap: 0.25rem;
   font-size: 0.9rem;
 }
+/* Vorschau-Modus: ueberzaehlige Punkte ausblenden, bis der Knopf aufklappt. */
+.kernpunkte-list.is-collapsed > .kp-extra { display: none; }
+/* "mehr/weniger anzeigen": schlichter Text-Button, grosszuegiger Tap-Bereich (mobil). */
+.kernpunkte-more {
+  margin-top: 0.45rem;
+  padding: 0.3rem 0;
+  font: inherit;
+  font-size: 0.82rem;
+  line-height: 1.2;
+  background: none;
+  border: none;
+  color: var(--primary);
+  cursor: pointer;
+}
+.kernpunkte-more:hover { text-decoration: underline; }
+.kernpunkte-more:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
 @media (max-width: 600px) {
   .kernpunkte-grid { grid-template-columns: 1fr; }
 }

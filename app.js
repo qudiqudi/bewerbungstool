@@ -4,9 +4,30 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.8.8";
+const APP_VERSION = "1.8.11";
 
 const CHANGELOG = [
+  {
+    version: "1.8.11",
+    date: "22.06.2026",
+    items: [
+      "Stellen-Kernpunkte: Lange Listen zeigen jetzt zunächst die wichtigsten Punkte; den Rest blendest du je Karte mit einem Tippen ein – deutlich weniger Scrollen, vor allem am Handy.",
+    ],
+  },
+  {
+    version: "1.8.10",
+    date: "22.06.2026",
+    items: [
+      "Sicherheit: Die Bot-Schutz-Prüfung beim Anmelden und Test-Erstellen ist jetzt fest an die jeweilige Anfrage gebunden.",
+    ],
+  },
+  {
+    version: "1.8.9",
+    date: "22.06.2026",
+    items: [
+      "Belege zu den Stellen-Kernpunkten werden wieder zuverlässig angezeigt.",
+    ],
+  },
   {
     version: "1.8.8",
     date: "19.06.2026",
@@ -1060,6 +1081,20 @@ function mainAdSegment(text) {
 // ab, daher wird hier nichts Zahlenartiges angetastet.
 function cleanKernpunktText(s) {
   let out = String(s == null ? "" : s).replace(/\s+/g, " ").trim();
+  // Nur ein UMSCHLIESSENDES Quote-Paar entfernen (Anfang UND Ende eine zusammengehoerige
+  // Klammer), damit ein jetzt-groundender, gequoteter beleg im Highlight-Panel ohne „…“
+  // erscheint. NICHT einseitig strippen — sonst verstuemmelt ein beleg wie
+  // 'New Work und agile' mit nur EINEM inneren Quote die Anzeige. Quotes im Text bleiben.
+  const QUOTE_PAIRS = [
+    ['"', '"'], ["'", "'"], ['„', '“'], ['„', '"'], ['“', '”'],
+    ['«', '»'], ['»', '«'], ['‹', '›'], ['‚', '‘'], ['‘', '’'],
+  ];
+  for (const [open, close] of QUOTE_PAIRS) {
+    if (out.length >= 2 && out[0] === open && out[out.length - 1] === close) {
+      out = out.slice(1, -1).trim();
+      break;
+    }
+  }
   // Solange am Anfang ein Marker + Whitespace (oder Marker am Stringende) steht,
   // diesen abtrennen. Marker: nur Spiegelstriche/Bullets/Sternchen. Der nachfolgende
   // Whitespace ist Pflicht, damit Wort-interne Bindestriche nicht getroffen werden.
@@ -1075,6 +1110,19 @@ function cleanKernpunktText(s) {
 function normalizeKernpunkte(k, jobText) {
   if (!k || typeof k !== "object") return null;
   const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+  // Entfernt umschliessende Anfuehrungszeichen (auch deutsche typografische „…“), in
+  // die manche Modell-Laeufe den beleg rahmen, obwohl der Inhalt ein perfektes
+  // woertliches Zitat ist. Ohne dieses Abstreifen scheiterte der Substring-Check nur
+  // am fuehrenden/abschliessenden Quote-Zeichen und der kernpunkt galt faelschlich als
+  // ungrounded. Muss verhaltensgleich zu quiz-quality.js (Backend) bleiben.
+  // Gemeinsame Quote-Klasse fuer BEIDE Enden (ASCII + deutsche/franzoesische typografische
+  // Quotes in beiden Richtungen, inkl. Guillemets «…» UND »…«). Symmetrisches Abstreifen ist
+  // fuer den reinen Substring-Match unschaedlich. MUSS identisch zu quiz-quality.js sein.
+  const stripWrapQuotes = (s) =>
+    String(s || "")
+      .replace(/^["'„“”‟«»‘’‚‹›″′]+/, "")
+      .replace(/["'„“”‟«»‘’‚‹›″′]+$/, "")
+      .trim();
   // Belege werden NUR gegen den Haupt-Anzeigentext geprueft (ohne nachgehaengte
   // Teaser fuer andere Stellen), nicht gegen die ganze gescrapte Seite.
   const hay = norm(mainAdSegment(jobText));
@@ -1095,7 +1143,7 @@ function normalizeKernpunkte(k, jobText) {
     // (`text`): ein Teilstring des Zitats koennte die Bedeutung kippen - etwa
     // "Homeoffice" aus dem Beleg "Kein Homeoffice vorgesehen". Das Zitat bewahrt den
     // Sinn (inkl. Verneinungen) und ist nachweislich aus der Anzeige.
-    const nb = norm(beleg);
+    const nb = stripWrapQuotes(norm(beleg));
     // Mindestlaenge gegen triviale Schnipsel; Hoechstlaenge, damit ein FOKUSSIERTES
     // Zitat erzwungen wird, statt es mitten im Satz zu kuerzen: eine blinde Kuerzung
     // koennte einen nachgestellten Qualifier oder eine Verneinung abschneiden und
@@ -1746,7 +1794,11 @@ function ensureTurnstileWidget() {
 
 // Frisches, einmaliges Token fuer genau diese Aktion. Leerer String, wenn Turnstile
 // nicht konfiguriert/bereit ist (dann muss der Worker SKIP_TURNSTILE gesetzt haben).
-async function getTurnstileToken(action) {
+// cData (optional) bindet das Token an genau diesen Request: der Aufrufer uebergibt den
+// SHA-256-Hex des exakt geposteten Bodys (bzw. des vh-Werts bei google-start); der Worker
+// prueft data.cdata gegen den serverseitig neu berechneten Hash. So laesst sich ein
+// abgegriffenes Token nicht auf eine andere Payload umhaengen.
+async function getTurnstileToken(action, cData) {
   if (!turnstileSitekey()) return "";
   if (!(await turnstileReady())) return "";
   setTurnstileVisible(true); // VOR render/execute einblenden (Render braucht sichtbaren Host)
@@ -1757,7 +1809,9 @@ async function getTurnstileToken(action) {
     _tsPending = finish;
     try {
       window.turnstile.reset(_tsWidgetId); // vorheriges Token verwerfen → frisches erzwingen
-      window.turnstile.execute(_tsWidgetId, { action });
+      const execOpts = { action };
+      if (cData) execOpts.cData = cData;
+      window.turnstile.execute(_tsWidgetId, execOpts);
     } catch {
       if (_tsPending === finish) _tsPending = null;
       finish("");
@@ -1798,7 +1852,8 @@ async function callHosted(hosted, onProgress, opts = {}) {
   const tier = settings.tier || "standard";
   const body = JSON.stringify({ ...hosted.payload, tier });
   const headers = { "Content-Type": "application/json", ...authHeaders() };
-  const token = await getTurnstileToken(hosted.action);
+  // cData an genau diesen Body binden (Hash des exakt gesendeten Strings).
+  const token = await getTurnstileToken(hosted.action, await sha256hex(body));
   if (token) headers["CF-Turnstile-Token"] = token;
 
   let res;
@@ -2969,7 +3024,7 @@ async function deriveThemenfelder(job) {
 // sofort schreiben. Zwischen loadHistory und saveHistory steht bewusst kein
 // await (synchron = atomar je Tab). Nicht ueberschreiben, falls inzwischen ein
 // neuerer Stand da ist. Aktualisiert zusaetzlich das in-memory job-Objekt.
-function saveThemenfelder(job, derived, level) {
+async function saveThemenfelder(job, derived, level) {
   const themenfelder = {
     v: 1,
     generatedAt: Date.now(),
@@ -2978,15 +3033,22 @@ function saveThemenfelder(job, derived, level) {
     cost: derived.cost,
     tokens: derived.tokens,
   };
-  const h = loadHistory();
-  const target =
-    (job.urlKey && h.jobs.find((j) => j.urlKey === job.urlKey)) ||
-    (job.key && h.jobs.find((j) => j.key === job.key)) ||
-    (job.identityKey && h.jobs.find((j) => j.identityKey === job.identityKey));
-  if (target && !(target.themenfelder && target.themenfelder.generatedAt > themenfelder.generatedAt)) {
+  await mutateHistory((h) => {
+    const target =
+      (job.urlKey && h.jobs.find((j) => j.urlKey === job.urlKey)) ||
+      (job.key && h.jobs.find((j) => j.key === job.key)) ||
+      (job.identityKey && h.jobs.find((j) => j.identityKey === job.identityKey));
+    // Nur schreiben, wenn es die Stelle gibt UND wir keine gleich neuen oder
+    // neueren Themenfelder ueberschreiben. >= statt >: bei exakt gleichem
+    // generatedAt (Same-Millisecond-Race zweier Tabs) ist der gespeicherte Stand
+    // gleich frisch - dann nicht ueberschreiben. Sonst false zurueckliefern: kein
+    // No-op-Write (s. mutateHistory), damit ein bloss abgeleiteter, aber nicht
+    // uebernommener Stand unter Quota-Druck keine echten Versuche verdraengt.
+    if (!target || (target.themenfelder && target.themenfelder.generatedAt >= themenfelder.generatedAt)) {
+      return false;
+    }
     target.themenfelder = themenfelder;
-    saveHistory(h);
-  }
+  });
   job.themenfelder = themenfelder;
   return themenfelder;
 }
@@ -3350,19 +3412,21 @@ async function startHostedGeneration(ctx) {
   actionRunning = true;
   showLoading("Test wird gestartet...");
   try {
-    const token = await getTurnstileToken("generate-quiz");
+    // Body einmal bauen, damit der cData-Hash exakt die gesendeten Bytes abdeckt.
+    const jobBody = JSON.stringify({
+      jobText: ctx.jobText,
+      numQuestions: ctx.numQuestions,
+      difficulty: ctx.difficulty,
+      vertiefung: ctx.vertiefung,
+      tier: settings.tier || "standard",
+    });
+    const token = await getTurnstileToken("generate-quiz", await sha256hex(jobBody));
     const headers = { "Content-Type": "application/json", ...authHeaders() };
     if (token) headers["CF-Turnstile-Token"] = token;
     const res = await fetch(hostedBase() + "/api/jobs", {
       method: "POST",
       headers,
-      body: JSON.stringify({
-        jobText: ctx.jobText,
-        numQuestions: ctx.numQuestions,
-        difficulty: ctx.difficulty,
-        vertiefung: ctx.vertiefung,
-        tier: settings.tier || "standard",
-      }),
+      body: jobBody,
     });
     if (res.status === 401) { handleHostedUnauthorized(); throw new Error(LOGIN_REDIRECT); }
     if (!res.ok) throw new Error(hostedErrorMessage(res.status));
@@ -4435,7 +4499,7 @@ async function runEvaluation() {
         `Du hast ${result.gesamt.prozent}% der automatisch bewerteten Aufgaben erreicht.`;
     }
 
-    const saved = saveAttempt(result, durationMs, evalCost, evalTokens);
+    const saved = await saveAttempt(result, durationMs, evalCost, evalTokens);
     // Den fortsetzbaren Lerntest erst verwerfen, wenn der Versuch WIRKLICH gespeichert
     // wurde — sonst koennten bei vollem/blockiertem Speicher beide verloren gehen.
     if (saved) clearLearnSession();
@@ -5266,6 +5330,13 @@ function loadHistory() {
 // abhaengig machen (z. B. eine offene Lern-Sitzung erst danach verwerfen), muessen
 // das Ergebnis pruefen.
 function saveHistory(h) {
+  // rev (additiv, optional) bei jedem Schreibvorgang hochzaehlen. Erlaubt der
+  // serialisierten Schreibsektion (mutateHistory) und anderen Tabs, eine
+  // Fremdaenderung zu erkennen. Defensiv: fehlt rev (Daten aus aelteren
+  // Versionen), bei 0 beginnen. Nur eine Zahl - alte Leser ignorieren das Feld,
+  // also abwaertskompatibel. Vor der Retry-Schleife, damit ein Quota-Retry rev
+  // nicht mehrfach hochzaehlt.
+  if (h && typeof h === "object") h.rev = (Number.isFinite(h.rev) ? h.rev : 0) + 1;
   // Bei vollem Speicher aelteste Versuche verwerfen und erneut versuchen
   for (let i = 0; i < 6; i++) {
     try {
@@ -5298,6 +5369,52 @@ function saveHistory(h) {
     }
   }
   return false;
+}
+
+// Serialisierter Schreibzugriff auf die History. Liest die History INNERHALB der
+// kritischen Sektion frisch, laesst den mutator sie in place aendern und schreibt
+// sie zurueck - das Ganze unter einem origin-weiten Web-Lock, sodass mehrere
+// offene Browser-Tabs sich nicht gegenseitig ueberschreiben (lost update: zwei
+// Tabs lesen denselben Stand, beide schreiben, der spaetere gewinnt). Der Lock
+// serialisiert die read-modify-write-Sektion ueber alle Tabs desselben Origins.
+//
+// Ohne Web Locks (sehr alte Browser) faellt es auf einen synchronen
+// read-modify-write zurueck: best effort, exakt das fruehere Verhalten, kein
+// Regress gegenueber vorher. localStorage kennt kein atomares Compare-and-Swap;
+// der Lock ist die einzige verlaessliche Serialisierung, das frueher angedachte
+// rev-Feld allein wuerde Drift nur erkennen, nicht verhindern.
+//
+// Der mutator MUSS synchron sein - kein await zwischen Lesen und Schreiben, sonst
+// reisst die Atomaritaet der Sektion auf. Rueckgabe: { ok, out } mit
+// ok = saveHistory-Ergebnis (true = wirklich geschrieben) und out = Rueckgabewert
+// des mutators.
+async function mutateHistory(mutator) {
+  let ran = false;
+  const run = () => {
+    ran = true;
+    const h = loadHistory();
+    const out = mutator(h);
+    // Gibt der mutator explizit false zurueck, war nichts zu schreiben: dann KEIN
+    // saveHistory. Ein No-op-Write wuerde sonst unter Quota-Druck die Bereinigung
+    // (Cache/aelteste Versuche verwerfen) ausloesen und echte Daten verdraengen,
+    // obwohl sich nichts geaendert hat. ok = true, da nichts fehlgeschlagen ist.
+    if (out === false) return { ok: true, out };
+    return { ok: saveHistory(h), out };
+  };
+  const locks = typeof navigator !== "undefined" && navigator.locks;
+  if (locks && typeof locks.request === "function") {
+    try {
+      return await locks.request("bewerbungstool.history", run);
+    } catch (e) {
+      // Lief der mutator schon (Fehler kam aus mutator/saveHistory), NICHT erneut
+      // ausfuehren - der Fehler propagiert wie bei direktem Aufruf. Scheitert die
+      // Lock-Mechanik selbst (ran === false, z. B. SecurityError in restriktiven
+      // Umgebungen), einmaliger best-effort-Write als Rueckfall.
+      if (ran) throw e;
+      return run();
+    }
+  }
+  return run();
 }
 
 // Komfort-Cache fuer Kernpunkte, die schon BEI der Generierung feststehen (vor dem
@@ -5576,8 +5693,12 @@ function buildTokens(genTokens, evalTokens) {
   return { gen, eval: ev, total: gen + ev };
 }
 
-function saveAttempt(result, durationMs, evalCost, evalTokens) {
-  const h = loadHistory();
+async function saveAttempt(result, durationMs, evalCost, evalTokens) {
+  // Schreiben unter dem History-Lock (mutateHistory), damit ein in einem anderen
+  // Tab parallel laufender Schreibvorgang (z. B. eine Themenfeld-Ableitung)
+  // diesen Versuch nicht ueberschreibt. Der gesamte Block liest/mutiert die
+  // frische History h und laeuft synchron innerhalb der Sektion.
+  return (await mutateHistory((h) => {
   const key = jobKey(quiz.jobText);
   const uKey = quiz.urlKey || null;
   const iKey = identityKeyOf(quiz.titel, quiz.arbeitgeber, quiz.arbeitsort);
@@ -5727,7 +5848,7 @@ function saveAttempt(result, durationMs, evalCost, evalTokens) {
 
   if (job.attempts.length > HISTORY_MAX_ATTEMPTS) job.attempts = job.attempts.slice(-HISTORY_MAX_ATTEMPTS);
   if (h.jobs.length > HISTORY_MAX_JOBS) h.jobs.length = HISTORY_MAX_JOBS;
-  return saveHistory(h); // true, wenn der Versuch wirklich gespeichert wurde
+  })).ok; // true, wenn der Versuch wirklich gespeichert wurde
 }
 
 function formatDate(ts) {
@@ -5756,12 +5877,12 @@ function jobSubtitle(job) {
 // Eintrag), zusaetzlich der urlKey als Rueckfall. Eine Referenzgleichheit
 // hilft nicht: loadHistory parst frisch, das uebergebene job-Objekt ist nie
 // dasselbe wie ein geladenes. Destruktiv und unwiderruflich.
-function deleteJob(job) {
-  const h = loadHistory();
-  h.jobs = h.jobs.filter((j) =>
-    !(job.key && j.key === job.key) &&
-    !(job.urlKey && j.urlKey === job.urlKey));
-  saveHistory(h);
+async function deleteJob(job) {
+  await mutateHistory((h) => {
+    h.jobs = h.jobs.filter((j) =>
+      !(job.key && j.key === job.key) &&
+      !(job.urlKey && j.urlKey === job.urlKey));
+  });
   // Komfort-Cache-Eintrag der Stelle mitloeschen, sonst bliebe er verwaist liegen.
   if (job.key) dropKpCache(job.key);
   // Zugehoerige Meldungen mitloeschen: Reports liegen in einem eigenen Key, der
@@ -6103,6 +6224,7 @@ function buildNumStepper(initial, onChange, opts = {}) {
 // gibt die Funktion null zurueck und renderJob haengt nichts ein. Modell-Output
 // wird ausschliesslich ueber textContent gesetzt (kein innerHTML).
 const KERNPUNKTE_LIST_MAX = 8; // sehr lange Listen kappen (geschwaetzige Modelle)
+const KERNPUNKTE_PREVIEW = 3;  // pro Karte initial sichtbare Punkte; Rest per "mehr anzeigen"
 function buildKernpunktePanel(job) {
   // Quelle der Kernpunkte: bevorzugt job.kernpunkte (beim Abschluss via saveAttempt
   // gespeichert, autoritativ). Fehlt das, der Komfort-Cache (kpcache): Kernpunkte, die
@@ -6193,14 +6315,36 @@ function buildKernpunktePanel(job) {
     title.textContent = s.label;
     card.appendChild(title);
 
+    const items = kp[s.key].slice(0, KERNPUNKTE_LIST_MAX);
     const ul = document.createElement("ul");
     ul.className = "kernpunkte-list";
-    kp[s.key].slice(0, KERNPUNKTE_LIST_MAX).forEach((item) => {
+    items.forEach((item, i) => {
       const li = document.createElement("li");
       li.textContent = String(item);
+      // Lange Listen: nur die ersten KERNPUNKTE_PREVIEW Punkte sofort zeigen, der Rest
+      // bleibt im DOM (per CSS ausgeblendet) und wird mit dem Knopf eingeblendet - so
+      // muss man pro Stelle nicht so weit scrollen (v.a. mobil), ohne Re-Render.
+      if (i >= KERNPUNKTE_PREVIEW) li.classList.add("kp-extra");
       ul.appendChild(li);
     });
     card.appendChild(ul);
+
+    const extra = items.length - KERNPUNKTE_PREVIEW;
+    if (extra > 0) {
+      ul.classList.add("is-collapsed");
+      const more = document.createElement("button");
+      more.type = "button";
+      more.className = "kernpunkte-more";
+      more.setAttribute("aria-expanded", "false");
+      const collapsedLabel = `+ ${extra} weitere anzeigen`;
+      more.textContent = collapsedLabel;
+      more.addEventListener("click", () => {
+        const expanded = !ul.classList.toggle("is-collapsed"); // toggle gibt true = jetzt collapsed
+        more.setAttribute("aria-expanded", expanded ? "true" : "false");
+        more.textContent = expanded ? "weniger anzeigen" : collapsedLabel;
+      });
+      card.appendChild(more);
+    }
     grid.appendChild(card);
   });
 
@@ -6338,7 +6482,7 @@ function buildVertiefungSection(job) {
       showLoading("Themenfelder werden abgeleitet...");
       try {
         const derived = await deriveThemenfelder(job);
-        saveThemenfelder(job, derived, prog.level);
+        await saveThemenfelder(job, derived, prog.level);
       } catch (e) {
         showError(e.message);
         actionRunning = false;
@@ -6381,7 +6525,7 @@ function buildVertiefungPicker(job) {
       showLoading("Themenfelder werden neu abgeleitet...");
       try {
         const derived = await deriveThemenfelder(job);
-        saveThemenfelder(job, derived, prog.level);
+        await saveThemenfelder(job, derived, prog.level);
       } catch (e) {
         showError(e.message);
         actionRunning = false;
@@ -6904,14 +7048,15 @@ $("login-magic-form").addEventListener("submit", async (e) => {
   btn.disabled = true;
   $("login-msg").textContent = "Anmeldelink wird gesendet...";
   try {
-    // Turnstile (Anti-Bot) wie bei der Generierung – an die Aktion gebunden.
-    const tkn = await getTurnstileToken("magic-link");
+    // Turnstile (Anti-Bot) wie bei der Generierung – an die Aktion und den Body gebunden.
+    const magicBody = JSON.stringify({ email });
+    const tkn = await getTurnstileToken("magic-link", await sha256hex(magicBody));
     const headers = { "Content-Type": "application/json" };
     if (tkn) headers["CF-Turnstile-Token"] = tkn;
     const res = await fetch(hostedBase() + "/auth/magic/start", {
       method: "POST",
       headers,
-      body: JSON.stringify({ email }),
+      body: magicBody,
     });
     // Auf den Status verzweigen (Codex-Review R6): nur 202 ist „gesendet". Sonst klare
     // Rueckmeldung, statt den Nutzer auf eine nie gesendete Mail warten zu lassen.
@@ -6942,8 +7087,9 @@ $("btn-login-google").addEventListener("click", async () => {
     const verifier = randomVerifier();
     try { sessionStorage.setItem(OAUTH_VERIFIER_KEY, verifier); } catch { /* egal */ }
     const vh = await sha256hex(verifier);
-    // Turnstile (Anti-Bot) wie bei Magic-Link/Generierung – an die Aktion gebunden.
-    const tkn = await getTurnstileToken("google-start");
+    // Turnstile (Anti-Bot) wie bei Magic-Link/Generierung – an die Aktion und den vh-Wert
+    // gebunden (google-start hat keinen Body; der Worker hasht den vh-Query-Wert).
+    const tkn = await getTurnstileToken("google-start", await sha256hex(vh));
     const headers = { Accept: "application/json" };
     if (tkn) headers["CF-Turnstile-Token"] = tkn;
     const r = await fetch(hostedBase() + "/auth/google/start?vh=" + encodeURIComponent(vh), { headers });
@@ -7082,7 +7228,7 @@ function exportData() {
 // Fuehrt eine Sicherung wieder ein. Bewusst nicht-destruktiv: Einstellungen
 // werden feldweise ergaenzt, Stellen per key und Versuche per Datum
 // zusammengefuehrt - vorhandene Daten gehen nie verloren.
-function importData(text) {
+async function importData(text) {
   let data;
   try {
     data = JSON.parse(text);
@@ -7129,7 +7275,7 @@ function importData(text) {
   let newJobs = 0;
   let newAttempts = 0;
   if (data.history && Array.isArray(data.history.jobs)) {
-    const h = loadHistory();
+    await mutateHistory((h) => {
     data.history.jobs.forEach((impJob) => {
       if (!impJob || !impJob.key || !Array.isArray(impJob.attempts)) return;
       // Nur Versuche mit verwertbarem Zeitstempel UND den tragenden Feldern
@@ -7237,7 +7383,7 @@ function importData(text) {
       if (j.attempts.length > HISTORY_MAX_ATTEMPTS) j.attempts = j.attempts.slice(-HISTORY_MAX_ATTEMPTS);
     });
     if (h.jobs.length > HISTORY_MAX_JOBS) h.jobs.length = HISTORY_MAX_JOBS;
-    saveHistory(h);
+    });
   }
 
   // Gemeldete Fragen defensiv und STRENG nicht-destruktiv mergen: importierte
@@ -7308,7 +7454,7 @@ $("import-file").addEventListener("change", async (e) => {
   const status = $("data-status");
   status.textContent = "Datei wird gelesen...";
   try {
-    const summary = importData(await file.text());
+    const summary = await importData(await file.text());
     status.textContent = "Import erfolgreich: " + summary + " Die Seite wird neu geladen...";
     setTimeout(() => location.reload(), 1500);
   } catch (err) {
@@ -7580,7 +7726,7 @@ function closeConfirmDelete() {
   }
   confirmDeleteReturnFocus = null;
 }
-$("btn-confirm-delete").addEventListener("click", () => {
+$("btn-confirm-delete").addEventListener("click", async () => {
   const job = confirmDeleteJob;
   const after = confirmDeleteAfter;
   // Beim Loeschen wird der ausloesende Knopf gleich aus dem DOM entfernt
@@ -7590,7 +7736,13 @@ $("btn-confirm-delete").addEventListener("click", () => {
   confirmDeleteReturnFocus = null;
   closeConfirmDelete();
   if (job) {
-    deleteJob(job);
+    // Erst loeschen (await: Schreiben laeuft unter dem History-Lock), dann die
+    // Ansicht neu aufbauen - sonst zeigte after() noch den alten Stand. Ein Lock-/
+    // Schreibfehler ist sehr selten; die Ansicht trotzdem neu aufbauen, damit sie
+    // konsistent bleibt (Rejection wird nicht unbehandelt).
+    try {
+      await deleteJob(job);
+    } catch { /* Loeschen fehlgeschlagen: Ansicht dennoch konsistent aufbauen */ }
     if (typeof after === "function") after();
     focusVisibleViewHeading();
   }
