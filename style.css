@@ -1398,7 +1398,6 @@ button.danger:hover { background: var(--red-soft); border-color: var(--red); }
   border: none;
   color: var(--primary);
   cursor: pointer;
-  align-self: flex-start;
 }
 .kernpunkte-more:hover { text-decoration: underline; }
 .kernpunkte-more:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
