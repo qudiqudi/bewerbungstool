@@ -3038,11 +3038,13 @@ async function saveThemenfelder(job, derived, level) {
       (job.urlKey && h.jobs.find((j) => j.urlKey === job.urlKey)) ||
       (job.key && h.jobs.find((j) => j.key === job.key)) ||
       (job.identityKey && h.jobs.find((j) => j.identityKey === job.identityKey));
-    // Nur schreiben, wenn es die Stelle gibt UND wir keine neueren Themenfelder
-    // ueberschreiben. Sonst false zurueckliefern: kein No-op-Write (s.
-    // mutateHistory), damit ein bloss abgeleiteter, aber nicht uebernommener Stand
-    // unter Quota-Druck keine echten Versuche verdraengt.
-    if (!target || (target.themenfelder && target.themenfelder.generatedAt > themenfelder.generatedAt)) {
+    // Nur schreiben, wenn es die Stelle gibt UND wir keine gleich neuen oder
+    // neueren Themenfelder ueberschreiben. >= statt >: bei exakt gleichem
+    // generatedAt (Same-Millisecond-Race zweier Tabs) ist der gespeicherte Stand
+    // gleich frisch - dann nicht ueberschreiben. Sonst false zurueckliefern: kein
+    // No-op-Write (s. mutateHistory), damit ein bloss abgeleiteter, aber nicht
+    // uebernommener Stand unter Quota-Druck keine echten Versuche verdraengt.
+    if (!target || (target.themenfelder && target.themenfelder.generatedAt >= themenfelder.generatedAt)) {
       return false;
     }
     target.themenfelder = themenfelder;
