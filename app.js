@@ -1073,7 +1073,7 @@ function cleanKernpunktText(s) {
   // 'New Work und agile' mit nur EINEM inneren Quote die Anzeige. Quotes im Text bleiben.
   const QUOTE_PAIRS = [
     ['"', '"'], ["'", "'"], ['„', '“'], ['„', '"'], ['“', '”'],
-    ['«', '»'], ['»', '«'], ['‚', '‘'], ['‘', '’'],
+    ['«', '»'], ['»', '«'], ['‹', '›'], ['‚', '‘'], ['‘', '’'],
   ];
   for (const [open, close] of QUOTE_PAIRS) {
     if (out.length >= 2 && out[0] === open && out[out.length - 1] === close) {
@@ -1106,8 +1106,8 @@ function normalizeKernpunkte(k, jobText) {
   // fuer den reinen Substring-Match unschaedlich. MUSS identisch zu quiz-quality.js sein.
   const stripWrapQuotes = (s) =>
     String(s || "")
-      .replace(/^["'„“”‟«»‘’‚]+/, "")
-      .replace(/["'„“”‟«»‘’‚]+$/, "")
+      .replace(/^["'„“”‟«»‘’‚‹›″′]+/, "")
+      .replace(/["'„“”‟«»‘’‚‹›″′]+$/, "")
       .trim();
   // Belege werden NUR gegen den Haupt-Anzeigentext geprueft (ohne nachgehaengte
   // Teaser fuer andere Stellen), nicht gegen die ganze gescrapte Seite.
