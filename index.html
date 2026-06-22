@@ -487,13 +487,17 @@
         <p>Nur die für die jeweilige Funktion nötigen Inhalte: der Text der Stellenanzeige, deine eingegebenen Antworten (zur Bewertung) und die gewählte Qualitätsstufe. Für den gehosteten Modus ist eine Anmeldung erforderlich (siehe „Konto im gehosteten Modus“); ohne Anmeldung kannst du stattdessen einen eigenen Schlüssel oder ein lokales Modell nutzen, dann fallen keine Kontodaten an.</p>
         <p>Bitte beachte: Stellenanzeigen und besonders deine Antworten können personenbezogene oder sensible Angaben enthalten. Gib im gehosteten Modus nichts ein, das nicht über fremde Dienste laufen soll – wenn du das vermeiden willst, nutze einen eigenen Schlüssel oder ein lokales Modell.</p>
 
+        <h3>Stellenanzeige per URL laden</h3>
+        <p>Wenn du eine Stellenanzeige über „Per URL laden“ importierst, wird die von dir eingegebene Adresse an den Dienst Jina AI (<code>r.jina.ai</code>) gesendet. Jina ruft die Seite ab und liefert den lesbaren Text zurück. Das geschieht unabhängig von der gewählten Betriebsart – also auch mit eigenem Schlüssel oder lokalem Modell. Wenn du das vermeiden willst, füge den Anzeigentext stattdessen über „Text einfügen“ direkt ein.</p>
+
         <h3>Wer die Daten verarbeitet (Empfänger)</h3>
         <ul>
-          <li>Cloudflare – Hosting unseres Vermittlungs-Servers (weltweit verteilte Server)</li>
+          <li>Cloudflare – Hosting unseres Vermittlungs-Servers (weltweit verteilte Server) sowie Bot-Schutz beim Anmelden und Test-Erstellen über Cloudflare Turnstile</li>
           <li>OpenRouter – leitet die Anfrage an das jeweilige KI-Modell weiter</li>
           <li>Der jeweilige Modellanbieter je nach Qualitätsstufe (z. B. OpenAI, Anthropic, DeepSeek)</li>
         </ul>
-        <p>Diese Anbieter verarbeiten die übermittelten Inhalte, um die Antwort zu erzeugen. Dabei ist eine Übermittlung in Länder außerhalb der EU (u. a. USA) möglich.</p>
+        <p>Diese Anbieter verarbeiten die übermittelten Inhalte, um die Antwort zu erzeugen. Dabei ist eine Übermittlung in Länder außerhalb der EU (u. a. USA) möglich. Soweit Daten in die USA oder andere Drittländer übertragen werden, stützen wir das auf die Standardvertragsklauseln der EU-Kommission bzw. – wo vorhanden – auf einen Angemessenheitsbeschluss (etwa das EU-US Data Privacy Framework).</p>
+        <p>Wenn wir schreiben, dass wir „keine IP-Adresse“ speichern, betrifft das unsere eigene Anwendung. Cloudflare verarbeitet IP-Adressen technisch unvermeidlich, um die Seite auszuliefern, vor Angriffen zu schützen und den Bot-Schutz durchzuführen.</p>
 
         <h3>Speicherung</h3>
         <p>Unser Server speichert die Inhalte deiner Anfragen nicht dauerhaft und protokolliert sie nicht; geführt wird nur ein anonymer Zähler für das Tageskontingent (Schutz vor Missbrauch und Kostenausreißern). Wie die genannten Anbieter die Daten behandeln, richtet sich nach deren eigenen Bestimmungen.</p>
@@ -507,6 +511,15 @@
 
         <h3>Konto im gehosteten Modus</h3>
         <p>Um den gehosteten Modus zu nutzen, meldest du dich per Anmeldelink (E-Mail) oder über Google an. Dabei speichern wir deine E-Mail-Adresse sowie technische Sitzungsdaten in einer Datenbank bei Cloudflare, um dein Konto wiederzuerkennen. Beim Anmeldelink versendet <strong>Resend</strong> die E-Mail in unserem Auftrag; beim Google-Login erhalten wir von Google nur deine E-Mail-Adresse und eine Kennung. Du kannst dich jederzeit in den Einstellungen wieder abmelden. Eine Konto-Löschung auf Anfrage ist über die unten genannte Kontaktadresse möglich. Wenn du dich nicht anmelden möchtest, nutze stattdessen einen eigenen API-Schlüssel oder ein lokales Modell – dann werden keine Kontodaten erhoben.</p>
+
+        <h3>Rechtsgrundlagen</h3>
+        <p>Soweit personenbezogene Daten verarbeitet werden, geschieht das auf folgenden Grundlagen der DSGVO: zur Bereitstellung der von dir angeforderten Funktionen und des Kontos auf Art. 6 Abs. 1 lit. b (Nutzungsverhältnis); für Bot-Schutz, anonyme Nutzungsstatistik und die Auswertung gemeldeter Fragen auf Art. 6 Abs. 1 lit. f (berechtigtes Interesse an einem stabilen, missbrauchssicheren und besseren Dienst).</p>
+
+        <h3>Speicherdauer</h3>
+        <p>Inhalte deiner Anfragen speichern wir nicht (siehe „Speicherung“). Kontodaten (E-Mail und Sitzungsdaten) bleiben gespeichert, solange dein Konto besteht; Sitzungen laufen automatisch ab, und du kannst dein Konto jederzeit über die unten genannte Kontaktadresse löschen lassen. Gemeldete Fragen bewahren wir nur so lange auf, wie wir sie zur Verbesserung der Fragen benötigen. Der anonyme Zähler fürs Tageskontingent wird laufend zurückgesetzt.</p>
+
+        <h3>Deine Rechte</h3>
+        <p>Du hast nach der DSGVO das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung, Datenübertragbarkeit sowie Widerspruch gegen Verarbeitungen, die auf einem berechtigten Interesse beruhen. Wende dich dafür an die unten genannte Kontaktadresse. Außerdem kannst du dich bei einer Datenschutz-Aufsichtsbehörde beschweren.</p>
 
         <h3>Verantwortlicher</h3>
         <p>Sebastian Chudoba<br>

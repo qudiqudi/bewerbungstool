@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.8.11";
+const APP_VERSION = "1.8.12";
 
 const CHANGELOG = [
+  {
+    version: "1.8.12",
+    date: "22.06.2026",
+    items: [
+      "Datenschutzhinweis ergänzt: Der Import einer Stellenanzeige per URL (über Jina AI) und der Bot-Schutz beim Anmelden sind jetzt ausdrücklich beschrieben; dazu Hinweise zu deinen Datenschutzrechten.",
+    ],
+  },
   {
     version: "1.8.11",
     date: "22.06.2026",
