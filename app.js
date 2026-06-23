@@ -3080,7 +3080,9 @@ async function deriveThemenfelder(job) {
     `Stellenausschreibung:\n\n${(job.jobText || "").slice(0, 30000)}\n\n` +
     `Bisherige Schwachstellen des Bewerbers (Punkte je Frage, 0-10, schwaechste zuerst):\n${buildSchwaechenSummary(job)}`;
   const { data, cost, tokens } = await callLLM(system, user, THEMENFELDER_SCHEMA, undefined, {
-    hosted: { action: "themenfelder", payload: { jobText: job.jobText || "", schwaechen: buildSchwaechenSummary(job) } },
+    // Phase B: jobId des aktuellen (ggf. bezahlten) Tests mitschicken → Vertiefen laeuft bei
+    // "beste" ueber das Follow-up-Entitlement statt eines erneuten Credit-Abzugs. Nur wenn vorhanden.
+    hosted: { action: "themenfelder", payload: { jobText: job.jobText || "", schwaechen: buildSchwaechenSummary(job), ...(quiz && quiz.jobId ? { jobId: quiz.jobId } : {}) } },
   });
   const fields = (data && Array.isArray(data.themenfelder) ? data.themenfelder : [])
     .filter((f) => f && typeof f.label === "string" && f.label.trim())
@@ -3415,6 +3417,10 @@ function finalizeQuiz(result, ctx) {
     tier: ctx.tier || null,
     model: ctx.model || null,
   };
+  // Phase B (Credits): die generierende jobId aufs Quiz durchreichen, damit Auswerten/
+  // Vertiefen eines bezahlten (Opus-)Tests serverseitig dem Job zugeordnet werden koennen
+  // (Follow-up-Entitlement). Additiv; alte/synchron erzeugte Quizze ohne jobId bleiben heil.
+  if (ctx.jobId) quiz.jobId = ctx.jobId;
   // Kernpunkte sofort an eine bereits bestehende Stelle schreiben, damit die
   // Uebersicht ohne Test-Abschluss erscheint (saveAttempt schreibt sie beim
   // Abschluss ohnehin erneut - idempotent).
@@ -3643,7 +3649,7 @@ function startReadyJob() {
   if (!job || !job.quiz) return;
   clearActiveJob();
   renderActiveJobCard(null);
-  finalizeQuiz(job.quiz, { ...job.ctx, genCost: null, genTokens: null, isLocal: false });
+  finalizeQuiz(job.quiz, { ...job.ctx, jobId: job.jobId, genCost: null, genTokens: null, isLocal: false });
 }
 
 // Status-Karte fuer den Hintergrund-Job auf der Startliste. state: "pending"|"ready"|"error"|null.
@@ -4508,6 +4514,9 @@ async function runEvaluation() {
         jobText: quiz.jobText,
         payload,
         kontext: { mode, limitMin: timer.limitMin, minutesUsed, overtime: timer.overtime, mcLokal: localSummary },
+        // Phase B: jobId mitschicken → Auswerten eines bezahlten Tests laeuft serverseitig
+        // ueber das Follow-up-Entitlement (kein erneuter Credit-Abzug). Nur wenn vorhanden.
+        ...(quiz.jobId ? { jobId: quiz.jobId } : {}),
       };
       const { data: rawResult, cost, tokens } = await callLLM(system, user, EVAL_SCHEMA, (acc) => {
         const seen = (acc.match(/"feedback"\s*:/g) || []).length;
