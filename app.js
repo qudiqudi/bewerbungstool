@@ -1714,17 +1714,18 @@ function clearAuthToken() {
 // Clientseitiger Cache des Guthaben-Signals. creditsEnabled gated die GESAMTE sichtbare
 // Credits-UI (Guthaben-Zeile, Opus-Stufe, Aufladen): steht das Server-Flag auf 0 (oder ist
 // der Nutzer nicht angemeldet), erscheint nichts Neues — kein Breaking Change. Defensive
-// Defaults: nichts zeigen, bis der Server geantwortet hat. userId = D1 users.id (fuer den
-// spaeteren Paddle-Checkout, customData.user_id).
+// Defaults: nichts zeigen, bis der Server geantwortet hat.
 // dirty = "der gecachte Stand koennte durch eine Abbuchung veraltet sein" (z. B. nach einem
 // bezahlten Opus-Job). Die Opus-Vorpruefung frischt dann vor dem naechsten Dispatch frisch nach.
 // opusTestCredits = vom Server gemeldete Kosten eines Opus-Tests (maßgeblich); der Client
 // nutzt diesen Wert, sobald der Worker ihn liefert, und faellt sonst auf OPUS_TEST_CREDITS
 // zurueck (forward-kompatibel, kein eigener Preis-Hoheitsanspruch des Clients).
-let creditsState = { credits: null, creditsEnabled: false, userId: null, opusTestCredits: null, loaded: false, dirty: false };
+// (Die user.id wird NICHT gecacht — die Paddle-Bindung laeuft serverseitig ueber den
+// signierten Checkout-Intent, nicht ueber ein client-geliefertes customData.user_id.)
+let creditsState = { credits: null, creditsEnabled: false, opusTestCredits: null, loaded: false, dirty: false };
 
 function resetCreditsState() {
-  creditsState = { credits: null, creditsEnabled: false, userId: null, opusTestCredits: null, loaded: false, dirty: false };
+  creditsState = { credits: null, creditsEnabled: false, opusTestCredits: null, loaded: false, dirty: false };
 }
 
 // 1 Credit = 0,01 €. Euro ist die Leitwaehrung in der UI (fuer Laien verstaendlich),
@@ -1845,10 +1846,14 @@ function updateTierHint() {
   }
 }
 
-// Balance-Zeile + Tier-Optionen gemeinsam aus dem aktuellen creditsState neu zeichnen.
+// Balance-Zeile + Tier-Optionen + Aufladen-Bereich aus dem aktuellen creditsState zeichnen.
 function renderCreditsUI() {
   renderBalanceLine();
   updateTierOptions();
+  // Aufladen nur, wenn Credits live sind (Flag an). Sichtbarkeit haengt zusaetzlich am
+  // Login-Zustand (Block liegt in #account-loggedin).
+  const topup = $("topup");
+  if (topup) topup.classList.toggle("hidden", !creditsState.creditsEnabled);
 }
 
 // Nach einer (moeglichen) Guthaben-Aenderung durch einen bezahlten Opus-Job: Cache als
@@ -1858,10 +1863,137 @@ function markCreditsDirtyIfPaid(tier) {
   if (tier === "beste") { creditsState.dirty = true; refreshBalance(); }
 }
 
-// Platzhalter fuer den Aufladedialog — die echte Paddle-Integration kommt in P4.
+// --- Aufladen via Paddle (Phase B, P4) -----------------------------------
+// Der client-side Token ist bewusst oeffentlich (kein Secret). Sandbox vs. Produktion wird
+// beim Go-Live umgestellt (paddleEnv) — prod-Token + prod-price-IDs dann hier eintragen.
+const PADDLE_CONFIG = {
+  sandbox: {
+    token: "test_dd28942b6ba0973839ad31d6f08",
+    prices: {
+      3: "pri_01kvthe259wsnywgqbcvjfef0j",
+      5: "pri_01kvthd4f8jb73j7905enkga59",
+      10: "pri_01kvthefqea9v7p3qxhedj60d8",
+    },
+  },
+  production: {
+    token: "", // TODO Go-Live: live client-side Token eintragen
+    prices: { 3: "", 5: "", 10: "" }, // TODO Go-Live: prod price-IDs eintragen
+  },
+};
+
+// Umgebung: Default sandbox; beim Go-Live (prod-Token+price-IDs gesetzt) auf "production"
+// stellen. localStorage-Override nur fuer Tests.
+function paddleEnv() {
+  try { const o = localStorage.getItem("bewerbungstool.paddleEnv"); if (o === "production" || o === "sandbox") return o; } catch {}
+  return "sandbox";
+}
+function paddleConfig() { return PADDLE_CONFIG[paddleEnv()] || PADDLE_CONFIG.sandbox; }
+
+function setTopupMsg(text) { const el = $("topup-msg"); if (el) el.textContent = text || ""; }
+
+let _paddleReady = null; // Promise<Paddle>, einmal geladen/initialisiert
+function loadPaddle() {
+  if (_paddleReady) return _paddleReady;
+  _paddleReady = new Promise((resolve, reject) => {
+    const init = () => {
+      const cfg = paddleConfig();
+      if (!cfg.token) { reject(new Error("paddle-no-token")); return; }
+      try {
+        window.Paddle.Environment.set(paddleEnv());
+        window.Paddle.Initialize({ token: cfg.token, eventCallback: onPaddleEvent });
+        resolve(window.Paddle);
+      } catch (e) { reject(e); }
+    };
+    if (window.Paddle) { init(); return; }
+    const s = document.createElement("script");
+    s.src = "https://cdn.paddle.com/paddle/v2/paddle.js";
+    s.async = true;
+    s.onload = init;
+    s.onerror = () => { _paddleReady = null; reject(new Error("paddle-load-failed")); };
+    document.head.appendChild(s);
+  }).catch((e) => { _paddleReady = null; throw e; }); // Fehlschlag nicht cachen → spaeter erneut moeglich
+  return _paddleReady;
+}
+
+// Paddle-Events. Nach erfolgreichem Checkout das Guthaben nachziehen (die Gutschrift macht der
+// Webhook serverseitig + asynchron → kurz pollen, bis der Stand steigt).
+function onPaddleEvent(ev) {
+  if (ev && ev.name === "checkout.completed") {
+    setTopupMsg("Zahlung erhalten. Dein Guthaben wird aktualisiert …");
+    pollBalanceAfterPurchase();
+  }
+}
+
+// Pollt das Guthaben, bis ein gesicherter Anstieg sichtbar ist (Webhook async) oder das Limit
+// erreicht ist. before nur als Basis nehmen, wenn es bekannt (finite) ist — sonst lässt sich
+// kein Anstieg beweisen und wir behaupten KEINE Bestaetigung (zeigen am Ende nur den Stand).
+async function pollBalanceAfterPurchase() {
+  const tok = settings.authToken;
+  const before = Number.isFinite(creditsState.credits) ? creditsState.credits : null;
+  for (let i = 0; i < 10; i++) {
+    await new Promise((r) => setTimeout(r, 2000)); // Webhook ist async → erst warten, dann lesen
+    if (settings.authToken !== tok) return; // Konto gewechselt/Logout → nicht weiterschreiben
+    await refreshBalance();
+    if (Number.isFinite(creditsState.credits) && before !== null && creditsState.credits > before) {
+      setTopupMsg(`Guthaben aktualisiert: ${formatGuthabenEuro(creditsState.credits)}.`);
+      return;
+    }
+  }
+  // Kein sicherer Anstieg bestaetigt (Webhook evtl. minimal verzoegert, oder Ausgangsstand war
+  // unbekannt). Neutral formulieren — KEIN Fehler, und nie einen veralteten Stand als bestaetigt.
+  if (Number.isFinite(creditsState.credits)) {
+    setTopupMsg(`Zahlung erhalten. Aktuelles Guthaben: ${formatGuthabenEuro(creditsState.credits)}.`);
+  } else {
+    setTopupMsg("Zahlung erhalten. Dein Guthaben erscheint in Kürze.");
+  }
+}
+
+// Startet den Kauf: erst den signierten Checkout-Intent (bindet serverseitig die user.id)
+// holen, dann das Paddle-Overlay oeffnen. Ohne Login/Token/Konfiguration sauber abbrechen
+// statt zu werfen. _topupBusy verhindert Doppelklicks (zwei Intents/Overlays).
+let _topupBusy = false;
+async function startTopup(euros) {
+  if (_topupBusy) return;
+  if (!settings.authToken) { promptHostedLogin(); return; }
+  _topupBusy = true;
+  try {
+    setTopupMsg("Aufladen wird vorbereitet …");
+    let ud;
+    try {
+      const r = await fetch(hostedBase() + "/api/checkout-intent", { method: "POST", headers: authHeaders() });
+      if (r.status === 401) { handleHostedUnauthorized(); return; }
+      if (!r.ok) { setTopupMsg("Aufladen ist gerade nicht möglich. Bitte später erneut versuchen."); return; }
+      const d = await r.json();
+      ud = d && typeof d.ud === "string" ? d.ud : "";
+    } catch { setTopupMsg("Keine Verbindung. Bitte Internetverbindung prüfen und erneut versuchen."); return; }
+    if (!ud) { setTopupMsg("Aufladen ist gerade nicht möglich. Bitte später erneut versuchen."); return; }
+
+    const cfg = paddleConfig();
+    const priceId = cfg.prices[euros];
+    if (!priceId) { setTopupMsg("Dieses Paket ist gerade nicht verfügbar."); return; }
+
+    let Paddle;
+    try { Paddle = await loadPaddle(); }
+    catch { setTopupMsg("Aufladen ist gerade nicht verfügbar. Bitte später erneut versuchen."); return; }
+
+    setTopupMsg("");
+    Paddle.Checkout.open({
+      items: [{ priceId, quantity: 1 }],
+      customData: { ud }, // signierter Intent — der Webhook entnimmt die uid daraus
+      settings: { displayMode: "overlay", locale: "de" },
+    });
+  } finally {
+    _topupBusy = false; // Vorbereitung beendet; ab hier ist das (modale) Overlay zustaendig
+  }
+}
+
+// Aufladen-Bereich oeffnen (vom Opus-Aufladen-Hinweis aus): in die Einstellungen, Konto-
+// Bereich sichtbar machen und zum Aufladen-Block scrollen.
 function openTopupDialog() {
-  const msg = $("account-msg");
-  if (msg) msg.textContent = "Aufladen wird in Kürze verfügbar.";
+  if (!settings.authToken) { promptHostedLogin(); return; }
+  showView("view-settings");
+  const t = $("topup");
+  if (t && !t.classList.contains("hidden")) { try { t.scrollIntoView({ behavior: "smooth", block: "center" }); } catch {} }
 }
 
 // Zeichnet die Guthaben-Zeile aus dem aktuellen creditsState. Nur sichtbar, wenn das Flag an
@@ -7405,12 +7537,11 @@ async function renderAccountSection() {
     if (r.ok) {
       const d = await r.json();
       showLoggedIn(d.user && d.user.email);
-      // /auth/me fuehrt seit dem Credits-Vertrag id + creditsEnabled + credits (additiv,
-      // defensiv gelesen: aeltere Worker liefern die Felder evtl. nicht).
+      // /auth/me fuehrt seit dem Credits-Vertrag creditsEnabled + credits + opusTestCredits
+      // (additiv, defensiv gelesen: aeltere Worker liefern die Felder evtl. nicht).
       creditsState = {
         credits: Number.isFinite(d.credits) ? d.credits : null,
         creditsEnabled: d.creditsEnabled === true,
-        userId: (d.user && d.user.id) || null,
         opusTestCredits: Number.isFinite(d.opusTestCredits) ? d.opusTestCredits : null,
         loaded: true,
         dirty: false,
@@ -7548,6 +7679,11 @@ $("model").addEventListener("change", updateModelDesc);
 
 // Kostenhinweis der Qualitaetsstufe bei Auswahl aktualisieren (z. B. „≈ 0,60 € pro Test“).
 $("tier").addEventListener("change", updateTierHint);
+
+// Aufladen-Buttons (3/5/10 €) → Paddle-Checkout.
+document.querySelectorAll(".btn-topup").forEach((b) => {
+  b.addEventListener("click", () => startTopup(Number(b.dataset.eur)));
+});
 
 $("btn-load-models").addEventListener("click", async () => {
   const status = $("local-models-status");
