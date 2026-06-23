@@ -698,13 +698,21 @@ function syncHistory(id) {
 function restoreView(id) {
   _poppingHistory = true;
   try {
-    if (id === "view-home") goHome();
-    else if (id === "view-job" && activeJob) openJob(activeJob);
+    // view-job ohne aktive Stelle (z. B. die offene Stelle wurde inzwischen
+    // geloescht): nicht das veraltete Detail-DOM wieder einblenden, sondern
+    // auf die Startliste zurueck.
+    if (id === "view-home" || (id === "view-job" && !activeJob)) goHome();
+    else if (id === "view-job") openJob(activeJob);
     else showView(id);
   } finally {
     _poppingHistory = false;
   }
 }
+
+// Woher die Einstellungen geoeffnet wurden: aus einem Einrichtungs-"Gate"
+// (Login/Onboarding) oder regulaer aus der laufenden App (Kopfzeile). Steuert,
+// wohin Speichern fuehrt - nach dem Einrichten in die App statt zurueck aufs Gate.
+let settingsOrigin = "app";
 
 window.addEventListener("popstate", (e) => {
   restoreView((e.state && e.state.view) || "view-home");
@@ -6926,6 +6934,7 @@ $("btn-ob-test").addEventListener("click", async () => {
 });
 
 $("btn-ob-skip").addEventListener("click", () => {
+  settingsOrigin = "gate";
   initSettingsForm();
   showView("view-settings");
 });
@@ -7135,6 +7144,7 @@ $("btn-login-google").addEventListener("click", async () => {
 // Escape-Pfad: ohne Konto weiter mit eigenem Schluessel / lokal.
 $("link-login-settings").addEventListener("click", (e) => {
   e.preventDefault();
+  settingsOrigin = "gate";
   initSettingsForm();
   showView("view-settings");
 });
@@ -7157,6 +7167,7 @@ $("btn-account-logout").addEventListener("click", async () => {
 });
 
 $("btn-settings").addEventListener("click", () => {
+  settingsOrigin = "app";
   initSettingsForm();
   showView("view-settings");
 });
@@ -7217,10 +7228,16 @@ $("btn-save-settings").addEventListener("click", () => {
     if (provider === "local") settings.baseUrl = normalizeBaseUrl($("base-url").value);
   }
   saveSettings(settings);
-  // Ueber die History zurueck statt goReturn(): so bleibt der Browser-/Geraete-
-  // Zurueck-Knopf konsistent (kein doppelter Vorwaerts-Eintrag). popstate stellt
-  // die vorherige Ansicht wieder her - dieselbe, die goReturn angesteuert haette.
-  history.back();
+  // Wurde aus einem Einrichtungs-Gate (Login/Onboarding) gespeichert und ist der
+  // Anbieter jetzt nutzbar, in die App (Startliste) statt per History zurueck aufs
+  // Gate - sonst landet man nach dem Einrichten wieder davor. Sonst ueber die
+  // History zurueck: so bleibt der Browser-/Geraete-Zurueck-Knopf konsistent (kein
+  // doppelter Vorwaerts-Eintrag) und ein laufender Test (view-quiz/result) bleibt
+  // erhalten - dieselbe Ansicht, die goReturn angesteuert haette.
+  const p = settings.provider || "hosted";
+  const configured = p === "local" ? !!settings.model : p === "hosted" ? !!settings.authToken : !!settings.apiKey;
+  if (settingsOrigin === "gate" && configured) goHome();
+  else history.back();
 });
 
 $("btn-cancel-settings").addEventListener("click", () => history.back());
