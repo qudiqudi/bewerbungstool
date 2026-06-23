@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.8.12";
+const APP_VERSION = "1.9.0";
 
 const CHANGELOG = [
+  {
+    version: "1.9.0",
+    date: "23.06.2026",
+    items: [
+      "Der Zurück-Knopf von Browser und Handy blättert jetzt innerhalb der App eine Ansicht zurück, statt die App zu verlassen.",
+    ],
+  },
   {
     version: "1.8.12",
     date: "22.06.2026",
@@ -653,43 +660,105 @@ const views = ["view-login", "view-onboarding", "view-settings", "view-home", "v
 
 function showView(id) {
   views.forEach((v) => $(v).classList.toggle("hidden", v !== id));
+  syncHistory(id);
 }
 
 function currentView() {
   return views.find((v) => !$(v).classList.contains("hidden")) || "view-input";
 }
 
-// Merkt sich beim Oeffnen von Historie/Einstellungen, wohin Zurueck/Abbrechen/
-// Speichern fuehren sollen: zurueck zu einem laufenden Test (view-quiz) bzw.
-// einer offenen Auswertung (view-result) statt immer zur Eingabe - sonst waere
-// ein angefangener Test ueber die Kopfzeilen-Buttons unwiederbringlich weg.
-let returnView = "view-home";
+// ---------- Browser-/Geraete-Zurueck ("popstate") ----------
+// Die App ist eine SPA, die Views nur ein-/ausblendet. Ohne History-Anbindung
+// verlaesst der Zurueck-Knopf (Browser-Pfeil, Android-Geste) die ganze PWA statt
+// eine View zurueckzublaettern. Darum spiegeln wir jeden View-Wechsel in die
+// History: die erste Ansicht ersetzt den Startzustand, jede weitere haengt einen
+// Eintrag an. "Zurueck" loest dann popstate aus und wir zeigen die Zielview an.
+let _historyReady = false;
+let _poppingHistory = false;
 
-function rememberReturnView() {
-  const cv = currentView();
-  if (cv === "view-quiz" || cv === "view-result") {
-    returnView = cv;
-  } else if (cv === "view-home" || cv === "view-job" || cv === "view-input") {
-    // Von Startliste, Stellen-Subpage oder Eingabe dorthin zurueckkehren
-    returnView = cv;
-  } else if (cv !== "view-history" && cv !== "view-settings") {
-    // Wechsel zwischen Historie und Einstellungen erbt das Ziel; Onboarding
-    // u. ae. setzt auf die Startliste zurueck
-    returnView = "view-home";
+// Identitaet des Datensatzes, der in einer daten-getragenen View gerade gezeigt
+// wird - damit Zurueck NICHT den falschen (inzwischen gewechselten) Datensatz
+// zeigt. view-job haengt an der aktiven Stelle, view-quiz/-result am Fragebogen.
+function viewRecordKey(id) {
+  if (id === "view-job") return activeJob ? (activeJob.key || activeJob.urlKey || null) : null;
+  if (id === "view-quiz" || id === "view-result") {
+    if (!quiz) return null;
+    return quiz.urlKey || (quiz.jobText ? jobKey(quiz.jobText) : null);
+  }
+  return null;
+}
+
+function syncHistory(id) {
+  // Aufruf stammt aus dem popstate-Handler selbst: nichts in die History schreiben,
+  // sonst wuerde Zurueck einen neuen Vorwaerts-Eintrag erzeugen.
+  if (_poppingHistory) return;
+  const st = { view: id, key: viewRecordKey(id) };
+  try {
+    if (!_historyReady) {
+      history.replaceState(st, "");
+      _historyReady = true;
+    } else if (!history.state || history.state.view !== id) {
+      // Gleiche View nicht doppelt stapeln (mehrfaches showView fuer dieselbe Ansicht).
+      history.pushState(st, "");
+    } else if (history.state.key !== st.key) {
+      // Gleiche View, aber anderer Datensatz (z. B. direkt von Stelle A zu B):
+      // den aktuellen Eintrag aktualisieren statt einen neuen anzuhaengen.
+      history.replaceState(st, "");
+    }
+  } catch { /* History-API nicht verfuegbar: dann eben ohne Zurueck-Anbindung */ }
+}
+
+// Eine Zielview beim Zurueckblaettern wiederherstellen. Home und die Stellen-
+// Subpage haengen an dynamischem Zustand und werden neu gerendert; der Rest ist
+// noch im DOM und wird nur wieder eingeblendet. Waehrend dieses Aufrufs schreibt
+// showView NICHT in die History (Flag).
+function restoreView(state) {
+  const id = (state && state.view) || "view-home";
+  const key = state && state.key;
+  _poppingHistory = true;
+  try {
+    // Daten-getragene Ansichten beim Zurueckblaettern neu aufbauen, sonst zeigen
+    // sie veralteten Stand (z. B. eine inzwischen geloeschte Stelle).
+    if (id === "view-home") goHome();
+    else if (id === "view-job") {
+      // Die zum Eintrag gehoerende Stelle anhand ihres gespeicherten Keys wieder
+      // oeffnen - nicht blind die aktuell aktive (die kann inzwischen eine andere
+      // sein). Nicht mehr vorhanden (geloescht) -> Startliste.
+      const job = key ? loadHistory().jobs.find((j) => j.key === key || j.urlKey === key) : null;
+      if (job) openJob(job); else goHome();
+    }
+    else if (id === "view-history") { renderHistory(); showView("view-history"); }
+    else if (id === "view-quiz" || id === "view-result") {
+      // Nur zeigen, wenn der aktuell geladene Fragebogen noch der des Eintrags ist
+      // (Live-Test oder eben angesehener Versuch). Sonst nicht den falschen Versuch
+      // zeigen, sondern auf die Startliste.
+      if (key && viewRecordKey(id) === key) showView(id); else goHome();
+    }
+    // Einrichtungs-Gates (Login/Onboarding) nicht per Zurueck erneut zeigen, wenn
+    // der Anbieter inzwischen nutzbar eingerichtet ist - dann auf die Startliste.
+    else if ((id === "view-login" || id === "view-onboarding") && isProviderConfigured()) goHome();
+    else showView(id);
+  } finally {
+    _poppingHistory = false;
   }
 }
 
-// Zurueck-Ziel ansteuern: Startliste und Stellen-Subpage muessen neu gerendert
-// werden (Subpage haengt an der zuletzt geoeffneten Stelle).
-function goReturn() {
-  if (returnView === "view-job" && activeJob) {
-    openJob(activeJob);
-  } else if (returnView === "view-home") {
-    goHome();
-  } else {
-    showView(returnView);
-  }
+// Ist der aktuelle Anbieter nutzbar eingerichtet? (lokal: Modell, hosted: Token,
+// BYOK: API-Schluessel) - genutzt vom Speichern der Einstellungen und vom
+// Zurueck-Handler, um nicht aufs Einrichtungs-Gate zurueckzufallen.
+function isProviderConfigured() {
+  const p = settings.provider || "hosted";
+  return p === "local" ? !!settings.model : p === "hosted" ? !!settings.authToken : !!settings.apiKey;
 }
+
+// Woher die Einstellungen geoeffnet wurden: aus einem Einrichtungs-"Gate"
+// (Login/Onboarding) oder regulaer aus der laufenden App (Kopfzeile). Steuert,
+// wohin Speichern fuehrt - nach dem Einrichten in die App statt zurueck aufs Gate.
+let settingsOrigin = "app";
+
+window.addEventListener("popstate", (e) => {
+  restoreView(e.state);
+});
 
 let loadingTicker = null;
 
@@ -6907,6 +6976,7 @@ $("btn-ob-test").addEventListener("click", async () => {
 });
 
 $("btn-ob-skip").addEventListener("click", () => {
+  settingsOrigin = "gate";
   initSettingsForm();
   showView("view-settings");
 });
@@ -7039,7 +7109,6 @@ async function renderAccountSection() {
 
 // Fuehrt zum Anmelde-Screen und zeigt optional eine Meldung (z. B. "erneut anmelden").
 function promptHostedLogin(msg) {
-  rememberReturnView();
   $("login-email").value = "";
   $("login-msg").textContent = msg || "";
   showView("view-login");
@@ -7117,6 +7186,7 @@ $("btn-login-google").addEventListener("click", async () => {
 // Escape-Pfad: ohne Konto weiter mit eigenem Schluessel / lokal.
 $("link-login-settings").addEventListener("click", (e) => {
   e.preventDefault();
+  settingsOrigin = "gate";
   initSettingsForm();
   showView("view-settings");
 });
@@ -7139,7 +7209,7 @@ $("btn-account-logout").addEventListener("click", async () => {
 });
 
 $("btn-settings").addEventListener("click", () => {
-  rememberReturnView();
+  settingsOrigin = "app";
   initSettingsForm();
   showView("view-settings");
 });
@@ -7200,10 +7270,17 @@ $("btn-save-settings").addEventListener("click", () => {
     if (provider === "local") settings.baseUrl = normalizeBaseUrl($("base-url").value);
   }
   saveSettings(settings);
-  goReturn();
+  // Wurde aus einem Einrichtungs-Gate (Login/Onboarding) gespeichert und ist der
+  // Anbieter jetzt nutzbar, in die App (Startliste) statt per History zurueck aufs
+  // Gate - sonst landet man nach dem Einrichten wieder davor. Sonst ueber die
+  // History zurueck: so bleibt der Browser-/Geraete-Zurueck-Knopf konsistent (kein
+  // doppelter Vorwaerts-Eintrag) und ein laufender Test (view-quiz/result) bleibt
+  // erhalten - dieselbe Ansicht, die goReturn angesteuert haette.
+  if (settingsOrigin === "gate" && isProviderConfigured()) goHome();
+  else history.back();
 });
 
-$("btn-cancel-settings").addEventListener("click", goReturn);
+$("btn-cancel-settings").addEventListener("click", () => history.back());
 
 /* ---------- Daten-Export / -Import (Umzug zwischen Adressen/Browsern) ---------- */
 
@@ -7592,7 +7669,7 @@ $("btn-review-questions").addEventListener("click", () => {
 // "Einstellungen" bewahrt den laufenden Test weiterhin.)
 $("btn-home").addEventListener("click", goHome);
 
-$("btn-history-back").addEventListener("click", goReturn);
+$("btn-history-back").addEventListener("click", () => history.back());
 
 // Startliste und Stellen-Subpage
 $("btn-new-job").addEventListener("click", () => {
@@ -7619,10 +7696,9 @@ $("resume-discard").addEventListener("click", discardLearnSession);
 // auf Mobilgeraeten der zuverlaessigste Zeitpunkt (pagehide feuert dort nicht immer).
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") saveLearnSession(); });
 window.addEventListener("pagehide", saveLearnSession);
-$("btn-input-back").addEventListener("click", goHome);
-$("btn-job-back").addEventListener("click", goHome);
+$("btn-input-back").addEventListener("click", () => history.back());
+$("btn-job-back").addEventListener("click", () => history.back());
 $("btn-all-jobs").addEventListener("click", () => {
-  rememberReturnView();
   renderHistory();
   showView("view-history");
   trackEvent("history-open");
