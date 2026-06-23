@@ -676,17 +676,34 @@ function currentView() {
 let _historyReady = false;
 let _poppingHistory = false;
 
+// Identitaet des Datensatzes, der in einer daten-getragenen View gerade gezeigt
+// wird - damit Zurueck NICHT den falschen (inzwischen gewechselten) Datensatz
+// zeigt. view-job haengt an der aktiven Stelle, view-quiz/-result am Fragebogen.
+function viewRecordKey(id) {
+  if (id === "view-job") return activeJob ? (activeJob.key || activeJob.urlKey || null) : null;
+  if (id === "view-quiz" || id === "view-result") {
+    if (!quiz) return null;
+    return quiz.urlKey || (quiz.jobText ? jobKey(quiz.jobText) : null);
+  }
+  return null;
+}
+
 function syncHistory(id) {
   // Aufruf stammt aus dem popstate-Handler selbst: nichts in die History schreiben,
   // sonst wuerde Zurueck einen neuen Vorwaerts-Eintrag erzeugen.
   if (_poppingHistory) return;
+  const st = { view: id, key: viewRecordKey(id) };
   try {
     if (!_historyReady) {
-      history.replaceState({ view: id }, "");
+      history.replaceState(st, "");
       _historyReady = true;
     } else if (!history.state || history.state.view !== id) {
       // Gleiche View nicht doppelt stapeln (mehrfaches showView fuer dieselbe Ansicht).
-      history.pushState({ view: id }, "");
+      history.pushState(st, "");
+    } else if (history.state.key !== st.key) {
+      // Gleiche View, aber anderer Datensatz (z. B. direkt von Stelle A zu B):
+      // den aktuellen Eintrag aktualisieren statt einen neuen anzuhaengen.
+      history.replaceState(st, "");
     }
   } catch { /* History-API nicht verfuegbar: dann eben ohne Zurueck-Anbindung */ }
 }
@@ -695,14 +712,28 @@ function syncHistory(id) {
 // Subpage haengen an dynamischem Zustand und werden neu gerendert; der Rest ist
 // noch im DOM und wird nur wieder eingeblendet. Waehrend dieses Aufrufs schreibt
 // showView NICHT in die History (Flag).
-function restoreView(id) {
+function restoreView(state) {
+  const id = (state && state.view) || "view-home";
+  const key = state && state.key;
   _poppingHistory = true;
   try {
     // Daten-getragene Ansichten beim Zurueckblaettern neu aufbauen, sonst zeigen
     // sie veralteten Stand (z. B. eine inzwischen geloeschte Stelle).
     if (id === "view-home") goHome();
-    else if (id === "view-job") { if (activeJob) openJob(activeJob); else goHome(); }
+    else if (id === "view-job") {
+      // Die zum Eintrag gehoerende Stelle anhand ihres gespeicherten Keys wieder
+      // oeffnen - nicht blind die aktuell aktive (die kann inzwischen eine andere
+      // sein). Nicht mehr vorhanden (geloescht) -> Startliste.
+      const job = key ? loadHistory().jobs.find((j) => j.key === key || j.urlKey === key) : null;
+      if (job) openJob(job); else goHome();
+    }
     else if (id === "view-history") { renderHistory(); showView("view-history"); }
+    else if (id === "view-quiz" || id === "view-result") {
+      // Nur zeigen, wenn der aktuell geladene Fragebogen noch der des Eintrags ist
+      // (Live-Test oder eben angesehener Versuch). Sonst nicht den falschen Versuch
+      // zeigen, sondern auf die Startliste.
+      if (key && viewRecordKey(id) === key) showView(id); else goHome();
+    }
     // Einrichtungs-Gates (Login/Onboarding) nicht per Zurueck erneut zeigen, wenn
     // der Anbieter inzwischen nutzbar eingerichtet ist - dann auf die Startliste.
     else if ((id === "view-login" || id === "view-onboarding") && isProviderConfigured()) goHome();
@@ -726,7 +757,7 @@ function isProviderConfigured() {
 let settingsOrigin = "app";
 
 window.addEventListener("popstate", (e) => {
-  restoreView((e.state && e.state.view) || "view-home");
+  restoreView(e.state);
 });
 
 let loadingTicker = null;
