@@ -15,6 +15,22 @@
   <meta name="theme-color" content="#3a2a25" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#c5543a">
   <title>jobreif.de – Einstellungstest-Simulator</title>
+  <meta name="description" content="jobreif.de macht aus jeder Stellenanzeige einen simulierten Einstellungstest mit KI-Feedback. Übe gezielt für dein Vorstellungsgespräch – kostenlos und ohne Installation.">
+  <link rel="canonical" href="https://jobreif.de/">
+  <meta name="robots" content="index, follow">
+  <!-- Open Graph / Social-Preview (Teilen in Messengern, sozialen Netzen).
+       Absolute URLs, weil Crawler sie ohne Seitenkontext abrufen. -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="jobreif.de">
+  <meta property="og:locale" content="de_DE">
+  <meta property="og:url" content="https://jobreif.de/">
+  <meta property="og:title" content="jobreif.de – Einstellungstest-Simulator">
+  <meta property="og:description" content="Aus jeder Stellenanzeige ein simulierter Einstellungstest mit KI-Feedback. Übe gezielt für dein Vorstellungsgespräch – kostenlos und ohne Installation.">
+  <meta property="og:image" content="https://jobreif.de/assets/social-preview.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="jobreif.de – Einstellungstest-Simulator">
+  <meta name="twitter:description" content="Aus jeder Stellenanzeige ein simulierter Einstellungstest mit KI-Feedback. Übe gezielt für dein Vorstellungsgespräch – kostenlos und ohne Installation.">
+  <meta name="twitter:image" content="https://jobreif.de/assets/social-preview.png">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="assets/icons/icon.svg" type="image/svg+xml">
   <link rel="icon" type="image/png" sizes="32x32" href="assets/icons/favicon-32.png">
@@ -33,6 +49,26 @@
        Explizites Rendern: app.js erzeugt/fuehrt das Widget bei Bedarf aus. Ohne
        gesetzten Sitekey passiert nichts (BYOK/lokal brauchen kein Turnstile). -->
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+  <!-- Strukturierte Daten (schema.org) fuer Google & Co. Ein reiner JSON-LD-
+       Datenblock, kein ausfuehrbares Skript - faellt daher nicht unter die
+       script-src-CSP oben. -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "jobreif.de",
+    "url": "https://jobreif.de/",
+    "description": "Macht aus jeder Stellenanzeige einen simulierten Einstellungstest mit KI-Feedback. Übe gezielt für dein Vorstellungsgespräch.",
+    "applicationCategory": "EducationalApplication",
+    "operatingSystem": "Web",
+    "inLanguage": "de",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "EUR"
+    }
+  }
+  </script>
 </head>
 <body>
   <header>
