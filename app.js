@@ -1710,6 +1710,67 @@ function clearAuthToken() {
   saveSettings(settings);
 }
 
+// --- Credits / Guthaben (Phase B) ----------------------------------------
+// Clientseitiger Cache des Guthaben-Signals. creditsEnabled gated die GESAMTE sichtbare
+// Credits-UI (Guthaben-Zeile, Opus-Stufe, Aufladen): steht das Server-Flag auf 0 (oder ist
+// der Nutzer nicht angemeldet), erscheint nichts Neues — kein Breaking Change. Defensive
+// Defaults: nichts zeigen, bis der Server geantwortet hat. userId = D1 users.id (fuer den
+// spaeteren Paddle-Checkout, customData.user_id).
+let creditsState = { credits: null, creditsEnabled: false, userId: null, loaded: false };
+
+function resetCreditsState() {
+  creditsState = { credits: null, creditsEnabled: false, userId: null, loaded: false };
+}
+
+// 1 Credit = 0,01 €. Euro ist die Leitwaehrung in der UI (fuer Laien verstaendlich),
+// Credits laufen nur als transparente Klammer mit.
+function formatGuthabenEuro(credits) {
+  return (credits / 100).toLocaleString("de-DE", { style: "currency", currency: "EUR" });
+}
+
+// Zeichnet die Guthaben-Zeile aus dem aktuellen creditsState. Nur sichtbar, wenn das Flag an
+// ist UND ein Stand bekannt ist. Idempotent — von allen Auffrisch-Stellen aufrufbar.
+function renderBalanceLine() {
+  const el = $("account-balance");
+  if (!el) return;
+  if (creditsState.creditsEnabled && Number.isFinite(creditsState.credits)) {
+    const euro = formatGuthabenEuro(creditsState.credits);
+    const cr = creditsState.credits.toLocaleString("de-DE");
+    // euro/cr sind aus Zahlen formatiert (keine Nutzereingabe) → kein XSS-Risiko.
+    el.innerHTML = `Guthaben: <strong>${euro}</strong> <span class="balance-credits">(${cr} Credits)</span>`;
+    el.classList.remove("hidden");
+  } else {
+    el.textContent = "";
+    el.classList.add("hidden");
+  }
+}
+
+// Holt den aktuellen Guthaben-/Flag-Stand vom Worker und zeichnet die Zeile neu. Fehler/
+// Offline: alten Cache behalten, nie werfen. Fuer Auffrischen nach Generierung/Kauf.
+async function refreshBalance() {
+  if (!settings.authToken) { resetCreditsState(); renderBalanceLine(); return creditsState; }
+  try {
+    const r = await fetch(hostedBase() + "/api/balance", { headers: authHeaders() });
+    if (r.ok) {
+      const d = await r.json();
+      creditsState = {
+        ...creditsState,
+        credits: Number.isFinite(d.credits) ? d.credits : null,
+        creditsEnabled: d.creditsEnabled === true,
+        loaded: true,
+      };
+    } else {
+      // Kein frischer Stand bestaetigt (5xx/401/…) → den alten Geldstand NICHT als aktuell
+      // stehen lassen, sondern als unbekannt ausblenden (gerade nach einer Abbuchung/Kauf).
+      creditsState = { ...creditsState, credits: null };
+    }
+  } catch {
+    creditsState = { ...creditsState, credits: null }; // offline: Stand unbekannt, nicht stale zeigen
+  }
+  renderBalanceLine();
+  return creditsState;
+}
+
 // Meldung aus der Redirect-Aufnahme, die beim naechsten Oeffnen der Einstellungen
 // im Konto-Bereich angezeigt wird.
 let _authRedirectMsg = "";
@@ -7104,13 +7165,37 @@ async function renderAccountSection() {
     $("account-loggedin").classList.add("hidden");
     $("account-loggedout").classList.remove("hidden");
     status.textContent = "Nicht angemeldet.";
+    resetCreditsState();
+    renderBalanceLine();
   };
-  if (!settings.authToken) { showLoggedOut(); return; }
+  const tok = settings.authToken;
+  if (!tok) { showLoggedOut(); return; }
   showLoggedIn(null); // optimistisch, bis /auth/me antwortet
+  // Guthaben bis zur frischen Bestaetigung als "unbekannt" behandeln und ausblenden: bei
+  // einer fehlschlagenden Auffrischung (5xx/Timeout/ungueltiges JSON) lieber kurz nichts
+  // zeigen als einen veralteten Geldstand faelschlich als aktuell auszugeben.
+  resetCreditsState();
+  renderBalanceLine();
   try {
     const r = await fetch(hostedBase() + "/auth/me", { headers: authHeaders() });
+    // Ueberholt? Wenn sich der Token waehrend des Requests geaendert hat (Logout oder
+    // Konto-Wechsel), darf diese Antwort weder UI noch creditsState anfassen — sonst
+    // repaintet sie den Stand des vorigen Kontos (z. B. fremdes Guthaben nach Logout).
+    if (settings.authToken !== tok) return;
     if (r.status === 401) { clearAuthToken(); showLoggedOut(); return; }
-    if (r.ok) { const d = await r.json(); showLoggedIn(d.user && d.user.email); }
+    if (r.ok) {
+      const d = await r.json();
+      showLoggedIn(d.user && d.user.email);
+      // /auth/me fuehrt seit dem Credits-Vertrag id + creditsEnabled + credits (additiv,
+      // defensiv gelesen: aeltere Worker liefern die Felder evtl. nicht).
+      creditsState = {
+        credits: Number.isFinite(d.credits) ? d.credits : null,
+        creditsEnabled: d.creditsEnabled === true,
+        userId: (d.user && d.user.id) || null,
+        loaded: true,
+      };
+      renderBalanceLine();
+    }
   } catch { /* offline: optimistischer Zustand bleibt */ }
 }
 
