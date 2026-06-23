@@ -2104,8 +2104,24 @@ async function getTurnstileToken(action, cData) {
   });
 }
 
-// Stabile, nutzerfreundliche Meldungen fuer die Hosted-Fehlercodes (Plan A.3.5).
-function hostedErrorMessage(status) {
+// Stabile, nutzerfreundliche Meldungen fuer die Hosted-Fehlercodes (Plan A.3.5). Der optionale
+// code stammt aus dem Fehler-BODY (z. B. bei 402) und erlaubt eine praezisere Meldung als der
+// reine Status. Unbekannte/fehlende codes fallen defensiv auf die Status-Meldung zurueck.
+function hostedErrorMessage(status, code) {
+  if (status === 402) {
+    switch (code) {
+      case "no-credits":
+        // Guthaben deckt den Opus-Test nicht (Aufladen-Dialog folgt in P4).
+        return "Dein Guthaben reicht für die beste Qualität (Opus) nicht aus. Du kannst in den Einstellungen aufladen oder eine andere Qualitätsstufe wählen.";
+      case "needs-paid-test":
+      case "no-entitlement":
+        return "Auswerten und Vertiefen in bester Qualität (Opus) gehören zu einem in Opus erstellten Test. Bitte erstelle den Test zuerst in bester Qualität.";
+      // tier-locked u. a.: Stufe im kostenlosen Modus gesperrt (tritt bei ausgeblendeter
+      // Opus-Option normal nicht auf — defensiv).
+      default:
+        return "Diese Qualitätsstufe ist im kostenlosen Modus nicht verfügbar.";
+    }
+  }
   switch (status) {
     case 403:
       return "Sicherheitsprüfung fehlgeschlagen. Bitte die Seite neu laden und erneut versuchen.";
@@ -2113,13 +2129,18 @@ function hostedErrorMessage(status) {
       return "Gerade sind viele Anfragen unterwegs (oder dein Tageskontingent ist erreicht). Bitte kurz warten und erneut versuchen.";
     case 503:
       return "Das kostenlose Tageskontingent ist für heute erschöpft – morgen ist es wieder verfügbar. Wenn du sofort weitermachen möchtest, kannst du in den Einstellungen unter „Anbieter“ einen eigenen API-Schlüssel hinterlegen.";
-    case 402:
-      return "Diese Qualitätsstufe ist im kostenlosen Modus nicht verfügbar.";
     case 400:
       return "Die Anfrage war ungültig. Bitte die Stellenanzeige prüfen.";
     default:
       return "Der Dienst ist momentan nicht erreichbar. Bitte später erneut versuchen.";
   }
+}
+
+// Liest den Fehlercode aus dem JSON-Body einer Nicht-OK-Antwort (Feld "error"); fehlt er oder
+// ist der Body kein JSON, null. Defensiv — wirft nie. Nur fuer Fehlerantworten gedacht.
+async function hostedErrorCode(res) {
+  try { const d = await res.json(); return d && typeof d.error === "string" ? d.error : null; }
+  catch { return null; }
 }
 
 // Hosted-Aufruf: schickt strukturierte DATEN (keine Prompts) an den app-spezifischen
@@ -2152,7 +2173,7 @@ async function callHosted(hosted, onProgress, opts = {}) {
   }
 
   if (res.status === 401) { handleHostedUnauthorized(); throw new Error(LOGIN_REDIRECT); }
-  if (!res.ok) throw new Error(hostedErrorMessage(res.status));
+  if (!res.ok) throw new Error(hostedErrorMessage(res.status, await hostedErrorCode(res)));
 
   let finishReason = null;
   const text = await readSSEText(
@@ -3756,7 +3777,7 @@ async function startHostedGeneration(ctx) {
       // den Guthaben-Cache als veraltet markieren+auffrischen, statt weiter auf stale Credits zu
       // vertrauen (sonst liefe der naechste Versuch wieder durch den Client-Gate ins Server-402).
       markCreditsDirtyIfPaid(tierSent);
-      throw new Error(hostedErrorMessage(res.status));
+      throw new Error(hostedErrorMessage(res.status, await hostedErrorCode(res)));
     }
     const data = await res.json();
     if (!data.jobId) throw new Error("Der Test konnte nicht gestartet werden. Bitte erneut versuchen.");
