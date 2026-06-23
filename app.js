@@ -698,15 +698,26 @@ function syncHistory(id) {
 function restoreView(id) {
   _poppingHistory = true;
   try {
-    // view-job ohne aktive Stelle (z. B. die offene Stelle wurde inzwischen
-    // geloescht): nicht das veraltete Detail-DOM wieder einblenden, sondern
-    // auf die Startliste zurueck.
-    if (id === "view-home" || (id === "view-job" && !activeJob)) goHome();
-    else if (id === "view-job") openJob(activeJob);
+    // Daten-getragene Ansichten beim Zurueckblaettern neu aufbauen, sonst zeigen
+    // sie veralteten Stand (z. B. eine inzwischen geloeschte Stelle).
+    if (id === "view-home") goHome();
+    else if (id === "view-job") { if (activeJob) openJob(activeJob); else goHome(); }
+    else if (id === "view-history") { renderHistory(); showView("view-history"); }
+    // Einrichtungs-Gates (Login/Onboarding) nicht per Zurueck erneut zeigen, wenn
+    // der Anbieter inzwischen nutzbar eingerichtet ist - dann auf die Startliste.
+    else if ((id === "view-login" || id === "view-onboarding") && isProviderConfigured()) goHome();
     else showView(id);
   } finally {
     _poppingHistory = false;
   }
+}
+
+// Ist der aktuelle Anbieter nutzbar eingerichtet? (lokal: Modell, hosted: Token,
+// BYOK: API-Schluessel) - genutzt vom Speichern der Einstellungen und vom
+// Zurueck-Handler, um nicht aufs Einrichtungs-Gate zurueckzufallen.
+function isProviderConfigured() {
+  const p = settings.provider || "hosted";
+  return p === "local" ? !!settings.model : p === "hosted" ? !!settings.authToken : !!settings.apiKey;
 }
 
 // Woher die Einstellungen geoeffnet wurden: aus einem Einrichtungs-"Gate"
@@ -7234,9 +7245,7 @@ $("btn-save-settings").addEventListener("click", () => {
   // History zurueck: so bleibt der Browser-/Geraete-Zurueck-Knopf konsistent (kein
   // doppelter Vorwaerts-Eintrag) und ein laufender Test (view-quiz/result) bleibt
   // erhalten - dieselbe Ansicht, die goReturn angesteuert haette.
-  const p = settings.provider || "hosted";
-  const configured = p === "local" ? !!settings.model : p === "hosted" ? !!settings.authToken : !!settings.apiKey;
-  if (settingsOrigin === "gate" && configured) goHome();
+  if (settingsOrigin === "gate" && isProviderConfigured()) goHome();
   else history.back();
 });
 
