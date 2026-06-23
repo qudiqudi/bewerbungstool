@@ -1674,7 +1674,7 @@ function trackEvent(flow) {
   try {
     const provider = settings.provider || "hosted";
     if (provider !== "hosted") return; // kein Beacon fuer BYOK/lokal
-    const tier = settings.tier || "standard";
+    const tier = effectiveTier();
     fetch(hostedBase() + "/api/event", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1708,6 +1708,344 @@ function clearAuthToken() {
   const { authToken, ...rest } = settings;
   settings = rest;
   saveSettings(settings);
+}
+
+// --- Credits / Guthaben (Phase B) ----------------------------------------
+// Clientseitiger Cache des Guthaben-Signals. creditsEnabled gated die GESAMTE sichtbare
+// Credits-UI (Guthaben-Zeile, Opus-Stufe, Aufladen): steht das Server-Flag auf 0 (oder ist
+// der Nutzer nicht angemeldet), erscheint nichts Neues — kein Breaking Change. Defensive
+// Defaults: nichts zeigen, bis der Server geantwortet hat.
+// dirty = "der gecachte Stand koennte durch eine Abbuchung veraltet sein" (z. B. nach einem
+// bezahlten Opus-Job). Die Opus-Vorpruefung frischt dann vor dem naechsten Dispatch frisch nach.
+// opusTestCredits = vom Server gemeldete Kosten eines Opus-Tests (maßgeblich); der Client
+// nutzt diesen Wert, sobald der Worker ihn liefert, und faellt sonst auf OPUS_TEST_CREDITS
+// zurueck (forward-kompatibel, kein eigener Preis-Hoheitsanspruch des Clients).
+// (Die user.id wird NICHT gecacht — die Paddle-Bindung laeuft serverseitig ueber den
+// signierten Checkout-Intent, nicht ueber ein client-geliefertes customData.user_id.)
+let creditsState = { credits: null, creditsEnabled: false, opusTestCredits: null, loaded: false, dirty: false };
+
+function resetCreditsState() {
+  creditsState = { credits: null, creditsEnabled: false, opusTestCredits: null, loaded: false, dirty: false };
+}
+
+// 1 Credit = 0,01 €. Euro ist die Leitwaehrung in der UI (fuer Laien verstaendlich),
+// Credits laufen nur als transparente Klammer mit.
+function formatGuthabenEuro(credits) {
+  return (credits / 100).toLocaleString("de-DE", { style: "currency", currency: "EUR" });
+}
+
+// Fallback-Richtwert fuer die Opus-Testkosten, falls der Server (noch) keinen Wert liefert.
+// Die Abrechnung macht serverseitig der Worker; maßgeblich ist creditsState.opusTestCredits.
+const OPUS_TEST_CREDITS = 60;
+
+// Maßgebliche Opus-Testkosten: Server-Wert, sonst Fallback-Konstante.
+function requiredOpusCredits() {
+  return Number.isFinite(creditsState.opusTestCredits) ? creditsState.opusTestCredits : OPUS_TEST_CREDITS;
+}
+
+// Ist die Opus-Stufe fuer das aktuelle Konto gedeckt? Bestaetigter Flag-an-Zustand UND
+// mindestens die Testkosten (nicht nur > 0 — mit 1..59 Credits liefe der Nutzer sonst in ein
+// Server-402). Der Server bleibt die letzte Instanz; das hier ist die ehrliche Vorpruefung.
+function canAffordBeste() {
+  return creditsState.loaded
+    && creditsState.creditsEnabled
+    && Number.isFinite(creditsState.credits)
+    && creditsState.credits >= requiredOpusCredits();
+}
+
+// Tatsaechlich verwendbare Qualitaetsstufe. "beste" (Opus) wird auf "standard" heruntergestuft,
+// solange der Client nicht bestaetigt berechtigt ist. So sendet ein importiertes oder veraltetes
+// settings.tier="beste" NIE einen gesperrten Premium-Request — unabhaengig davon, ob das
+// Einstellungsformular schon neu gespeichert wurde. Der Generierungs-Pfad prueft zusaetzlich
+// fail-closed VOR dem Dispatch (Guard in generateQuiz), damit eine bewusst bezahlte Auswahl nie
+// still als standard durchrutscht; effectiveTier ist die defensive Untergrenze.
+function effectiveTier() {
+  const t = settings.tier || "standard";
+  if (t !== "beste") return t;
+  return canAffordBeste() ? "beste" : "standard";
+}
+
+// Stufe fuer einen Hosted-Call. Ein Follow-up MIT jobId (Auswerten/Vertiefen eines bestimmten,
+// ggf. bezahlten Tests) verwendet die Stufe DES TESTS (aus der Quiz-Provenienz) — NICHT das
+// aktuelle Guthaben: sonst verloere ein bezahlter Opus-Test nach dem Verbrauch der Credits
+// still seine Premium-Folgeschritte. Der Server leitet die Berechtigung ohnehin aus der jobId
+// ab. Neue, abrechenbare Generierung (ohne jobId) bleibt guthabengegated (effectiveTier).
+function tierForHostedCall(payload) {
+  const jobId = payload && typeof payload.jobId === "string" ? payload.jobId : "";
+  // Die Provenienz-Stufe NUR uebernehmen, wenn die jobId im Payload auch wirklich zum aktuellen
+  // Quiz gehoert — sonst koennte die Premium-Stufe eines Opus-Quiz in einen Request fuer einen
+  // ANDEREN Job durchsickern. Passt es nicht zusammen, normale (guthabengegated) Wahl.
+  if (jobId && quiz && quiz.jobId === jobId && quiz.provenance) {
+    return quiz.provenance.tier || "standard";
+  }
+  return effectiveTier();
+}
+
+// Schaltet die Opus-Stufe ("beste") im Qualitaets-Select frei: nur wenn das Server-Flag an
+// ist. Ohne Guthaben bleibt die Option sichtbar, aber gesperrt (mit Aufladen-Hinweis) — so
+// ist sie auffindbar und stupst zum Aufladen, ohne einen leeren Kauf auszuloesen.
+function updateTierOptions() {
+  const sel = $("tier");
+  if (!sel) return;
+  const beste = sel.querySelector('option[value="beste"]');
+  if (!beste) return;
+  // Entitlement noch unbekannt (kein bestaetigter Server-Stand): NICHTS erzwingen, sonst
+  // fiele eine gespeicherte beste-Auswahl beim Oeffnen der Einstellungen still auf standard.
+  // Bei gespeichertem Wunsch "beste" die Option sichtbar lassen, damit das Select sie weiter
+  // anzeigt; die endgueltige Entscheidung faellt, sobald /auth/me bzw. /api/balance da ist.
+  if (!creditsState.loaded) {
+    if (settings.tier === "beste") { beste.hidden = false; beste.disabled = false; }
+    updateTierHint();
+    return;
+  }
+  if (!creditsState.creditsEnabled) {
+    // Flag bestaetigt aus → Opus ist gar kein verfuegbares Feature. Option verbergen UND eine
+    // gespeicherte (importierte/veraltete) beste-Absicht auf standard NORMALISIEREN, damit
+    // Anzeige und gespeicherte Einstellung uebereinstimmen und die Generierung nicht an einem
+    // unsichtbaren beste-Wert haengenbleibt (Quelle der Wahrheit konsistent halten).
+    beste.hidden = true;
+    beste.disabled = true;
+    if (settings.tier === "beste") { settings = { ...settings, tier: "standard" }; saveSettings(settings); }
+    if (sel.value === "beste") sel.value = "standard";
+    updateTierHint();
+    return;
+  }
+  // Flag an: Option zeigen. Waehlbar nur, wenn das Guthaben mindestens einen Opus-Test deckt
+  // (nicht schon ab 1 Credit).
+  beste.hidden = false;
+  beste.disabled = !canAffordBeste();
+  // Bei zu wenig Guthaben die beste-ABSICHT bewusst NICHT verwerfen (anders als beim Flag-aus):
+  // die Option bleibt sichtbar und, falls gespeichert, ausgewaehlt (disabled, mit Aufladen-
+  // Hinweis). Die Generierung weist dann klar aufs Aufladen hin, statt still auf standard zu
+  // generieren — Anzeige und settings.tier bleiben konsistent (beide "beste").
+  if (settings.tier === "beste" && sel.value !== "beste") sel.value = "beste";
+  updateTierHint();
+}
+
+// Hinweistext unter dem Qualitaets-Select: Kostenhinweis bei aktiver Opus-Auswahl bzw.
+// Aufladen-Aufforderung, wenn die Option mangels Guthaben gesperrt ist.
+function updateTierHint() {
+  const sel = $("tier");
+  const hint = $("tier-beste-hint");
+  if (!sel || !hint) return;
+  const beste = sel.querySelector('option[value="beste"]');
+  if (!beste || beste.hidden) { hint.classList.add("hidden"); hint.textContent = ""; return; }
+  if (sel.value === "beste" && !beste.disabled) {
+    // Ausgewaehlt und gedeckt → Kostenhinweis.
+    hint.innerHTML = `Beste Qualität (Opus) kostet etwa <strong>${formatGuthabenEuro(requiredOpusCredits())} pro Test</strong>.`;
+    hint.classList.remove("hidden");
+  } else if (beste.disabled) {
+    // Gesperrt (ausgewaehlt oder nur sichtbar) → Guthaben fehlt; Aufladen anbieten.
+    hint.innerHTML = 'Beste Qualität (Opus) braucht mehr Guthaben. <a href="#" id="link-aufladen">Aufladen</a>';
+    hint.classList.remove("hidden");
+    const link = $("link-aufladen");
+    if (link) link.onclick = (e) => { e.preventDefault(); openTopupDialog(); };
+  } else {
+    hint.classList.add("hidden");
+    hint.textContent = "";
+  }
+}
+
+// Balance-Zeile + Tier-Optionen + Aufladen-Bereich aus dem aktuellen creditsState zeichnen.
+function renderCreditsUI() {
+  renderBalanceLine();
+  updateTierOptions();
+  // Aufladen nur, wenn Credits live sind (Flag an). Sichtbarkeit haengt zusaetzlich am
+  // Login-Zustand (Block liegt in #account-loggedin).
+  const topup = $("topup");
+  if (topup) topup.classList.toggle("hidden", !creditsState.creditsEnabled);
+}
+
+// Nach einer (moeglichen) Guthaben-Aenderung durch einen bezahlten Opus-Job: Cache als
+// veraltet markieren und im Hintergrund auffrischen (Anzeige + naechste Opus-Pruefung). Nur
+// fuer "beste" relevant; standard/guenstig sind gratis und beruehren das Guthaben nicht.
+function markCreditsDirtyIfPaid(tier) {
+  if (tier === "beste") { creditsState.dirty = true; refreshBalance(); }
+}
+
+// --- Aufladen via Paddle (Phase B, P4) -----------------------------------
+// Der client-side Token ist bewusst oeffentlich (kein Secret). Sandbox vs. Produktion wird
+// beim Go-Live umgestellt (paddleEnv) — prod-Token + prod-price-IDs dann hier eintragen.
+const PADDLE_CONFIG = {
+  sandbox: {
+    token: "test_dd28942b6ba0973839ad31d6f08",
+    prices: {
+      3: "pri_01kvthe259wsnywgqbcvjfef0j",
+      5: "pri_01kvthd4f8jb73j7905enkga59",
+      10: "pri_01kvthefqea9v7p3qxhedj60d8",
+    },
+  },
+  production: {
+    token: "", // TODO Go-Live: live client-side Token eintragen
+    prices: { 3: "", 5: "", 10: "" }, // TODO Go-Live: prod price-IDs eintragen
+  },
+};
+
+// Umgebung: Default sandbox; beim Go-Live (prod-Token+price-IDs gesetzt) auf "production"
+// stellen. localStorage-Override nur fuer Tests.
+function paddleEnv() {
+  try { const o = localStorage.getItem("bewerbungstool.paddleEnv"); if (o === "production" || o === "sandbox") return o; } catch {}
+  return "sandbox";
+}
+function paddleConfig() { return PADDLE_CONFIG[paddleEnv()] || PADDLE_CONFIG.sandbox; }
+
+function setTopupMsg(text) { const el = $("topup-msg"); if (el) el.textContent = text || ""; }
+
+let _paddleReady = null; // Promise<Paddle>, einmal geladen/initialisiert
+function loadPaddle() {
+  if (_paddleReady) return _paddleReady;
+  _paddleReady = new Promise((resolve, reject) => {
+    const init = () => {
+      const cfg = paddleConfig();
+      if (!cfg.token) { reject(new Error("paddle-no-token")); return; }
+      try {
+        window.Paddle.Environment.set(paddleEnv());
+        window.Paddle.Initialize({ token: cfg.token, eventCallback: onPaddleEvent });
+        resolve(window.Paddle);
+      } catch (e) { reject(e); }
+    };
+    if (window.Paddle) { init(); return; }
+    const s = document.createElement("script");
+    s.src = "https://cdn.paddle.com/paddle/v2/paddle.js";
+    s.async = true;
+    s.onload = init;
+    s.onerror = () => { _paddleReady = null; reject(new Error("paddle-load-failed")); };
+    document.head.appendChild(s);
+  }).catch((e) => { _paddleReady = null; throw e; }); // Fehlschlag nicht cachen → spaeter erneut moeglich
+  return _paddleReady;
+}
+
+// Paddle-Events. Nach erfolgreichem Checkout das Guthaben nachziehen (die Gutschrift macht der
+// Webhook serverseitig + asynchron → kurz pollen, bis der Stand steigt).
+function onPaddleEvent(ev) {
+  if (ev && ev.name === "checkout.completed") {
+    setTopupMsg("Zahlung erhalten. Dein Guthaben wird aktualisiert …");
+    pollBalanceAfterPurchase();
+  }
+}
+
+// Pollt das Guthaben, bis ein gesicherter Anstieg sichtbar ist (Webhook async) oder das Limit
+// erreicht ist. before nur als Basis nehmen, wenn es bekannt (finite) ist — sonst lässt sich
+// kein Anstieg beweisen und wir behaupten KEINE Bestaetigung (zeigen am Ende nur den Stand).
+async function pollBalanceAfterPurchase() {
+  const tok = settings.authToken;
+  const before = Number.isFinite(creditsState.credits) ? creditsState.credits : null;
+  for (let i = 0; i < 10; i++) {
+    await new Promise((r) => setTimeout(r, 2000)); // Webhook ist async → erst warten, dann lesen
+    if (settings.authToken !== tok) return; // Konto gewechselt/Logout → nicht weiterschreiben
+    await refreshBalance();
+    if (Number.isFinite(creditsState.credits) && before !== null && creditsState.credits > before) {
+      setTopupMsg(`Guthaben aktualisiert: ${formatGuthabenEuro(creditsState.credits)}.`);
+      return;
+    }
+  }
+  // Kein sicherer Anstieg bestaetigt (Webhook evtl. minimal verzoegert, oder Ausgangsstand war
+  // unbekannt). Neutral formulieren — KEIN Fehler, und nie einen veralteten Stand als bestaetigt.
+  if (Number.isFinite(creditsState.credits)) {
+    setTopupMsg(`Zahlung erhalten. Aktuelles Guthaben: ${formatGuthabenEuro(creditsState.credits)}.`);
+  } else {
+    setTopupMsg("Zahlung erhalten. Dein Guthaben erscheint in Kürze.");
+  }
+}
+
+// Startet den Kauf: erst den signierten Checkout-Intent (bindet serverseitig die user.id)
+// holen, dann das Paddle-Overlay oeffnen. Ohne Login/Token/Konfiguration sauber abbrechen
+// statt zu werfen. _topupBusy verhindert Doppelklicks (zwei Intents/Overlays).
+let _topupBusy = false;
+async function startTopup(euros) {
+  if (_topupBusy) return;
+  if (!settings.authToken) { promptHostedLogin(); return; }
+  _topupBusy = true;
+  try {
+    setTopupMsg("Aufladen wird vorbereitet …");
+    let ud;
+    try {
+      const r = await fetch(hostedBase() + "/api/checkout-intent", { method: "POST", headers: authHeaders() });
+      if (r.status === 401) { handleHostedUnauthorized(); return; }
+      if (!r.ok) { setTopupMsg("Aufladen ist gerade nicht möglich. Bitte später erneut versuchen."); return; }
+      const d = await r.json();
+      ud = d && typeof d.ud === "string" ? d.ud : "";
+    } catch { setTopupMsg("Keine Verbindung. Bitte Internetverbindung prüfen und erneut versuchen."); return; }
+    if (!ud) { setTopupMsg("Aufladen ist gerade nicht möglich. Bitte später erneut versuchen."); return; }
+
+    const cfg = paddleConfig();
+    const priceId = cfg.prices[euros];
+    if (!priceId) { setTopupMsg("Dieses Paket ist gerade nicht verfügbar."); return; }
+
+    let Paddle;
+    try { Paddle = await loadPaddle(); }
+    catch { setTopupMsg("Aufladen ist gerade nicht verfügbar. Bitte später erneut versuchen."); return; }
+
+    setTopupMsg("");
+    Paddle.Checkout.open({
+      items: [{ priceId, quantity: 1 }],
+      customData: { ud }, // signierter Intent — der Webhook entnimmt die uid daraus
+      settings: { displayMode: "overlay", locale: "de" },
+    });
+  } finally {
+    _topupBusy = false; // Vorbereitung beendet; ab hier ist das (modale) Overlay zustaendig
+  }
+}
+
+// Aufladen-Bereich oeffnen (vom Opus-Aufladen-Hinweis aus): in die Einstellungen, Konto-
+// Bereich sichtbar machen und zum Aufladen-Block scrollen.
+function openTopupDialog() {
+  if (!settings.authToken) { promptHostedLogin(); return; }
+  showView("view-settings");
+  const t = $("topup");
+  if (t && !t.classList.contains("hidden")) { try { t.scrollIntoView({ behavior: "smooth", block: "center" }); } catch {} }
+}
+
+// Zeichnet die Guthaben-Zeile aus dem aktuellen creditsState. Nur sichtbar, wenn das Flag an
+// ist UND ein Stand bekannt ist. Idempotent — von allen Auffrisch-Stellen aufrufbar.
+function renderBalanceLine() {
+  const el = $("account-balance");
+  if (!el) return;
+  if (creditsState.creditsEnabled && Number.isFinite(creditsState.credits)) {
+    const euro = formatGuthabenEuro(creditsState.credits);
+    const cr = creditsState.credits.toLocaleString("de-DE");
+    // euro/cr sind aus Zahlen formatiert (keine Nutzereingabe) → kein XSS-Risiko.
+    el.innerHTML = `Guthaben: <strong>${euro}</strong> <span class="balance-credits">(${cr} Credits)</span>`;
+    el.classList.remove("hidden");
+  } else {
+    el.textContent = "";
+    el.classList.add("hidden");
+  }
+}
+
+// Holt den aktuellen Guthaben-/Flag-Stand vom Worker und zeichnet die Zeile neu. Fehler/
+// Offline: alten Cache behalten, nie werfen. Fuer Auffrischen nach Generierung/Kauf.
+async function refreshBalance() {
+  const tok = settings.authToken;
+  if (!tok) { resetCreditsState(); renderCreditsUI(); return creditsState; }
+  try {
+    const r = await fetch(hostedBase() + "/api/balance", { headers: authHeaders() });
+    // Ueberholt? Token wechselte/Logout waehrend des (Hintergrund-)Requests → diese Antwort
+    // darf den creditsState eines anderen Kontos NICHT anwenden (wie bei /auth/me).
+    if (settings.authToken !== tok) return creditsState;
+    if (r.status === 401) { clearAuthToken(); resetCreditsState(); renderCreditsUI(); return creditsState; }
+    if (r.ok) {
+      const d = await r.json();
+      if (settings.authToken !== tok) return creditsState; // nach dem json()-await erneut pruefen
+      creditsState = {
+        ...creditsState,
+        credits: Number.isFinite(d.credits) ? d.credits : null,
+        creditsEnabled: d.creditsEnabled === true,
+        opusTestCredits: Number.isFinite(d.opusTestCredits) ? d.opusTestCredits : null,
+        loaded: true,
+        dirty: false, // frisch bestaetigt
+      };
+    } else {
+      // Kein frischer Stand bestaetigt (5xx/…) → den alten Geldstand NICHT als aktuell stehen
+      // lassen, sondern als unbekannt ausblenden (gerade nach einer Abbuchung/Kauf).
+      creditsState = { ...creditsState, credits: null };
+    }
+  } catch {
+    if (settings.authToken !== tok) return creditsState;
+    creditsState = { ...creditsState, credits: null }; // offline: Stand unbekannt, nicht stale zeigen
+  }
+  renderCreditsUI();
+  return creditsState;
 }
 
 // Meldung aus der Redirect-Aufnahme, die beim naechsten Oeffnen der Einstellungen
@@ -1898,8 +2236,24 @@ async function getTurnstileToken(action, cData) {
   });
 }
 
-// Stabile, nutzerfreundliche Meldungen fuer die Hosted-Fehlercodes (Plan A.3.5).
-function hostedErrorMessage(status) {
+// Stabile, nutzerfreundliche Meldungen fuer die Hosted-Fehlercodes (Plan A.3.5). Der optionale
+// code stammt aus dem Fehler-BODY (z. B. bei 402) und erlaubt eine praezisere Meldung als der
+// reine Status. Unbekannte/fehlende codes fallen defensiv auf die Status-Meldung zurueck.
+function hostedErrorMessage(status, code) {
+  if (status === 402) {
+    switch (code) {
+      case "no-credits":
+        // Guthaben deckt den Opus-Test nicht (Aufladen-Dialog folgt in P4).
+        return "Dein Guthaben reicht für die beste Qualität (Opus) nicht aus. Du kannst in den Einstellungen aufladen oder eine andere Qualitätsstufe wählen.";
+      case "needs-paid-test":
+      case "no-entitlement":
+        return "Auswerten und Vertiefen in bester Qualität (Opus) gehören zu einem in Opus erstellten Test. Bitte erstelle den Test zuerst in bester Qualität.";
+      // tier-locked u. a.: Stufe im kostenlosen Modus gesperrt (tritt bei ausgeblendeter
+      // Opus-Option normal nicht auf — defensiv).
+      default:
+        return "Diese Qualitätsstufe ist im kostenlosen Modus nicht verfügbar.";
+    }
+  }
   switch (status) {
     case 403:
       return "Sicherheitsprüfung fehlgeschlagen. Bitte die Seite neu laden und erneut versuchen.";
@@ -1907,13 +2261,18 @@ function hostedErrorMessage(status) {
       return "Gerade sind viele Anfragen unterwegs (oder dein Tageskontingent ist erreicht). Bitte kurz warten und erneut versuchen.";
     case 503:
       return "Das kostenlose Tageskontingent ist für heute erschöpft – morgen ist es wieder verfügbar. Wenn du sofort weitermachen möchtest, kannst du in den Einstellungen unter „Anbieter“ einen eigenen API-Schlüssel hinterlegen.";
-    case 402:
-      return "Diese Qualitätsstufe ist im kostenlosen Modus nicht verfügbar.";
     case 400:
       return "Die Anfrage war ungültig. Bitte die Stellenanzeige prüfen.";
     default:
       return "Der Dienst ist momentan nicht erreichbar. Bitte später erneut versuchen.";
   }
+}
+
+// Liest den Fehlercode aus dem JSON-Body einer Nicht-OK-Antwort (Feld "error"); fehlt er oder
+// ist der Body kein JSON, null. Defensiv — wirft nie. Nur fuer Fehlerantworten gedacht.
+async function hostedErrorCode(res) {
+  try { const d = await res.json(); return d && typeof d.error === "string" ? d.error : null; }
+  catch { return null; }
 }
 
 // Hosted-Aufruf: schickt strukturierte DATEN (keine Prompts) an den app-spezifischen
@@ -1925,7 +2284,7 @@ async function callHosted(hosted, onProgress, opts = {}) {
     throw new Error("Interner Fehler: Hosted-Aufruf ohne Aktion.");
   }
   requireHostedLoginOrThrow(); // Backstop: Anmeldung Pflicht
-  const tier = settings.tier || "standard";
+  const tier = tierForHostedCall(hosted.payload);
   const body = JSON.stringify({ ...hosted.payload, tier });
   const headers = { "Content-Type": "application/json", ...authHeaders() };
   // cData an genau diesen Body binden (Hash des exakt gesendeten Strings).
@@ -1946,7 +2305,7 @@ async function callHosted(hosted, onProgress, opts = {}) {
   }
 
   if (res.status === 401) { handleHostedUnauthorized(); throw new Error(LOGIN_REDIRECT); }
-  if (!res.ok) throw new Error(hostedErrorMessage(res.status));
+  if (!res.ok) throw new Error(hostedErrorMessage(res.status, await hostedErrorCode(res)));
 
   let finishReason = null;
   const text = await readSSEText(
@@ -3080,7 +3439,9 @@ async function deriveThemenfelder(job) {
     `Stellenausschreibung:\n\n${(job.jobText || "").slice(0, 30000)}\n\n` +
     `Bisherige Schwachstellen des Bewerbers (Punkte je Frage, 0-10, schwaechste zuerst):\n${buildSchwaechenSummary(job)}`;
   const { data, cost, tokens } = await callLLM(system, user, THEMENFELDER_SCHEMA, undefined, {
-    hosted: { action: "themenfelder", payload: { jobText: job.jobText || "", schwaechen: buildSchwaechenSummary(job) } },
+    // Phase B: jobId des aktuellen (ggf. bezahlten) Tests mitschicken → Vertiefen laeuft bei
+    // "beste" ueber das Follow-up-Entitlement statt eines erneuten Credit-Abzugs. Nur wenn vorhanden.
+    hosted: { action: "themenfelder", payload: { jobText: job.jobText || "", schwaechen: buildSchwaechenSummary(job), ...(quiz && quiz.jobId ? { jobId: quiz.jobId } : {}) } },
   });
   const fields = (data && Array.isArray(data.themenfelder) ? data.themenfelder : [])
     .filter((f) => f && typeof f.label === "string" && f.label.trim())
@@ -3184,6 +3545,35 @@ async function generateQuiz(opts = {}) {
     if (uk) { urlKey = uk; jobUrl = lastFetch.url; }
   }
   const vertiefungFelder = vertiefung ? vertiefung.felder.map((f) => ({ id: f.id, label: f.label })) : null;
+
+  // Opus gewuenscht? Vor dem Dispatch FAIL-CLOSED pruefen: eine bewusst bezahlte Auswahl darf
+  // nie still als standard durchrutschen. Nur weiter, wenn frisch bestaetigt ist, dass Opus
+  // gedeckt ist; sonst mit klarer Meldung abbrechen (statt heimlich downzugraden).
+  // Nur pruefen, wenn ueberhaupt ein Token da ist: ohne Anmeldung uebernimmt
+  // startHostedGeneration den Login-Prompt — der Opus-Gate darf den NICHT mit einem
+  // Guthaben-/Offline-Fehler verdecken.
+  if (isHosted && settings.tier === "beste" && settings.authToken) {
+    // Frisch nachladen, wenn unbekannt ODER moeglicherweise veraltet (nach einer Abbuchung) —
+    // sonst koennte ein zweiter Opus-Test auf stale Guthaben gestartet werden.
+    if (!creditsState.loaded || creditsState.dirty) await refreshBalance();
+    // refreshBalance() kann (a) settings.tier ueber updateTierOptions auf standard normalisiert
+    // haben (Flag bestaetigt aus) oder (b) bei 401 das Token verworfen haben. In beiden Faellen
+    // hier NICHT blockieren: dann greift entweder normale standard-Generierung oder der
+    // Login-Pfad in startHostedGeneration.
+    if (settings.authToken && settings.tier === "beste") {
+      if (!creditsState.loaded) {
+        // Entitlement liess sich nicht bestaetigen (Balance-Abruf fehlgeschlagen/offline).
+        showError("Die beste Qualität (Opus) konnte gerade nicht bestätigt werden. Bitte Verbindung prüfen und erneut versuchen, oder in den Einstellungen eine andere Qualitätsstufe wählen.");
+        return;
+      }
+      if (!canAffordBeste()) {
+        // Flag an, aber Guthaben deckt keinen Opus-Test → NICHT still downgraden, sondern
+        // klar aufs Aufladen/eine andere Stufe hinweisen (die Absicht bleibt erhalten).
+        showError(`Dein Guthaben reicht für die beste Qualität (Opus) nicht aus (etwa ${formatGuthabenEuro(requiredOpusCredits())} pro Test). Du kannst in den Einstellungen aufladen oder eine andere Qualitätsstufe wählen.`);
+        return;
+      }
+    }
+  }
 
   // Erst hier zaehlen: nach der Ersetzen-Rueckfrage und allen Vor-Checks, unmittelbar
   // vor dem tatsaechlichen Generierungs-Dispatch (kein Zaehlen fuer abgebrochene Laeufe).
@@ -3356,6 +3746,9 @@ async function generateQuiz(opts = {}) {
       jobText, difficulty, urlKey, jobUrl, vertiefungFelder, mode,
       genCost, genTokens, isLocal, localAborted, total,
       provider: settings.provider || "hosted",
+      // Dieser Pfad ist immer NICHT-hosted (hosted kehrt vorher ueber startHostedGeneration
+      // zurueck) — die Stufe ist hier ein reines BYOK/lokal-Provenienzfeld; wie bisher
+      // unveraendert uebernehmen (kein Opus-Clamp, der nur den Hosted-Pfad betrifft).
       tier: settings.tier || null,
       model: settings.model || null,
     });
@@ -3415,6 +3808,10 @@ function finalizeQuiz(result, ctx) {
     tier: ctx.tier || null,
     model: ctx.model || null,
   };
+  // Phase B (Credits): die generierende jobId aufs Quiz durchreichen, damit Auswerten/
+  // Vertiefen eines bezahlten (Opus-)Tests serverseitig dem Job zugeordnet werden koennen
+  // (Follow-up-Entitlement). Additiv; alte/synchron erzeugte Quizze ohne jobId bleiben heil.
+  if (ctx.jobId) quiz.jobId = ctx.jobId;
   // Kernpunkte sofort an eine bereits bestehende Stelle schreiben, damit die
   // Uebersicht ohne Test-Abschluss erscheint (saveAttempt schreibt sie beim
   // Abschluss ohnehin erneut - idempotent).
@@ -3488,13 +3885,15 @@ async function startHostedGeneration(ctx) {
   actionRunning = true;
   showLoading("Test wird gestartet...");
   try {
+    // Stufe einmal bestimmen und konsistent fuer Body UND Provenienz verwenden.
+    const tierSent = effectiveTier();
     // Body einmal bauen, damit der cData-Hash exakt die gesendeten Bytes abdeckt.
     const jobBody = JSON.stringify({
       jobText: ctx.jobText,
       numQuestions: ctx.numQuestions,
       difficulty: ctx.difficulty,
       vertiefung: ctx.vertiefung,
-      tier: settings.tier || "standard",
+      tier: tierSent,
     });
     const token = await getTurnstileToken("generate-quiz", await sha256hex(jobBody));
     const headers = { "Content-Type": "application/json", ...authHeaders() };
@@ -3505,7 +3904,13 @@ async function startHostedGeneration(ctx) {
       body: jobBody,
     });
     if (res.status === 401) { handleHostedUnauthorized(); throw new Error(LOGIN_REDIRECT); }
-    if (!res.ok) throw new Error(hostedErrorMessage(res.status));
+    if (!res.ok) {
+      // Bezahlter (Opus-)Request abgelehnt (z. B. 402, weil anderswo verbraucht oder Preisdrift):
+      // den Guthaben-Cache als veraltet markieren+auffrischen, statt weiter auf stale Credits zu
+      // vertrauen (sonst liefe der naechste Versuch wieder durch den Client-Gate ins Server-402).
+      markCreditsDirtyIfPaid(tierSent);
+      throw new Error(hostedErrorMessage(res.status, await hostedErrorCode(res)));
+    }
     const data = await res.json();
     if (!data.jobId) throw new Error("Der Test konnte nicht gestartet werden. Bitte erneut versuchen.");
     // Nur den fuer die Fertigstellung noetigen Kontext sichern (keine Prompts/Tokens).
@@ -3517,9 +3922,12 @@ async function startHostedGeneration(ctx) {
         jobText: ctx.jobText, difficulty: ctx.difficulty, mode: ctx.mode,
         urlKey: ctx.urlKey, jobUrl: ctx.jobUrl, vertiefungFelder: ctx.vertiefungFelder,
         // Provenienz fuer Reports (Hosted-Pfad): Modell baut der Server -> model null.
-        provider: "hosted", tier: settings.tier || "standard", model: null,
+        provider: "hosted", tier: tierSent, model: null,
       },
     });
+    // Ein bezahlter (Opus-)Job hat das Guthaben veraendert → Cache als veraltet markieren und
+    // im Hintergrund auffrischen, damit Anzeige und naechste Opus-Pruefung stimmen.
+    markCreditsDirtyIfPaid(tierSent);
     hideLoading();
     showView("view-home");
     renderActiveJobCard("pending");
@@ -3600,15 +4008,21 @@ async function pollActiveJob() {
       }
     } catch { /* reines Komfort-Update: Fehler ignorieren, saveAttempt schreibt spaeter */ }
     renderActiveJobCard("ready");
+    // Bezahlter Opus-Job fertig → Guthaben-Cache nachziehen (Anzeige + naechste Opus-Pruefung).
+    markCreditsDirtyIfPaid(job.ctx && job.ctx.tier);
   } else if (data.status === "done") {
     // Defensiv: "done" ohne Quiz ist ein Serverfehler — nicht endlos weiter pollen.
     clearActiveJob();
     renderActiveJobCard("error");
     showError(jobErrorMessage("unknown"));
+    // Wie der error-Zweig: ein bezahlter Opus-Job kann rueckerstattet werden → Guthaben nachziehen.
+    markCreditsDirtyIfPaid(job.ctx && job.ctx.tier);
   } else if (data.status === "error") {
     clearActiveJob();
     renderActiveJobCard("error");
     showError(jobErrorMessage(data.code));
+    // Fehlgeschlagener Opus-Job wird serverseitig ggf. rueckerstattet → Guthaben nachziehen.
+    markCreditsDirtyIfPaid(job.ctx && job.ctx.tier);
   } else {
     renderActiveJobCard("pending");
     scheduleJobPoll(3000);
@@ -3643,7 +4057,7 @@ function startReadyJob() {
   if (!job || !job.quiz) return;
   clearActiveJob();
   renderActiveJobCard(null);
-  finalizeQuiz(job.quiz, { ...job.ctx, genCost: null, genTokens: null, isLocal: false });
+  finalizeQuiz(job.quiz, { ...job.ctx, jobId: job.jobId, genCost: null, genTokens: null, isLocal: false });
 }
 
 // Status-Karte fuer den Hintergrund-Job auf der Startliste. state: "pending"|"ready"|"error"|null.
@@ -4508,6 +4922,9 @@ async function runEvaluation() {
         jobText: quiz.jobText,
         payload,
         kontext: { mode, limitMin: timer.limitMin, minutesUsed, overtime: timer.overtime, mcLokal: localSummary },
+        // Phase B: jobId mitschicken → Auswerten eines bezahlten Tests laeuft serverseitig
+        // ueber das Follow-up-Entitlement (kein erneuter Credit-Abzug). Nur wenn vorhanden.
+        ...(quiz.jobId ? { jobId: quiz.jobId } : {}),
       };
       const { data: rawResult, cost, tokens } = await callLLM(system, user, EVAL_SCHEMA, (acc) => {
         const seen = (acc.match(/"feedback"\s*:/g) || []).length;
@@ -7070,6 +7487,10 @@ function initSettingsForm() {
   $("api-key").value = settings.apiKey || "";
   $("base-url").value = settings.baseUrl || "";
   $("tier").value = settings.tier || "standard";
+  // Die Opus-Option richtet renderAccountSection() unten ein: es setzt creditsState frisch
+  // (erst "unbekannt", dann der bestaetigte Server-Stand) und ruft renderCreditsUI →
+  // updateTierOptions. Hier NICHT mit einem evtl. veralteten Cache vorgreifen, sonst koennte
+  // ein stale Flag-aus eine gueltige beste-Absicht faelschlich normalisieren.
   updateSettingsProviderUI();
   if ($("provider").value === "local") {
     populateLocalModelSelect([], settings.model);
@@ -7095,13 +7516,38 @@ async function renderAccountSection() {
     $("account-loggedin").classList.add("hidden");
     $("account-loggedout").classList.remove("hidden");
     status.textContent = "Nicht angemeldet.";
+    resetCreditsState();
+    renderCreditsUI();
   };
-  if (!settings.authToken) { showLoggedOut(); return; }
+  const tok = settings.authToken;
+  if (!tok) { showLoggedOut(); return; }
   showLoggedIn(null); // optimistisch, bis /auth/me antwortet
+  // Guthaben bis zur frischen Bestaetigung als "unbekannt" behandeln und ausblenden: bei
+  // einer fehlschlagenden Auffrischung (5xx/Timeout/ungueltiges JSON) lieber kurz nichts
+  // zeigen als einen veralteten Geldstand faelschlich als aktuell auszugeben.
+  resetCreditsState();
+  renderCreditsUI();
   try {
     const r = await fetch(hostedBase() + "/auth/me", { headers: authHeaders() });
+    // Ueberholt? Wenn sich der Token waehrend des Requests geaendert hat (Logout oder
+    // Konto-Wechsel), darf diese Antwort weder UI noch creditsState anfassen — sonst
+    // repaintet sie den Stand des vorigen Kontos (z. B. fremdes Guthaben nach Logout).
+    if (settings.authToken !== tok) return;
     if (r.status === 401) { clearAuthToken(); showLoggedOut(); return; }
-    if (r.ok) { const d = await r.json(); showLoggedIn(d.user && d.user.email); }
+    if (r.ok) {
+      const d = await r.json();
+      showLoggedIn(d.user && d.user.email);
+      // /auth/me fuehrt seit dem Credits-Vertrag creditsEnabled + credits + opusTestCredits
+      // (additiv, defensiv gelesen: aeltere Worker liefern die Felder evtl. nicht).
+      creditsState = {
+        credits: Number.isFinite(d.credits) ? d.credits : null,
+        creditsEnabled: d.creditsEnabled === true,
+        opusTestCredits: Number.isFinite(d.opusTestCredits) ? d.opusTestCredits : null,
+        loaded: true,
+        dirty: false,
+      };
+      renderCreditsUI();
+    }
   } catch { /* offline: optimistischer Zustand bleibt */ }
 }
 
@@ -7224,9 +7670,20 @@ $("provider").addEventListener("change", () => {
   } else if ($("provider").value !== "hosted") {
     populateModelSelect($("provider").value, settings.model);
   }
+  // Wechsel auf hosted in einem offenen Formular: Konto/Guthaben laden, damit Opus-Option und
+  // Guthaben-Zeile sofort stimmen (sonst erst nach Schliessen/Oeffnen der Einstellungen).
+  if ($("provider").value === "hosted") renderAccountSection();
 });
 
 $("model").addEventListener("change", updateModelDesc);
+
+// Kostenhinweis der Qualitaetsstufe bei Auswahl aktualisieren (z. B. „≈ 0,60 € pro Test“).
+$("tier").addEventListener("change", updateTierHint);
+
+// Aufladen-Buttons (3/5/10 €) → Paddle-Checkout.
+document.querySelectorAll(".btn-topup").forEach((b) => {
+  b.addEventListener("click", () => startTopup(Number(b.dataset.eur)));
+});
 
 $("btn-load-models").addEventListener("click", async () => {
   const status = $("local-models-status");
@@ -7350,7 +7807,7 @@ async function importData(text) {
     // oder handgeschriebenes Backup soll keine ungueltige Stufe persistieren, die
     // Hosted-Calls bis zum naechsten Speichern scheitern liesse (defensiv lesen).
     const tierImp = typeof inc.tier === "string" ? inc.tier.trim() : "";
-    if (tierImp === "standard" || tierImp === "guenstig") merged.tier = tierImp;
+    if (tierImp === "standard" || tierImp === "guenstig" || tierImp === "beste") merged.tier = tierImp;
     settings = merged;
     saveSettings(settings);
     settingsImported = true;
@@ -8194,6 +8651,9 @@ function routeInitialView() {
 consumeAuthRedirect().then(() => {
   routeInitialView();
   resumeActiveJob();
+  // creditsState frueh laden (hosted + angemeldet), damit die Opus-Stufe nach einem Reload
+  // sofort korrekt verfuegbar ist und effectiveTier sie nicht still auf standard herabstuft.
+  if ((settings.provider || "hosted") === "hosted" && settings.authToken) refreshBalance();
 });
 
 /* ---------- Service Worker (PWA) ---------- */
