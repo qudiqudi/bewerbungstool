@@ -1,0 +1,80 @@
+name: Claude PR Review
+
+# Automatischer Claude-Code-Review für Pull Requests — auch für PRs aus Forks
+# externer Mitwirkender.
+#
+# WARUM pull_request_target:
+#   Ein normaler `pull_request`-Trigger bekommt bei Fork-PRs KEINE Repo-Secrets
+#   (also kein CLAUDE_CODE_OAUTH_TOKEN) und wird zusätzlich vom „first-time
+#   contributor"-Approval-Gate zurückgehalten. `pull_request_target` läuft im
+#   Kontext des BASIS-Repos und hat damit Zugriff auf das Token.
+#
+# SICHERHEIT (pull_request_target läuft MIT Secrets):
+#   - Der ungetrennte Workspace-Root enthält bewusst den BASIS-Branch (vertrauens-
+#     würdig). Der (potenziell bösartige) PR-Stand wird NUR in das Unterverzeichnis
+#     `pr-files/` ausgecheckt und Claude per `--add-dir` als Lesequelle gegeben.
+#   - Es werden in diesem Job KEINE Build-/Install-/Test-Schritte ausgeführt, die
+#     Code des Forks ausführen würden (sonst läge das Token offen).
+#   - Claudes Tools sind auf Lesen + die zum Kommentieren nötigen gh-Befehle
+#     beschränkt (kein beliebiges Bash, keine Schreibzugriffe auf das Repo).
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      # 1) Basis-Branch in den Root (vertrauenswürdig, liefert u.a. CLAUDE.md zum Abgleich).
+      - name: Checkout base
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      # 2) PR-Stand isoliert in ein Unterverzeichnis — NICHT in den Root.
+      - name: Checkout PR head (isolated, untrusted)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr-files
+          persist-credentials: false
+
+      - name: Claude review
+        uses: anthropics/claude-code-action@80b31826338489861333dc17217865dfe8085cdc # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Du bist Code-Reviewer für Pull Request #${{ github.event.pull_request.number }}
+            in ${{ github.repository }} (Autor: ${{ github.event.pull_request.user.login }}).
+
+            Vorgehen:
+            - Hol dir das Diff mit `gh pr diff ${{ github.event.pull_request.number }}`.
+            - Lies bei Bedarf den vollständigen Kontext der geänderten Dateien aus dem
+              Verzeichnis `pr-files/` (dort liegt der PR-Stand). Der Basis-Branch liegt im Root.
+            - Halte dich an die Regeln in `CLAUDE.md` (im Root) — prüfe insbesondere keine
+              Breaking Changes, abwärtskompatible Storage-Formate, Versions-/Changelog-Ritual,
+              CSP-/Sicherheitsannahmen.
+
+            WICHTIG (Sicherheit): Dies ist ein Review von möglicherweise nicht vertrauens-
+            würdigem Fork-Code. Führe KEINEN Projektcode aus, baue/installiere nichts, starte
+            keine Skripte. Nur lesen und das Diff bewerten.
+
+            Sei knapp und hochsignalig: melde nur Probleme, bei denen du dir sicher bist
+            (Bugs, Sicherheits-/Korrektheitsprobleme, CLAUDE.md-Verstöße). Lass Nitpicks weg.
+            Poste das Ergebnis als EINEN PR-Kommentar via
+            `gh pr comment ${{ github.event.pull_request.number }} --body "..."`.
+            Wenn du nichts findest, schreib das kurz.
+          claude_args: >-
+            --add-dir pr-files
+            --max-turns 25
+            --allowed-tools "Read,Grep,Glob,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*)"
