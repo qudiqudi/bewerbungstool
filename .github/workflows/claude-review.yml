@@ -71,8 +71,21 @@ jobs:
             Poste das Ergebnis als EINEN PR-Kommentar via
             `gh pr comment ${{ github.event.issue.number }} --body "..."`.
             Wenn du nichts findest, schreib das kurz.
-          # Tool-Muster OHNE Leerzeichen — Leerzeichen in z.B. "Bash(gh pr diff:*)" zerlegt
-          # der claude_args-Parser falsch (nur das letzte Tool wird registriert, der CLI-
-          # Aufruf bricht dann beim Start ab). Bash(gh:*) erlaubt genau die gh-Befehle,
-          # ohne Leerzeichen. Schreibzugriffe/anderes Bash bleiben gesperrt.
-          claude_args: --allowed-tools Read,Grep,Glob,Bash(gh:*) --max-turns 25
+          # Tool-Allowlist als JSON (settings-Input) statt über --allowed-tools: so umgeht
+          # man das Shell-Splitting von claude_args, das an Leerzeichen in Mustern wie
+          # "Bash(gh pr diff:*)" scheitert. Eng gefasst auf genau die benötigten gh-Befehle
+          # — KEIN Bash(gh:*) (das würde gh api + alle Schreib-Subkommandos erlauben).
+          settings: |
+            {
+              "permissions": {
+                "allow": [
+                  "Read",
+                  "Grep",
+                  "Glob",
+                  "Bash(gh pr diff:*)",
+                  "Bash(gh pr view:*)",
+                  "Bash(gh pr comment:*)"
+                ]
+              }
+            }
+          claude_args: --max-turns 25
