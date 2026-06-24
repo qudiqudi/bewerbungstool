@@ -1,81 +1,91 @@
 name: Claude PR Review
 
-# Automatischer Claude-Code-Review für Pull Requests — auch für PRs aus Forks
-# externer Mitwirkender.
+# On-Demand-Review: läuft NUR, wenn jemand auf einem Pull Request einen Kommentar
+# mit "@claude" schreibt — nicht automatisch beim Öffnen eines PRs.
 #
-# WARUM pull_request_target:
-#   Ein normaler `pull_request`-Trigger bekommt bei Fork-PRs KEINE Repo-Secrets
-#   (also kein CLAUDE_CODE_OAUTH_TOKEN) und wird zusätzlich vom „first-time
-#   contributor"-Approval-Gate zurückgehalten. `pull_request_target` läuft im
-#   Kontext des BASIS-Repos und hat damit Zugriff auf das Token.
+# issue_comment läuft im Kontext des BASIS-Repos und hat daher Zugriff auf die
+# Secrets (CLAUDE_CODE_OAUTH_TOKEN), auch wenn der PR aus einem Fork kommt.
 #
-# SICHERHEIT (pull_request_target läuft MIT Secrets):
-#   - Der ungetrennte Workspace-Root enthält bewusst den BASIS-Branch (vertrauens-
-#     würdig). Der (potenziell bösartige) PR-Stand wird NUR in das Unterverzeichnis
-#     `pr-files/` ausgecheckt und Claude per `--add-dir` als Lesequelle gegeben.
-#   - Es werden in diesem Job KEINE Build-/Install-/Test-Schritte ausgeführt, die
-#     Code des Forks ausführen würden (sonst läge das Token offen).
-#   - Claudes Tools sind auf Lesen + die zum Kommentieren nötigen gh-Befehle
-#     beschränkt (kein beliebiges Bash, keine Schreibzugriffe auf das Repo).
+# SICHERHEIT:
+#   - Nur Kommentare von OWNER/MEMBER/COLLABORATOR lösen einen Lauf aus, damit nicht
+#     beliebige Dritte über @claude Reviews (und damit Token-/Kosten-Verbrauch)
+#     auslösen können. Soll der PR-Autor (Fork) sich selbst auslösen dürfen, unten
+#     "CONTRIBUTOR" zur Liste hinzufügen.
+#   - Es wird KEIN ungeprüfter Fork-Code ausgecheckt oder ausgeführt; der Review
+#     arbeitet über `gh pr diff` (read-only API). Claudes Tools sind auf Lesen +
+#     die zum Posten nötigen gh-Befehle beschränkt.
 
 on:
-  pull_request_target:
-    types: [opened, reopened, synchronize]
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: read
   pull-requests: write
-  id-token: write # claude-code-action mints an OIDC token to post review comments
+  id-token: write # Fallback für die OIDC-App-Token-Exchange-Variante
 
 concurrency:
-  group: claude-review-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  group: claude-review-${{ github.event.issue.number }}
+  cancel-in-progress: false
 
 jobs:
   review:
-    if: ${{ !github.event.pull_request.draft }}
+    # Nur auf PR-Kommentaren (kein reines Issue), die "@claude" enthalten, von
+    # vertrauenswürdigen Absendern.
+    if: >-
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '@claude') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
     steps:
-      # 1) Basis-Branch in den Root (vertrauenswürdig, liefert u.a. CLAUDE.md zum Abgleich).
+      # Basis-Repo (für CLAUDE.md / Kontext). Der PR-Stand wird NICHT ausgecheckt;
+      # Claude liest das Diff über die API (gh pr diff).
       - name: Checkout base
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          persist-credentials: false
-
-      # 2) PR-Stand isoliert in ein Unterverzeichnis — NICHT in den Root.
-      - name: Checkout PR head (isolated, untrusted)
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          path: pr-files
           persist-credentials: false
 
       - name: Claude review
         uses: anthropics/claude-code-action@80b31826338489861333dc17217865dfe8085cdc # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Direkt der Workflow-Token zum Posten → kein Claude-GitHub-App-Token-Exchange nötig.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
-            Du bist Code-Reviewer für Pull Request #${{ github.event.pull_request.number }}
-            in ${{ github.repository }} (Autor: ${{ github.event.pull_request.user.login }}).
+            Du bist Code-Reviewer für Pull Request #${{ github.event.issue.number }}
+            in ${{ github.repository }}. Ausgelöst per @claude-Kommentar.
 
             Vorgehen:
-            - Hol dir das Diff mit `gh pr diff ${{ github.event.pull_request.number }}`.
-            - Lies bei Bedarf den vollständigen Kontext der geänderten Dateien aus dem
-              Verzeichnis `pr-files/` (dort liegt der PR-Stand). Der Basis-Branch liegt im Root.
+            - Hol dir das Diff mit `gh pr diff ${{ github.event.issue.number }}` (zeigt auch
+              vollständig neu hinzugefügte Dateien). Nutze `gh pr view` für Titel/Beschreibung.
             - Halte dich an die Regeln in `CLAUDE.md` (im Root) — prüfe insbesondere keine
               Breaking Changes, abwärtskompatible Storage-Formate, Versions-/Changelog-Ritual,
               CSP-/Sicherheitsannahmen.
 
             WICHTIG (Sicherheit): Dies ist ein Review von möglicherweise nicht vertrauens-
             würdigem Fork-Code. Führe KEINEN Projektcode aus, baue/installiere nichts, starte
-            keine Skripte. Nur lesen und das Diff bewerten.
+            keine Skripte. Nur das Diff lesen und bewerten.
 
             Sei knapp und hochsignalig: melde nur Probleme, bei denen du dir sicher bist
             (Bugs, Sicherheits-/Korrektheitsprobleme, CLAUDE.md-Verstöße). Lass Nitpicks weg.
             Poste das Ergebnis als EINEN PR-Kommentar via
-            `gh pr comment ${{ github.event.pull_request.number }} --body "..."`.
+            `gh pr comment ${{ github.event.issue.number }} --body "..."`.
             Wenn du nichts findest, schreib das kurz.
-          claude_args: >-
-            --add-dir pr-files
-            --max-turns 25
-            --allowed-tools "Read,Grep,Glob,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*)"
+          # Tool-Allowlist als JSON (settings-Input) statt über --allowed-tools: so umgeht
+          # man das Shell-Splitting von claude_args, das an Leerzeichen in Mustern wie
+          # "Bash(gh pr diff:*)" scheitert. Eng gefasst auf genau die benötigten gh-Befehle
+          # — KEIN Bash(gh:*) (das würde gh api + alle Schreib-Subkommandos erlauben).
+          settings: |
+            {
+              "permissions": {
+                "allow": [
+                  "Read",
+                  "Grep",
+                  "Glob",
+                  "Bash(gh pr diff:*)",
+                  "Bash(gh pr view:*)",
+                  "Bash(gh pr comment:*)"
+                ]
+              }
+            }
+          claude_args: --max-turns 25
