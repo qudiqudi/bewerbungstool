@@ -71,6 +71,8 @@ jobs:
             Poste das Ergebnis als EINEN PR-Kommentar via
             `gh pr comment ${{ github.event.issue.number }} --body "..."`.
             Wenn du nichts findest, schreib das kurz.
-          claude_args: >-
-            --max-turns 25
-            --allowed-tools "Read,Grep,Glob,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*)"
+          # Tool-Muster OHNE Leerzeichen — Leerzeichen in z.B. "Bash(gh pr diff:*)" zerlegt
+          # der claude_args-Parser falsch (nur das letzte Tool wird registriert, der CLI-
+          # Aufruf bricht dann beim Start ab). Bash(gh:*) erlaubt genau die gh-Befehle,
+          # ohne Leerzeichen. Schreibzugriffe/anderes Bash bleiben gesperrt.
+          claude_args: --allowed-tools Read,Grep,Glob,Bash(gh:*) --max-turns 25
