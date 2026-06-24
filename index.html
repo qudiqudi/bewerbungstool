@@ -8,9 +8,10 @@
        angepasst werden; der CI-Check erzwingt das). connect-src listet die
        genutzten Dienste: KI-Anbieter und der Jina-Reader fuers URL-Laden. Die
        localhost-Eintraege erlauben den lokalen Anbieter (Ollama :11434, LM Studio
-       :1234 oder eine eigene Adresse). Neue externe Hosts muessen hier ergaenzt
-       werden, sonst blockt der Browser sie. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-AS03majGGAgYGEK0v1Hwe170PaXGMA1A1goCTG9ZANs=' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self' https://api.jobreif.de https://api.anthropic.com https://api.openai.com https://api.deepseek.com https://r.jina.ai https://challenges.cloudflare.com http://localhost:* http://127.0.0.1:*; frame-src https://challenges.cloudflare.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; object-src 'none'; form-action 'self'">
+       :1234 oder eine eigene Adresse). *.paddle.com erlaubt das Aufladen-Overlay
+       (Paddle.js-Skript, Checkout-iframe, dessen API/Assets). Neue externe Hosts
+       muessen hier ergaenzt werden, sonst blockt der Browser sie. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-AS03majGGAgYGEK0v1Hwe170PaXGMA1A1goCTG9ZANs=' https://challenges.cloudflare.com https://*.paddle.com; style-src 'self' 'unsafe-inline' https://*.paddle.com; img-src 'self' https://*.paddle.com; font-src 'self' https://*.paddle.com; connect-src 'self' https://api.jobreif.de https://api.anthropic.com https://api.openai.com https://api.deepseek.com https://r.jina.ai https://challenges.cloudflare.com https://*.paddle.com http://localhost:* http://127.0.0.1:*; frame-src https://challenges.cloudflare.com https://*.paddle.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; object-src 'none'; form-action 'self'">
   <meta name="theme-color" content="#c5543a" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#3a2a25" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#c5543a">
@@ -198,16 +199,28 @@
         <select id="tier">
           <option value="standard">Standard – empfohlen</option>
           <option value="guenstig">Günstig – schneller und sparsamer</option>
+          <option value="beste" hidden disabled>Beste (Opus) – höchste Qualität</option>
         </select>
+        <p id="tier-beste-hint" class="hint hidden"></p>
         <p class="hint">Im gehosteten Modus ist die Nutzung kostenlos (mit einem fairen Tageskontingent). Deine Eingaben werden zur Erstellung der Tests an unseren Dienst gesendet – Details im <a href="#" id="link-datenschutz-tier">Datenschutzhinweis</a>.</p>
       </div>
 
       <div id="row-account" class="hidden">
         <label>Konto</label>
         <p id="account-status" class="hint">Nicht angemeldet.</p>
+        <p id="account-balance" class="hidden"></p>
         <div id="account-loggedin" class="hidden">
           <div class="row wrap">
             <button id="btn-account-logout" type="button" class="ghost">Abmelden</button>
+          </div>
+          <div id="topup" class="hidden">
+            <p class="hint">Guthaben aufladen (für die beste Qualität, Opus):</p>
+            <div class="row wrap">
+              <button type="button" class="ghost btn-topup" data-eur="3">3 €</button>
+              <button type="button" class="ghost btn-topup" data-eur="5">5 €</button>
+              <button type="button" class="ghost btn-topup" data-eur="10">10 €</button>
+            </div>
+            <p id="topup-msg" class="hint" role="status"></p>
           </div>
         </div>
         <div id="account-loggedout" class="hidden">
