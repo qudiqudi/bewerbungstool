@@ -25,6 +25,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  id-token: write # claude-code-action mints an OIDC token to post review comments
 
 concurrency:
   group: claude-review-${{ github.event.pull_request.number }}
