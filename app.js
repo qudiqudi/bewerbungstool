@@ -8573,7 +8573,11 @@ function openImpressum(e) {
 function closeImpressum() {
   $("impressum-modal").classList.add("hidden");
 }
-$("link-impressum").addEventListener("click", openImpressum);
+// Der Footer-Impressum-Link zeigt jetzt auf die eigenstaendige impressum.html (Paddle braucht
+// erreichbare, verlinkte Rechts-URLs). Das Modal bleibt als Fallback erhalten; den Listener nur
+// binden, wenn der alte Trigger noch existiert (sonst kein Fehler beim Laden).
+const _linkImpressum = $("link-impressum");
+if (_linkImpressum) _linkImpressum.addEventListener("click", openImpressum);
 $("btn-impressum-close").addEventListener("click", closeImpressum);
 $("impressum-modal").addEventListener("click", (e) => {
   if (e.target === $("impressum-modal")) closeImpressum();
