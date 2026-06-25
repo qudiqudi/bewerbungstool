@@ -202,6 +202,7 @@
           <option value="beste" hidden disabled>Beste (Opus) – höchste Qualität</option>
         </select>
         <p id="tier-beste-hint" class="hint hidden"></p>
+        <p id="tier-free-hint" class="hint hidden"></p>
         <p class="hint">Im gehosteten Modus ist die Nutzung kostenlos (mit einem fairen Tageskontingent). Deine Eingaben werden zur Erstellung der Tests an unseren Dienst gesendet – Details im <a href="#" id="link-datenschutz-tier">Datenschutzhinweis</a>.</p>
       </div>
 
@@ -212,6 +213,9 @@
         <div id="account-loggedin" class="hidden">
           <div class="row wrap">
             <button id="btn-account-logout" type="button" class="ghost">Abmelden</button>
+          </div>
+          <div id="auto-credits-row" class="hidden">
+            <label><input type="checkbox" id="auto-use-credits"> Nach dem kostenlosen Tageskontingent automatisch Guthaben verwenden (ohne jedes Mal nachzufragen)</label>
           </div>
           <div id="topup" class="hidden">
             <p class="hint">Guthaben aufladen (für die beste Qualität, Opus):</p>
@@ -524,6 +528,18 @@
         <div class="row">
           <button id="btn-confirm-replace-learn" class="primary">Neuen Test starten</button>
           <button id="btn-confirm-replace-learn-cancel" class="ghost">Abbrechen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Overflow: Gratis-Tageskontingent aufgebraucht → Test gegen Guthaben (mit Bestätigung) -->
+    <div id="overflow-modal" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="overflow-title">
+      <div class="modal card">
+        <h2 id="overflow-title">Kostenloses Tageskontingent aufgebraucht</h2>
+        <p id="overflow-text"></p>
+        <div class="row">
+          <button id="btn-overflow-confirm" class="primary">Mit Guthaben erstellen</button>
+          <button id="btn-overflow-cancel" class="ghost">Abbrechen</button>
         </div>
       </div>
     </div>
