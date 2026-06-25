@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.9.0";
+const APP_VERSION = "1.9.1";
 
 const CHANGELOG = [
+  {
+    version: "1.9.1",
+    date: "25.06.2026",
+    items: [
+      "Fragenanzahl: In der günstigen Qualitätsstufe liegt die Obergrenze jetzt bei 15 Fragen, in den übrigen Stufen bei 20 (Standard bleibt 10). Die günstige Stufe liefert bei sehr vielen Fragen spürbar schwächer – mit der niedrigeren Grenze bleiben die Tests zuverlässig und schnell. Brauchst du mehr Fragen, erstelle einfach einen weiteren Fragebogen.",
+    ],
+  },
   {
     version: "1.9.0",
     date: "23.06.2026",
@@ -660,6 +667,9 @@ const views = ["view-login", "view-onboarding", "view-settings", "view-home", "v
 
 function showView(id) {
   views.forEach((v) => $(v).classList.toggle("hidden", v !== id));
+  // Eingabe-Bildschirm: Fragen-Stepper an die aktuelle Stufe anpassen (guenstig deckelt
+  // niedriger). Ein evtl. unter "standard" gesetzter hoeherer Wert wird heruntergeklemmt.
+  if (id === "view-input") { const ni = $("num-questions"); if (ni && ni.refreshMax) ni.refreshMax(); }
   syncHistory(id);
 }
 
@@ -3498,7 +3508,9 @@ async function generateQuiz(opts = {}) {
     showError("Bitte zuerst eine Stellenanzeige per URL laden oder den Text unter „Text einfügen“ einfügen.");
     return;
   }
-  const numQuestions = $("num-questions").value;
+  // Auf das Tier-Maximum klemmen (Sicherheitsnetz, falls der Stepper nach einem
+  // Stufenwechsel noch einen hoeheren Wert traegt): guenstig nie ueber NUM_MAX_GUENSTIG.
+  const numQuestions = clampNum(Number($("num-questions").value) || 10);
   mode = document.querySelector('input[name="mode"]:checked').value;
   let difficulty = document.querySelector('input[name="difficulty"]:checked').value;
   // Vertiefungsbogen: ohne Themenfeld kein Aufruf (Schutz auch hier im Einstieg,
@@ -6631,16 +6643,25 @@ function renderHome() {
 }
 
 // Gueltiger Fragenzahl-Bereich - identisch zum Stepper im Eingabe-Bildschirm
-// (#num-questions). Eine Stelle.
-const NUM_MIN = 4, NUM_MAX = 30;
+// (#num-questions). Eine Stelle. Die Obergrenze haengt an der Qualitaetsstufe:
+// die guenstige Stufe wird niedriger gedeckelt (NUM_MAX_GUENSTIG), weil das Modell
+// bei vielen Fragen einbricht (liefert zu wenige/teils fehlerhafte Fragen) und es
+// unnoetig Zeit/Kosten kostet. Standard/beste behalten die hoehere Grenze. Man kann
+// jederzeit einen weiteren Fragebogen erstellen.
+const NUM_MIN = 4, NUM_MAX = 20, NUM_MAX_GUENSTIG = 15;
+// Tier-abhaengige Obergrenze. settings.tier ist nur im Hosted-Modus gesetzt; BYOK/lokal
+// laufen unter dem "standard"-Default und bekommen damit die hoehere Grenze.
+function numMax() {
+  return settings && settings.tier === "guenstig" ? NUM_MAX_GUENSTIG : NUM_MAX;
+}
 
 // Test-Einstellungen defensiv lesen: aeltere Stellen haben kein lastTestConfig,
 // dann Standard (Lernmodus, mittel, 10 Fragen). Die gespeicherte Fragenzahl ist
 // die tatsaechlich erzeugte (quiz.fragen.length) und kann daneben liegen, wenn
-// ein Modell mehr/weniger Fragen liefert - auf den gueltigen Bereich (4-30)
+// ein Modell mehr/weniger Fragen liefert - auf den gueltigen Bereich (4-20, guenstig 4-15)
 // klemmen, damit Stepper und Eingabe-Bildschirm nicht auseinander laufen.
 function clampNum(n) {
-  return Math.min(NUM_MAX, Math.max(NUM_MIN, Math.round(n)));
+  return Math.min(numMax(), Math.max(NUM_MIN, Math.round(n)));
 }
 
 function normalizeTestConfig(c) {
@@ -6659,13 +6680,13 @@ function vertiefungMinFragen(count) {
 }
 
 // Fragen-Stepper fuer dynamisch erzeugte Panels (Subpage). Gleiche Optik und
-// gleiches Verhalten (Bereich 4-30) wie der statische Stepper im Eingabe-
+// gleiches Verhalten (Bereich 4-20 (guenstig 4-15)) wie der statische Stepper im Eingabe-
 // Bildschirm; onChange meldet jeden gueltigen Wert zurueck. opts.min hebt die
 // Untergrenze an (fuer die Vertiefung, deren Minimum mit der Feldauswahl
 // floatet); ohne opts bleibt es bei NUM_MIN. setMin(n) verschiebt die Grenze
 // live und zieht den Wert bei Bedarf hoch; getValue() liefert den Stand.
 function buildNumStepper(initial, onChange, opts = {}) {
-  const clampMin = (m) => Math.min(NUM_MAX, Math.max(NUM_MIN, Math.round(Number(m) || NUM_MIN)));
+  const clampMin = (m) => Math.min(numMax(), Math.max(NUM_MIN, Math.round(Number(m) || NUM_MIN)));
   let min = clampMin(opts.min);
   let value = Math.max(min, clampNum(Number(initial) || 10));
   const wrap = document.createElement("div");
@@ -6688,10 +6709,10 @@ function buildNumStepper(initial, onChange, opts = {}) {
   const render = () => {
     disp.textContent = String(value);
     dec.disabled = value <= min;
-    inc.disabled = value >= NUM_MAX;
+    inc.disabled = value >= numMax();
   };
   const setValue = (n, notify) => {
-    value = Math.min(NUM_MAX, Math.max(min, clampNum(n)));
+    value = Math.min(numMax(), Math.max(min, clampNum(n)));
     render();
     if (notify && onChange) onChange(value);
   };
@@ -6881,7 +6902,7 @@ function buildStartPanel(job) {
   diffWrap.appendChild(diffBtns);
   controls.appendChild(diffWrap);
 
-  // Anzahl Fragen (Stepper 4-30, ersetzt das frühere Dropdown)
+  // Anzahl Fragen (Stepper 4-20 / guenstig 4-15, ersetzt das frühere Dropdown)
   const numWrap = document.createElement("div");
   numWrap.className = "start-opt-row";
   const numLabel = document.createElement("span");
@@ -7185,7 +7206,7 @@ function startTestForJob(job, testMode, cfg) {
   const dEl = document.querySelector(`input[name="difficulty"][value="${cfg.difficulty}"]`);
   if (dEl) dEl.checked = true;
   const numInput = $("num-questions");
-  // Stepper setzt den Wert geklemmt (4-30) und zieht Anzeige/Buttons mit; aeltere
+  // Stepper setzt den Wert geklemmt (4-20, guenstig 4-15) und zieht Anzeige/Buttons mit; aeltere
   // Eintraege mit abweichendem cfg.num werden so defensiv in den Bereich gebracht.
   if (Number.isFinite(cfg.num)) {
     if (numInput.setValue) numInput.setValue(cfg.num);
@@ -8019,8 +8040,8 @@ $("tab-text").addEventListener("click", () => { setSourceTab("text"); saveDraft(
 
 // Fragen-Stepper: loest das fruehere <select id="num-questions"> ab. Gleiche id
 // und gleiche .value-Schnittstelle (Zahl als String), nur +/- statt Dropdown.
-// Keine Persistenz - wie zuvor ist der Standard bei jedem Laden 10. Der Bereich
-// 4-30 erhaelt die bisherige Obergrenze (vorheriger Dropdown ging bis 30).
+// Keine Persistenz - wie zuvor ist der Standard bei jedem Laden 10. Die Obergrenze
+// ist tier-abhaengig (numMax(): 20, guenstig 15); render() klemmt darauf.
 function initNumStepper() {
   const NUM_DEFAULT = 10;
   const input = $("num-questions");
@@ -8029,13 +8050,13 @@ function initNumStepper() {
   const inc = $("num-inc");
   if (!input || !display || !dec || !inc) return;
 
-  const clamp = (n) => Math.min(NUM_MAX, Math.max(NUM_MIN, n));
+  const clamp = (n) => Math.min(numMax(), Math.max(NUM_MIN, n));
   const render = () => {
     const n = clamp(Number(input.value) || NUM_DEFAULT);
     input.value = String(n);
     display.textContent = String(n);
     dec.disabled = n <= NUM_MIN;
-    inc.disabled = n >= NUM_MAX;
+    inc.disabled = n >= numMax();
   };
   const step = (delta) => {
     input.value = String(clamp((Number(input.value) || NUM_DEFAULT) + delta));
@@ -8044,6 +8065,10 @@ function initNumStepper() {
   // Erlaubt es anderen Stellen (z. B. "Weiter ueben"), den Wert programmatisch
   // zu setzen und die Anzeige/Buttons mitzuziehen.
   input.setValue = (n) => { input.value = String(n); render(); };
+  // Erlaubt es, die Obergrenze nach einem Stufenwechsel neu anzuwenden (render klemmt
+  // den Wert ueber numMax() auf das Tier-Maximum) - showView ruft das beim Anzeigen des
+  // Eingabe-Bildschirms auf, damit guenstig nie mehr als NUM_MAX_GUENSTIG zeigt.
+  input.refreshMax = render;
 
   dec.addEventListener("click", () => step(-1));
   inc.addEventListener("click", () => step(1));
