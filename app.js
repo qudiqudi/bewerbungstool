@@ -1732,10 +1732,24 @@ function clearAuthToken() {
 // zurueck (forward-kompatibel, kein eigener Preis-Hoheitsanspruch des Clients).
 // (Die user.id wird NICHT gecacht — die Paddle-Bindung laeuft serverseitig ueber den
 // signierten Checkout-Intent, nicht ueber ein client-geliefertes customData.user_id.)
-let creditsState = { credits: null, creditsEnabled: false, opusTestCredits: null, loaded: false, dirty: false };
+// freeRemaining = vom Server (/api/balance) gemeldete heute noch verfuegbaren GRATIS-Tests in
+// den Gratis-Stufen (Overflow-Signal); null = unbekannt/Server liefert es (noch) nicht.
+let creditsState = { credits: null, creditsEnabled: false, opusTestCredits: null, freeRemaining: null, loaded: false, dirty: false };
 
 function resetCreditsState() {
-  creditsState = { credits: null, creditsEnabled: false, opusTestCredits: null, loaded: false, dirty: false };
+  creditsState = { credits: null, creditsEnabled: false, opusTestCredits: null, freeRemaining: null, loaded: false, dirty: false };
+}
+
+// Festpreis je Test und Stufe (Credits). Forward-kompatible Fallback-Werte fuer den
+// Kostenhinweis VOR dem Server-402; massgeblich bleibt der Server (er liefert priceCredits im
+// 402 quota-exhausted-Body und bucht ohnehin selbst ab). beste nutzt den gemeldeten Server-Wert.
+const TIER_TEST_CREDITS = { standard: 25, guenstig: 5, beste: 60 };
+function tierPriceCredits(tier) {
+  if (tier === "beste") return requiredOpusCredits();
+  return Number.isFinite(TIER_TEST_CREDITS[tier]) ? TIER_TEST_CREDITS[tier] : 0;
+}
+function tierLabelFor(tier) {
+  return tier === "beste" ? "Beste (Opus)" : tier === "guenstig" ? "Günstig" : "Standard";
 }
 
 // 1 Credit = 0,01 €. Euro ist die Leitwaehrung in der UI (fuer Laien verstaendlich),
@@ -1856,14 +1870,49 @@ function updateTierHint() {
   }
 }
 
+// Hinweis fuer die Gratis-Stufen (standard/guenstig): wie viele kostenlose Tests heute noch
+// uebrig sind bzw. — wenn aufgebraucht — dass weitere Tests Guthaben kosten (Overflow). Nur
+// bei aktivem Flag und bekanntem freeRemaining; fuer "beste" zeigt updateTierHint den Opus-Preis.
+function updateFreeTierHint() {
+  const sel = $("tier");
+  const hint = $("tier-free-hint");
+  if (!hint) return;
+  const tier = sel ? sel.value : (settings.tier || "standard");
+  const remaining = creditsState.freeRemaining;
+  if (!creditsState.creditsEnabled || tier === "beste" || !Number.isFinite(remaining)) {
+    hint.classList.add("hidden"); hint.textContent = ""; return;
+  }
+  if (remaining > 0) {
+    hint.textContent = remaining === 1
+      ? "Heute noch 1 kostenloser Test in dieser Qualität."
+      : `Heute noch ${remaining} kostenlose Tests in dieser Qualität.`;
+  } else {
+    // euro aus einer Zahl formatiert (keine Nutzereingabe) → kein XSS.
+    const euro = formatGuthabenEuro(tierPriceCredits(tier));
+    hint.innerHTML = settings.autoUseCredits
+      ? `Dein kostenloses Tageskontingent ist aufgebraucht. Jeder weitere Test in dieser Qualität wird automatisch mit <strong>${euro}</strong> aus deinem Guthaben bezahlt.`
+      : `Dein kostenloses Tageskontingent ist aufgebraucht. Jeder weitere Test in dieser Qualität kostet <strong>${euro}</strong> aus deinem Guthaben (mit Bestätigung).`;
+  }
+  hint.classList.remove("hidden");
+}
+
 // Balance-Zeile + Tier-Optionen + Aufladen-Bereich aus dem aktuellen creditsState zeichnen.
 function renderCreditsUI() {
   renderBalanceLine();
   updateTierOptions();
+  updateFreeTierHint();
   // Aufladen nur, wenn Credits live sind (Flag an). Sichtbarkeit haengt zusaetzlich am
   // Login-Zustand (Block liegt in #account-loggedin).
   const topup = $("topup");
   if (topup) topup.classList.toggle("hidden", !creditsState.creditsEnabled);
+  // Opt-in "automatisch Guthaben verwenden": nur bei aktivem Flag sichtbar; Haken aus dem
+  // gespeicherten settings.autoUseCredits spiegeln.
+  const autoRow = $("auto-credits-row");
+  if (autoRow) {
+    autoRow.classList.toggle("hidden", !creditsState.creditsEnabled);
+    const cb = $("auto-use-credits");
+    if (cb) cb.checked = !!settings.autoUseCredits;
+  }
 }
 
 // Nach einer (moeglichen) Guthaben-Aenderung durch einen bezahlten Opus-Job: Cache als
@@ -1871,6 +1920,14 @@ function renderCreditsUI() {
 // fuer "beste" relevant; standard/guenstig sind gratis und beruehren das Guthaben nicht.
 function markCreditsDirtyIfPaid(tier) {
   if (tier === "beste") { creditsState.dirty = true; refreshBalance(); }
+}
+
+// Guthaben nach einem terminalen (asynchronen) Job nachziehen: Opus ueber markCreditsDirtyIfPaid,
+// ein per Guthaben bezahlter Gratis-Stufen-Overflow direkt — sonst bliebe nach einem serverseitigen
+// Refund eines fehlgeschlagenen standard/guenstig-Overflow-Jobs der angezeigte Stand veraltet.
+function refreshCreditsAfterJob(ctx) {
+  markCreditsDirtyIfPaid(ctx && ctx.tier);
+  if (ctx && ctx.paidOverflow) refreshBalance();
 }
 
 // --- Aufladen via Paddle (Phase B, P4) -----------------------------------
@@ -2042,17 +2099,19 @@ async function refreshBalance() {
         credits: Number.isFinite(d.credits) ? d.credits : null,
         creditsEnabled: d.creditsEnabled === true,
         opusTestCredits: Number.isFinite(d.opusTestCredits) ? d.opusTestCredits : null,
+        freeRemaining: Number.isFinite(d.freeRemaining) ? d.freeRemaining : null,
         loaded: true,
         dirty: false, // frisch bestaetigt
       };
     } else {
       // Kein frischer Stand bestaetigt (5xx/…) → den alten Geldstand NICHT als aktuell stehen
-      // lassen, sondern als unbekannt ausblenden (gerade nach einer Abbuchung/Kauf).
-      creditsState = { ...creditsState, credits: null };
+      // lassen, sondern als unbekannt ausblenden (gerade nach einer Abbuchung/Kauf). Auch
+      // freeRemaining leeren, sonst koennte der Hinweis ein veraltetes Gratis-Kontingent zeigen.
+      creditsState = { ...creditsState, credits: null, freeRemaining: null };
     }
   } catch {
     if (settings.authToken !== tok) return creditsState;
-    creditsState = { ...creditsState, credits: null }; // offline: Stand unbekannt, nicht stale zeigen
+    creditsState = { ...creditsState, credits: null, freeRemaining: null }; // offline: Stand unbekannt, nicht stale zeigen
   }
   renderCreditsUI();
   return creditsState;
@@ -2252,6 +2311,11 @@ async function getTurnstileToken(action, cData) {
 function hostedErrorMessage(status, code) {
   if (status === 402) {
     switch (code) {
+      case "quota-exhausted":
+        // Gratis-Tageskontingent aufgebraucht. Der Generierungs-Pfad (startHostedGeneration)
+        // faengt das ab und bietet den bezahlten Overflow per Dialog an; diese Meldung ist nur
+        // ein defensiver Fallback, falls der Code anderswo durchschlaegt.
+        return "Dein kostenloses Tageskontingent ist für heute aufgebraucht. Du kannst mit Guthaben weitermachen (in den Einstellungen aufladen) oder morgen kostenlos weiterüben.";
       case "no-credits":
         // Guthaben deckt den Opus-Test nicht (Aufladen-Dialog folgt in P4).
         return "Dein Guthaben reicht für die beste Qualität (Opus) nicht aus. Du kannst in den Einstellungen aufladen oder eine andere Qualitätsstufe wählen.";
@@ -3881,6 +3945,27 @@ function scheduleJobPoll(delayMs) {
   _jobPollTimer = setTimeout(pollActiveJob, delayMs);
 }
 
+// Sendet den Generierungs-Request an /api/jobs. payWithCredits=true nur fuer den bestaetigten
+// Gratis-Overflow (Gratis-Kontingent aufgebraucht). Der Body wird je Aufruf frisch gebaut und
+// der Turnstile-cData-Hash exakt daran gebunden — auch der Overflow-Retry braucht einen frischen
+// Token (Turnstile-Tokens sind Einmal-Tokens). Liefert die rohe Response.
+function postGenerationJob(ctx, tierSent, payWithCredits) {
+  const jobBody = JSON.stringify({
+    jobText: ctx.jobText,
+    numQuestions: ctx.numQuestions,
+    difficulty: ctx.difficulty,
+    vertiefung: ctx.vertiefung,
+    tier: tierSent,
+    ...(payWithCredits ? { payWithCredits: true } : {}),
+  });
+  return (async () => {
+    const token = await getTurnstileToken("generate-quiz", await sha256hex(jobBody));
+    const headers = { "Content-Type": "application/json", ...authHeaders() };
+    if (token) headers["CF-Turnstile-Token"] = token;
+    return fetch(hostedBase() + "/api/jobs", { method: "POST", headers, body: jobBody });
+  })();
+}
+
 // Startet einen serverseitigen Generierungsjob (Turnstile einmal beim Start) und kehrt
 // sofort zurueck; die Erstellung laeuft im Hintergrund (Worker-DO), tab-unabhaengig.
 async function startHostedGeneration(ctx) {
@@ -3899,28 +3984,46 @@ async function startHostedGeneration(ctx) {
   try {
     // Stufe einmal bestimmen und konsistent fuer Body UND Provenienz verwenden.
     const tierSent = effectiveTier();
-    // Body einmal bauen, damit der cData-Hash exakt die gesendeten Bytes abdeckt.
-    const jobBody = JSON.stringify({
-      jobText: ctx.jobText,
-      numQuestions: ctx.numQuestions,
-      difficulty: ctx.difficulty,
-      vertiefung: ctx.vertiefung,
-      tier: tierSent,
-    });
-    const token = await getTurnstileToken("generate-quiz", await sha256hex(jobBody));
-    const headers = { "Content-Type": "application/json", ...authHeaders() };
-    if (token) headers["CF-Turnstile-Token"] = token;
-    const res = await fetch(hostedBase() + "/api/jobs", {
-      method: "POST",
-      headers,
-      body: jobBody,
-    });
+    let paidOverflow = false; // wurde der Test per Gratis-Overflow (Kontingent aufgebraucht) bezahlt?
+    let res = await postGenerationJob(ctx, tierSent, false);
+    // 402 quota-exhausted = Gratis-Tageskontingent aufgebraucht. Erst NACH ausdruecklicher
+    // Bestaetigung erneut senden (payWithCredits:true) — keine unbeabsichtigten Kosten.
+    if (res.status === 402) {
+      const body = await res.json().catch(() => ({}));
+      if (body && body.error === "quota-exhausted") {
+        hideLoading();
+        const price = Number.isFinite(body.priceCredits) ? body.priceCredits : tierPriceCredits(tierSent);
+        const have = Number.isFinite(body.credits) ? body.credits
+          : (Number.isFinite(creditsState.credits) ? creditsState.credits : 0);
+        if (have < price) {
+          // Guthaben deckt keinen weiteren Test → Aufladen anbieten, NICHTS starten/abbuchen.
+          refreshBalance();
+          showError("Dein kostenloses Tageskontingent ist für heute aufgebraucht und dein Guthaben reicht für einen weiteren Test nicht aus. Du kannst in den Einstellungen aufladen.");
+          openTopupDialog();
+          return;
+        }
+        // Opt-in "automatisch Guthaben verwenden": der Nutzer hat dauerhaftes Einverstaendnis
+        // gegeben (Einstellung, Default aus) UND sieht den Kostenhinweis an der Stufe → kein
+        // Dialog. Sonst pro Test bestaetigen (keine unbeabsichtigten Kosten, CLAUDE.md).
+        const ok = settings.autoUseCredits ? true
+          : await openOverflowConfirm({ tier: body.tier || tierSent, priceCredits: price });
+        if (!ok) { refreshBalance(); return; } // abgebrochen → kein Test, kein Charge
+        showLoading("Test wird gestartet...");
+        res = await postGenerationJob(ctx, tierSent, true);
+        paidOverflow = true;
+      } else {
+        // Anderer 402 (z. B. no-credits bei Opus, tier-locked) → normale Fehlermeldung. Der Body
+        // wurde bereits gelesen, daher hier direkt mappen statt erneut hostedErrorCode(res).
+        markCreditsDirtyIfPaid(tierSent);
+        throw new Error(hostedErrorMessage(402, body && typeof body.error === "string" ? body.error : null));
+      }
+    }
     if (res.status === 401) { handleHostedUnauthorized(); throw new Error(LOGIN_REDIRECT); }
     if (!res.ok) {
-      // Bezahlter (Opus-)Request abgelehnt (z. B. 402, weil anderswo verbraucht oder Preisdrift):
-      // den Guthaben-Cache als veraltet markieren+auffrischen, statt weiter auf stale Credits zu
-      // vertrauen (sonst liefe der naechste Versuch wieder durch den Client-Gate ins Server-402).
+      // Request abgelehnt (z. B. Preisdrift/anderswo verbraucht): den Guthaben-Cache als
+      // veraltet markieren+auffrischen, statt weiter auf stale Credits zu vertrauen.
       markCreditsDirtyIfPaid(tierSent);
+      if (paidOverflow) refreshBalance(); // fehlgeschlagener Overflow → Stand neu holen
       throw new Error(hostedErrorMessage(res.status, await hostedErrorCode(res)));
     }
     const data = await res.json();
@@ -3935,11 +4038,18 @@ async function startHostedGeneration(ctx) {
         urlKey: ctx.urlKey, jobUrl: ctx.jobUrl, vertiefungFelder: ctx.vertiefungFelder,
         // Provenienz fuer Reports (Hosted-Pfad): Modell baut der Server -> model null.
         provider: "hosted", tier: tierSent, model: null,
+        // Gratis-Stufen-Overflow per Guthaben bezahlt? Dann auch bei spaeterem (asynchronem)
+        // Job-Fehler+Refund das Guthaben auffrischen — markCreditsDirtyIfPaid greift sonst nur
+        // fuer "beste". (additiv, alte Job-Eintraege ohne das Feld lesen defensiv als false.)
+        paidOverflow,
       },
     });
-    // Ein bezahlter (Opus-)Job hat das Guthaben veraendert → Cache als veraltet markieren und
-    // im Hintergrund auffrischen, damit Anzeige und naechste Opus-Pruefung stimmen.
+    // Guthaben/Gratis-Kontingent haben sich durch den Start veraendert: ein bezahlter Opus-
+    // ODER Overflow-Job hat Credits gekostet, ein Gratis-Job einen freien Test verbraucht.
+    // markCreditsDirtyIfPaid deckt den Opus-Fall (dirty + Refresh) ab; refreshBalance holt
+    // zusaetzlich freeRemaining (Gratis-Stufen) und das Guthaben nach dem Overflow nach.
     markCreditsDirtyIfPaid(tierSent);
+    if (paidOverflow || creditsState.creditsEnabled) refreshBalance();
     hideLoading();
     showView("view-home");
     renderActiveJobCard("pending");
@@ -4021,20 +4131,20 @@ async function pollActiveJob() {
     } catch { /* reines Komfort-Update: Fehler ignorieren, saveAttempt schreibt spaeter */ }
     renderActiveJobCard("ready");
     // Bezahlter Opus-Job fertig → Guthaben-Cache nachziehen (Anzeige + naechste Opus-Pruefung).
-    markCreditsDirtyIfPaid(job.ctx && job.ctx.tier);
+    refreshCreditsAfterJob(job.ctx);
   } else if (data.status === "done") {
     // Defensiv: "done" ohne Quiz ist ein Serverfehler — nicht endlos weiter pollen.
     clearActiveJob();
     renderActiveJobCard("error");
     showError(jobErrorMessage("unknown"));
     // Wie der error-Zweig: ein bezahlter Opus-Job kann rueckerstattet werden → Guthaben nachziehen.
-    markCreditsDirtyIfPaid(job.ctx && job.ctx.tier);
+    refreshCreditsAfterJob(job.ctx);
   } else if (data.status === "error") {
     clearActiveJob();
     renderActiveJobCard("error");
     showError(jobErrorMessage(data.code));
     // Fehlgeschlagener Opus-Job wird serverseitig ggf. rueckerstattet → Guthaben nachziehen.
-    markCreditsDirtyIfPaid(job.ctx && job.ctx.tier);
+    refreshCreditsAfterJob(job.ctx);
   } else {
     renderActiveJobCard("pending");
     scheduleJobPoll(3000);
@@ -7567,10 +7677,14 @@ async function renderAccountSection() {
         credits: Number.isFinite(d.credits) ? d.credits : null,
         creditsEnabled: d.creditsEnabled === true,
         opusTestCredits: Number.isFinite(d.opusTestCredits) ? d.opusTestCredits : null,
+        // /auth/me liefert freeRemaining (noch) nicht — defensiv lesen; den echten Stand holt
+        // refreshBalance() unten von /api/balance nach (nur wenn Credits live sind).
+        freeRemaining: Number.isFinite(d.freeRemaining) ? d.freeRemaining : null,
         loaded: true,
         dirty: false,
       };
       renderCreditsUI();
+      if (creditsState.creditsEnabled) refreshBalance(); // freeRemaining (+ frisches Guthaben) holen
     }
   } catch { /* offline: optimistischer Zustand bleibt */ }
 }
@@ -7701,8 +7815,9 @@ $("provider").addEventListener("change", () => {
 
 $("model").addEventListener("change", updateModelDesc);
 
-// Kostenhinweis der Qualitaetsstufe bei Auswahl aktualisieren (z. B. „≈ 0,60 € pro Test“).
-$("tier").addEventListener("change", updateTierHint);
+// Kostenhinweis der Qualitaetsstufe bei Auswahl aktualisieren (z. B. „≈ 0,60 € pro Test“)
+// sowie den Gratis-Kontingent-/Overflow-Hinweis fuer die Gratis-Stufen.
+$("tier").addEventListener("change", () => { updateTierHint(); updateFreeTierHint(); });
 
 // Aufladen-Buttons (3/5/10 €) → Paddle-Checkout.
 document.querySelectorAll(".btn-topup").forEach((b) => {
@@ -7739,7 +7854,11 @@ $("btn-save-settings").addEventListener("click", () => {
   if (provider === "hosted") {
     // Hosted: nur Provider + Stufe setzen. Vorhandene BYOK-Felder (apiKey/baseUrl/
     // model) BLEIBEN als Fallback erhalten - nie verwerfen (Leitplanke).
-    settings = { ...settings, provider: "hosted", tier: $("tier").value || "standard" };
+    // autoUseCredits (Opt-in: Overflow ohne jedes Mal nachzufragen) additiv mitspeichern;
+    // der Haken existiert nur bei aktivem Credits-Flag, sonst bleibt der alte Wert erhalten.
+    const autoCb = $("auto-use-credits");
+    const autoUseCredits = creditsState.creditsEnabled && autoCb ? autoCb.checked : !!settings.autoUseCredits;
+    settings = { ...settings, provider: "hosted", tier: $("tier").value || "standard", autoUseCredits };
   } else {
     settings = {
       ...settings,
@@ -7832,6 +7951,10 @@ async function importData(text) {
     // Hosted-Calls bis zum naechsten Speichern scheitern liesse (defensiv lesen).
     const tierImp = typeof inc.tier === "string" ? inc.tier.trim() : "";
     if (tierImp === "standard" || tierImp === "guenstig" || tierImp === "beste") merged.tier = tierImp;
+    // autoUseCredits BEWUSST NICHT importieren: ein "automatisch Guthaben verwenden" darf nur
+    // durch ausdrueckliches lokales Anhaken aktiviert werden, nie still durch ein Backup-File
+    // (sonst koennte ein importiertes Backup unbemerkt Abbuchungen scharf schalten). Der lokale
+    // Wert aus {...cur} bleibt erhalten.
     settings = merged;
     saveSettings(settings);
     settingsImported = true;
@@ -8269,6 +8392,36 @@ $("btn-confirm-replace-learn").addEventListener("click", () => {
 });
 $("btn-confirm-replace-learn-cancel").addEventListener("click", closeConfirmReplaceLearn);
 
+// Rueckfrage vor dem bezahlten Overflow: ist das Gratis-Tageskontingent aufgebraucht, fragt
+// der Server mit 402 quota-exhausted zurueck. Erst NACH ausdruecklicher Bestaetigung sendet der
+// Client den Generierungs-Request erneut mit payWithCredits:true (keine unbeabsichtigten Kosten,
+// CLAUDE.md-Leitplanke). Promise-basiert: resolve(true)=erstellen, resolve(false)=abbrechen.
+let overflowConfirmResolve = null;
+let overflowConfirmReturnFocus = null;
+function openOverflowConfirm({ tier, priceCredits }) {
+  const euro = formatGuthabenEuro(Number.isFinite(priceCredits) ? priceCredits : tierPriceCredits(tier));
+  // euro/Label aus kontrollierten Werten (Zahl bzw. fester Stufenname) → kein XSS.
+  $("overflow-text").innerHTML =
+    `Dein kostenloses Tageskontingent für heute ist aufgebraucht. Diesen Test in Qualität ` +
+    `<strong>${tierLabelFor(tier)}</strong> für <strong>${euro}</strong> aus deinem Guthaben erstellen?`;
+  overflowConfirmReturnFocus = document.activeElement;
+  $("overflow-modal").classList.remove("hidden");
+  $("btn-overflow-confirm").focus();
+  return new Promise((resolve) => { overflowConfirmResolve = resolve; });
+}
+function closeOverflowConfirm(result) {
+  $("overflow-modal").classList.add("hidden");
+  const resolve = overflowConfirmResolve;
+  overflowConfirmResolve = null;
+  if (overflowConfirmReturnFocus && typeof overflowConfirmReturnFocus.focus === "function") {
+    overflowConfirmReturnFocus.focus();
+  }
+  overflowConfirmReturnFocus = null;
+  if (resolve) resolve(result);
+}
+$("btn-overflow-confirm").addEventListener("click", () => closeOverflowConfirm(true));
+$("btn-overflow-cancel").addEventListener("click", () => closeOverflowConfirm(false));
+
 // Rueckfrage vor dem Loeschen einer Stelle (ersetzt das blockierende native
 // confirm()). Merkt sich die betroffene Stelle und was nach dem Loeschen
 // neu gerendert wird; Fokus wird gesetzt und nach dem Schliessen zurueckgegeben.
@@ -8636,6 +8789,8 @@ const ESCAPE_CLOSERS = [
   ["impressum-modal", closeImpressum],
   ["confirm-eval-modal", cancelConfirmEval],
   ["confirm-replace-learn-modal", closeConfirmReplaceLearn],
+  ["overflow-modal", () => closeOverflowConfirm(false)], // Escape = abbrechen, Promise sauber aufloesen
+
   ["badge-modal", closeBadgeModal],
   ["confirm-delete-modal", closeConfirmDelete],
   ["report-modal", closeReportModal],
