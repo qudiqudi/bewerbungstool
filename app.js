@@ -6649,10 +6649,13 @@ function renderHome() {
 // unnoetig Zeit/Kosten kostet. Standard/beste behalten die hoehere Grenze. Man kann
 // jederzeit einen weiteren Fragebogen erstellen.
 const NUM_MIN = 4, NUM_MAX = 20, NUM_MAX_GUENSTIG = 15;
-// Tier-abhaengige Obergrenze. settings.tier ist nur im Hosted-Modus gesetzt; BYOK/lokal
-// laufen unter dem "standard"-Default und bekommen damit die hoehere Grenze.
+// Tier-abhaengige Obergrenze. Der guenstig-Deckel gilt NUR im Hosted-Modus: settings.tier
+// bleibt beim Wechsel auf BYOK/lokal als Altwert erhalten (wird nie geloescht), steuert dort
+// aber kein Modell — solche Nutzer wuerden sonst faelschlich auf 15 gedeckelt. Ohne Hosted
+// (oder ohne settings) greift die hoehere Standardgrenze.
 function numMax() {
-  return settings && settings.tier === "guenstig" ? NUM_MAX_GUENSTIG : NUM_MAX;
+  const hosted = settings && (settings.provider || "hosted") === "hosted";
+  return hosted && settings.tier === "guenstig" ? NUM_MAX_GUENSTIG : NUM_MAX;
 }
 
 // Test-Einstellungen defensiv lesen: aeltere Stellen haben kein lastTestConfig,
