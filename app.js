@@ -1902,6 +1902,14 @@ function markCreditsDirtyIfPaid(tier) {
   if (tier === "beste") { creditsState.dirty = true; refreshBalance(); }
 }
 
+// Guthaben nach einem terminalen (asynchronen) Job nachziehen: Opus ueber markCreditsDirtyIfPaid,
+// ein per Guthaben bezahlter Gratis-Stufen-Overflow direkt — sonst bliebe nach einem serverseitigen
+// Refund eines fehlgeschlagenen standard/guenstig-Overflow-Jobs der angezeigte Stand veraltet.
+function refreshCreditsAfterJob(ctx) {
+  markCreditsDirtyIfPaid(ctx && ctx.tier);
+  if (ctx && ctx.paidOverflow) refreshBalance();
+}
+
 // --- Aufladen via Paddle (Phase B, P4) -----------------------------------
 // Der client-side Token ist bewusst oeffentlich (kein Secret). Sandbox vs. Produktion wird
 // beim Go-Live umgestellt (paddleEnv) — prod-Token + prod-price-IDs dann hier eintragen.
@@ -2077,12 +2085,13 @@ async function refreshBalance() {
       };
     } else {
       // Kein frischer Stand bestaetigt (5xx/…) → den alten Geldstand NICHT als aktuell stehen
-      // lassen, sondern als unbekannt ausblenden (gerade nach einer Abbuchung/Kauf).
-      creditsState = { ...creditsState, credits: null };
+      // lassen, sondern als unbekannt ausblenden (gerade nach einer Abbuchung/Kauf). Auch
+      // freeRemaining leeren, sonst koennte der Hinweis ein veraltetes Gratis-Kontingent zeigen.
+      creditsState = { ...creditsState, credits: null, freeRemaining: null };
     }
   } catch {
     if (settings.authToken !== tok) return creditsState;
-    creditsState = { ...creditsState, credits: null }; // offline: Stand unbekannt, nicht stale zeigen
+    creditsState = { ...creditsState, credits: null, freeRemaining: null }; // offline: Stand unbekannt, nicht stale zeigen
   }
   renderCreditsUI();
   return creditsState;
@@ -4003,6 +4012,10 @@ async function startHostedGeneration(ctx) {
         urlKey: ctx.urlKey, jobUrl: ctx.jobUrl, vertiefungFelder: ctx.vertiefungFelder,
         // Provenienz fuer Reports (Hosted-Pfad): Modell baut der Server -> model null.
         provider: "hosted", tier: tierSent, model: null,
+        // Gratis-Stufen-Overflow per Guthaben bezahlt? Dann auch bei spaeterem (asynchronem)
+        // Job-Fehler+Refund das Guthaben auffrischen — markCreditsDirtyIfPaid greift sonst nur
+        // fuer "beste". (additiv, alte Job-Eintraege ohne das Feld lesen defensiv als false.)
+        paidOverflow,
       },
     });
     // Guthaben/Gratis-Kontingent haben sich durch den Start veraendert: ein bezahlter Opus-
@@ -4092,20 +4105,20 @@ async function pollActiveJob() {
     } catch { /* reines Komfort-Update: Fehler ignorieren, saveAttempt schreibt spaeter */ }
     renderActiveJobCard("ready");
     // Bezahlter Opus-Job fertig → Guthaben-Cache nachziehen (Anzeige + naechste Opus-Pruefung).
-    markCreditsDirtyIfPaid(job.ctx && job.ctx.tier);
+    refreshCreditsAfterJob(job.ctx);
   } else if (data.status === "done") {
     // Defensiv: "done" ohne Quiz ist ein Serverfehler — nicht endlos weiter pollen.
     clearActiveJob();
     renderActiveJobCard("error");
     showError(jobErrorMessage("unknown"));
     // Wie der error-Zweig: ein bezahlter Opus-Job kann rueckerstattet werden → Guthaben nachziehen.
-    markCreditsDirtyIfPaid(job.ctx && job.ctx.tier);
+    refreshCreditsAfterJob(job.ctx);
   } else if (data.status === "error") {
     clearActiveJob();
     renderActiveJobCard("error");
     showError(jobErrorMessage(data.code));
     // Fehlgeschlagener Opus-Job wird serverseitig ggf. rueckerstattet → Guthaben nachziehen.
-    markCreditsDirtyIfPaid(job.ctx && job.ctx.tier);
+    refreshCreditsAfterJob(job.ctx);
   } else {
     renderActiveJobCard("pending");
     scheduleJobPoll(3000);
