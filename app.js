@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.9.1";
+const APP_VERSION = "1.10.0";
 
 const CHANGELOG = [
+  {
+    version: "1.10.0",
+    date: "26.06.2026",
+    items: [
+      "Neu: ein optionales Profil in den Einstellungen. Mit ein paar groben Angaben – Quereinstieg oder Fachwechsel, wie viel Berufserfahrung, Ausbildungsstand – passen die Fragen besser zu deiner Ausgangslage und treffen die typischen Knackpunkte deiner Bewerbung. Alles freiwillig, ohne persönliche Daten, und es bleibt in deinem Browser. Wirkt im gehosteten Modus.",
+    ],
+  },
   {
     version: "1.9.1",
     date: "25.06.2026",
@@ -571,6 +578,58 @@ function saveSettings(s) {
 }
 
 let settings = loadSettings();
+
+/* ---------- Profil (eigener Key, NICHT in settings) ---------- */
+// Nicht-identifizierendes, optionales Bewerber-Profil (Plan 2026, 3.1). Eigener
+// localStorage-Key, bewusst getrennt von settings (dort liegen provider/apiKey/model/
+// tier/authToken). Geschlossene Enums, defensiv gelesen: unbekannte/zukuenftige Werte
+// werden ignoriert, damit ein alter Client oder manipulierter Speicher nie freien Text
+// in den Prompt traegt. Wirkt im ersten Slice NUR im Hosted-Pfad (BYOK/local lesen es nicht).
+const PROFILE_KEY = "bewerbungstool.profile";
+const PROFILE_ENUMS = {
+  erfahrung: ["einsteiger", "berufserfahren", "senior"],
+  trajectory: ["fach", "quer", "aufstieg"],
+  ausbildung: ["keine_angabe", "schule", "ausbildung_laufend", "ausbildung_abgeschlossen",
+    "studium_laufend", "studium_abgeschlossen", "fortbildung", "umschulung_anerkennung"],
+};
+const PROFILE_BRANCHE_MAX = 80;
+
+// Validiert ein rohes Profil feldweise. Gibt immer ein Objekt (ggf. leer); ungueltige/
+// leere Felder werden weggelassen, nie uebernommen. Spiegelt validateProfile im Worker.
+function sanitizeProfile(raw) {
+  const out = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const k of ["erfahrung", "trajectory", "ausbildung"]) {
+    if (PROFILE_ENUMS[k].includes(raw[k])) out[k] = raw[k];
+  }
+  if (typeof raw.branche === "string") {
+    const b = raw.branche.trim().slice(0, PROFILE_BRANCHE_MAX);
+    if (b) out.branche = b;
+  }
+  return out;
+}
+function loadProfile() {
+  let raw;
+  try { raw = JSON.parse(localStorage.getItem(PROFILE_KEY)); } catch { raw = null; }
+  return sanitizeProfile(raw);
+}
+function saveProfile(p) {
+  const clean = sanitizeProfile(p);
+  try {
+    if (Object.keys(clean).length) localStorage.setItem(PROFILE_KEY, JSON.stringify(clean));
+    else localStorage.removeItem(PROFILE_KEY); // komplett leer → Key entfernen statt {}
+  } catch { /* voll/blockiert: Profil ist optional, kein harter Fehler */ }
+  profile = clean;
+  return clean;
+}
+// Payload fuer den Hosted-Request: das validierte Profil oder undefined (Feld dann
+// weggelassen → abwaertskompatibel, Worker sieht kein profile).
+function profilePayload() {
+  const p = loadProfile();
+  return Object.keys(p).length ? p : undefined;
+}
+
+let profile = loadProfile();
 
 /* ---------- Farbschema (Auto / Hell / Dunkel) ---------- */
 // Eigener, additiver Key - die Einstellungen (settings) bleiben unberuehrt.
@@ -3665,6 +3724,7 @@ async function generateQuiz(opts = {}) {
       vertiefung: vertiefung
         ? { felder: vertiefung.felder.map((f) => ({ label: f.label })), niveau: vertiefung.niveau || undefined }
         : undefined,
+      profile: profilePayload(), // optionales, validiertes Bewerber-Profil (nur Hosted)
     });
   }
 
@@ -3956,6 +4016,7 @@ function postGenerationJob(ctx, tierSent, payWithCredits) {
     difficulty: ctx.difficulty,
     vertiefung: ctx.vertiefung,
     tier: tierSent,
+    ...(ctx.profile ? { profile: ctx.profile } : {}), // nur senden, wenn gesetzt (abwaertskompatibel)
     ...(payWithCredits ? { payWithCredits: true } : {}),
   });
   return (async () => {
@@ -7632,6 +7693,11 @@ function initSettingsForm() {
   } else if ($("provider").value !== "hosted") {
     populateModelSelect($("provider").value, settings.model);
   }
+  // Profil (eigener Key) in die Auswahlfelder spiegeln; fehlende Felder → "" (Keine Angabe).
+  $("profile-trajectory").value = profile.trajectory || "";
+  $("profile-erfahrung").value = profile.erfahrung || "";
+  $("profile-ausbildung").value = profile.ausbildung || "";
+  $("profile-branche").value = profile.branche || "";
   $("account-msg").textContent = "";
   renderAccountSection();
 }
@@ -7870,6 +7936,13 @@ $("btn-save-settings").addEventListener("click", () => {
     if (provider === "local") settings.baseUrl = normalizeBaseUrl($("base-url").value);
   }
   saveSettings(settings);
+  // Profil unabhaengig von settings in seinem eigenen Key sichern (leere Auswahl → entfernt).
+  saveProfile({
+    trajectory: $("profile-trajectory").value,
+    erfahrung: $("profile-erfahrung").value,
+    ausbildung: $("profile-ausbildung").value,
+    branche: $("profile-branche").value,
+  });
   // Wurde aus einem Einrichtungs-Gate (Login/Onboarding) gespeichert und ist der
   // Anbieter jetzt nutzbar, in die App (Startliste) statt per History zurueck aufs
   // Gate - sonst landet man nach dem Einrichten wieder davor. Sonst ueber die
@@ -7895,6 +7968,7 @@ function exportData() {
     version: 1,
     exportedAt: new Date().toISOString(),
     settings: exportedSettings,
+    profile: loadProfile(), // nicht-identifizierendes Profil gehoert ins Backup (Plan 3.1)
     history: loadHistory(),
     reports: loadReports(),
   };
@@ -7919,8 +7993,20 @@ async function importData(text) {
   } catch {
     throw new Error("Die Datei ist kein gültiges JSON.");
   }
-  if (!data || typeof data !== "object" || (!data.settings && !data.history && !data.reports)) {
+  if (!data || typeof data !== "object" || (!data.settings && !data.history && !data.reports && !data.profile)) {
     throw new Error("Die Datei enthält keine erkennbaren Bewerbungstool-Daten.");
+  }
+
+  // Profil additiv und feldweise uebernehmen: gueltige importierte Werte ueberschreiben,
+  // leere/ungueltige werden ignoriert (sanitizeProfile). Nicht-destruktiv wie die uebrigen
+  // Importpfade — ein vorhandenes Feld bleibt, wenn der Import dafuer nichts Gueltiges liefert.
+  let profileImported = false;
+  if (data.profile && typeof data.profile === "object") {
+    const inc = sanitizeProfile(data.profile);
+    if (Object.keys(inc).length) {
+      saveProfile({ ...loadProfile(), ...inc });
+      profileImported = true;
+    }
   }
 
   let settingsImported = false;
@@ -8117,6 +8203,7 @@ async function importData(text) {
 
   const parts = [];
   if (settingsImported) parts.push("Einstellungen übernommen");
+  if (profileImported) parts.push("Profil übernommen");
   parts.push(
     (newJobs === 1 ? "1 neue Stelle" : newJobs + " neue Stellen") +
       ", " +

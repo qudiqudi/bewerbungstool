@@ -265,6 +265,37 @@
       </div>
       <p id="hint-local" class="hint hidden">Lokale Modelle laufen kostenlos auf deinem Rechner, sind aber meist kleiner als die Cloud-Modelle: Fragen und Bewertung können dadurch oberflächlicher ausfallen. Kleine Modelle neigen außerdem zu Halluzinationen – sie erfinden mitunter Angaben, die gar nicht in der Anzeige stehen (z.&nbsp;B. einen falschen Arbeitsort oder Arbeitgeber). Prüfe solche Angaben im Zweifel selbst. Für brauchbare Ergebnisse empfiehlt sich ein größeres Modell (ab ca. 8B, z.&nbsp;B. <code>llama3.1:8b</code> oder <code>qwen2.5:7b</code>).</p>
 
+      <hr class="settings-divider">
+      <label>Dein Profil <span class="hint" style="font-weight:normal">(optional)</span></label>
+      <p class="hint">Ein paar grobe Angaben zu dir – damit die Fragen besser zu deiner Ausgangslage passen (z.&nbsp;B. Quereinstieg statt Fachwechsel). Keine persönlichen Daten nötig, alles bleibt in deinem Browser. Wirkt aktuell nur im <strong>gehosteten Modus</strong>; bei eigenem Schlüssel oder lokalem Modell ändert es noch nichts.</p>
+      <label for="profile-trajectory">Worum geht es bei dieser Bewerbung?</label>
+      <select id="profile-trajectory">
+        <option value="">Keine Angabe</option>
+        <option value="fach">Fachlicher Wechsel in dieselbe Richtung</option>
+        <option value="quer">Quereinstieg / Branchenwechsel</option>
+        <option value="aufstieg">Aufstieg / mehr Verantwortung</option>
+      </select>
+      <label for="profile-erfahrung">Wie viel Berufserfahrung bringst du mit?</label>
+      <select id="profile-erfahrung">
+        <option value="">Keine Angabe</option>
+        <option value="einsteiger">Berufseinsteiger</option>
+        <option value="berufserfahren">Berufserfahren</option>
+        <option value="senior">Sehr erfahren (Senior)</option>
+      </select>
+      <label for="profile-ausbildung">Höchster Ausbildungsstand</label>
+      <select id="profile-ausbildung">
+        <option value="">Keine Angabe</option>
+        <option value="schule">Schule</option>
+        <option value="ausbildung_laufend">Ausbildung läuft</option>
+        <option value="ausbildung_abgeschlossen">Ausbildung abgeschlossen</option>
+        <option value="studium_laufend">Studium läuft</option>
+        <option value="studium_abgeschlossen">Studium abgeschlossen</option>
+        <option value="fortbildung">Meister · Techniker · Fachwirt · Zertifikat</option>
+        <option value="umschulung_anerkennung">Umschulung · ausländischer Abschluss in Anerkennung</option>
+      </select>
+      <label for="profile-branche">Branche / Bereich <span class="hint" style="font-weight:normal">(optional)</span></label>
+      <input type="text" id="profile-branche" maxlength="80" placeholder="z. B. Logistik, IT, Pflege" autocomplete="off">
+
       <div class="row">
         <button id="btn-save-settings" class="primary">Speichern</button>
         <button id="btn-cancel-settings" class="ghost">Abbrechen</button>
