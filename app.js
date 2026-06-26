@@ -1480,6 +1480,23 @@ function normalizeDruckpunkte(d) {
   return out.length ? out : null;
 }
 
+// Importiertes Druckpunkte-Wrapper aus einem Backup defensiv pruefen: NUR die plausible
+// Form { data: [...] } mit mindestens einem verwertbaren Eintrag uebernehmen, die data
+// ueber normalizeDruckpunkte saeubern (titellose/krumme Eintraege raus, hart gedeckelt).
+// Sonst undefined → das Feld wird nicht gesetzt. Schuetzt BEIDE Import-Pfade (neue Stelle
+// wie Merge) davor, dass ein praepariertes Backup beliebige/krumme druckpunkte persistiert.
+function sanitizeImportedDruckpunkte(impJob) {
+  const w = impJob && impJob.druckpunkte;
+  if (!w || typeof w !== "object" || !Array.isArray(w.data)) return undefined;
+  const data = normalizeDruckpunkte(w.data);
+  if (!data) return undefined;
+  return {
+    v: 1,
+    generatedAt: Number.isFinite(Number(w.generatedAt)) ? Number(w.generatedAt) : Date.now(),
+    data,
+  };
+}
+
 function normalizeQuizData(result, jobText = "") {
   if (!result || typeof result !== "object" || !Array.isArray(result.fragen)) {
     throw new Error("Die Modellantwort hatte nicht die erwartete Form (keine Fragenliste).");
@@ -8210,6 +8227,9 @@ async function importData(text) {
           ...impJob,
           attempts: incoming,
           kernpunkte: regroundImportedKernpunkte(impJob),
+          // Druckpunkte NICHT ungeprueft aus dem Spread uebernehmen: explizit auf die
+          // gesaeuberte Wrapper-Form (oder undefined) ueberschreiben, analog kernpunkte.
+          druckpunkte: sanitizeImportedDruckpunkte(impJob),
           ...(impIKey ? { identityKey: impIKey } : {}),
         });
         newJobs++;
@@ -8233,10 +8253,11 @@ async function importData(text) {
         if (rk) existing.kernpunkte = rk;
       }
       // Druckpunkte additiv aus dem Import nachtragen, falls lokal noch keine vorhanden
-      // sind. Defensiv: nur eine plausible Form (Wrapper mit data-Array) akzeptieren.
-      if (impJob.druckpunkte && typeof impJob.druckpunkte === "object" &&
-          Array.isArray(impJob.druckpunkte.data) && impJob.druckpunkte.data.length && !existing.druckpunkte) {
-        existing.druckpunkte = impJob.druckpunkte;
+      // sind. Dieselbe defensive Saeuberung wie auf dem Neu-Pfad (gepruefte Wrapper-Form,
+      // saubere data) - ein praepariertes Backup kann nichts Krummes unterschieben.
+      if (!existing.druckpunkte) {
+        const dpImp = sanitizeImportedDruckpunkte(impJob);
+        if (dpImp) existing.druckpunkte = dpImp;
       }
       // Vertiefungs-Themenfelder aus dem Import uebernehmen: fehlt lokal eins
       // oder ist das importierte neuer (generatedAt), das importierte behalten -
