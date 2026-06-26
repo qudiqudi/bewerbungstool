@@ -6656,7 +6656,10 @@ function dateInputToTs(v) {
   if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return null;
   const [y, m, d] = v.split("-").map(Number);
   const dt = new Date(y, m - 1, d); // lokale Mitternacht
-  return Number.isFinite(dt.getTime()) ? dt.getTime() : null;
+  // Unmoegliche Daten abweisen: new Date(2026, 1, 31) rollt auf Maerz weiter. Nur
+  // akzeptieren, wenn die Komponenten EXAKT zurueckkommen (kein stilles Verschieben).
+  if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return null;
+  return dt.getTime();
 }
 
 // Status/Termin einer Stelle persistieren (kleine, atomare Mutation ueber mutateHistory).
@@ -6666,12 +6669,17 @@ async function updateJobCockpit(job, patch) {
   if (!job || !job.key) return;
   await mutateHistory((h) => {
     const j = h.jobs.find((x) => x && x.key === job.key);
-    if (!j) return;
+    // Stelle nicht gefunden -> false: KEIN No-op-Write (sonst koennte saveHistory unter
+    // Quota-Druck die Bereinigung ausloesen, obwohl sich nichts geaendert hat).
+    if (!j) return false;
     if ("status" in patch) {
       if (isValidStatus(patch.status)) j.status = patch.status; else delete j.status;
     }
     if ("gespraechAm" in patch) {
-      if (patch.gespraechAm) j.gespraechAm = patch.gespraechAm; else delete j.gespraechAm;
+      const g = patch.gespraechAm;
+      // Nur ein echter positiver Zeitstempel wird persistiert (gleicher Vertrag wie
+      // jobGespraechAm) - kein negativer Wert/String/NaN landet im Job-Objekt.
+      if (typeof g === "number" && Number.isFinite(g) && g > 0) j.gespraechAm = g; else delete j.gespraechAm;
     }
   });
 }
