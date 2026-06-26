@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.13.0";
+const APP_VERSION = "1.14.0";
 
 const CHANGELOG = [
+  {
+    version: "1.14.0",
+    date: "26.06.2026",
+    items: [
+      "Neu: Du kannst beim Erstellen eines Tests eine Gesprächsstufe wählen – Telefoninterview, Fachgespräch, Assessment-Center oder Leitungsrunde. Der Test schneidet die Fragen dann auf genau diese Runde zu (z. B. breiteres Screening am Telefon, mehr Verhalten und Szenarien im Assessment-Center). Optional und im gehosteten Modus.",
+    ],
+  },
   {
     version: "1.13.0",
     date: "26.06.2026",
@@ -652,6 +659,16 @@ function saveProfile(p) {
 function profilePayload() {
   const p = loadProfile();
   return Object.keys(p).length ? p : undefined;
+}
+
+// Gespraechsstufe (Plan 2026, 3.6): per-Test gewaehlte Interviewrunde aus dem Auswahlfeld.
+// Geschlossenes Enum, defensiv gelesen - nur ein bekannter Wert wird gesendet, sonst
+// undefined (Feld weggelassen → abwaertskompatibel, nur Hosted nutzt es).
+const GESPRAECHSSTUFEN = ["telefon", "fachgespraech", "assessment", "leitung"];
+function gespraechsstufePayload() {
+  const el = document.getElementById("gespraechsstufe");
+  const v = el && typeof el.value === "string" ? el.value : "";
+  return GESPRAECHSSTUFEN.includes(v) ? v : undefined;
 }
 
 let profile = loadProfile();
@@ -3791,6 +3808,7 @@ async function generateQuiz(opts = {}) {
         ? { felder: vertiefung.felder.map((f) => ({ label: f.label })), niveau: vertiefung.niveau || undefined }
         : undefined,
       profile: profilePayload(), // optionales, validiertes Bewerber-Profil (nur Hosted)
+      gespraechsstufe: gespraechsstufePayload(), // optionale Interviewrunde (nur Hosted)
     });
   }
 
@@ -4083,6 +4101,7 @@ function postGenerationJob(ctx, tierSent, payWithCredits) {
     vertiefung: ctx.vertiefung,
     tier: tierSent,
     ...(ctx.profile ? { profile: ctx.profile } : {}), // nur senden, wenn gesetzt (abwaertskompatibel)
+    ...(ctx.gespraechsstufe ? { gespraechsstufe: ctx.gespraechsstufe } : {}), // nur senden, wenn gewaehlt
     ...(payWithCredits ? { payWithCredits: true } : {}),
   });
   return (async () => {
