@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.11.0";
+const APP_VERSION = "1.12.0";
 
 const CHANGELOG = [
+  {
+    version: "1.12.0",
+    date: "26.06.2026",
+    items: [
+      "Der Fortschritt einer Stelle zeigt jetzt, wie bereit du fürs nächste Gespräch bist – statt dich auf eine tägliche Übungsserie festzunageln. Die „Tage in Folge“-Anzeige und der damit verbundene Druck sind weg. Das Abzeichen fürs Dranbleiben gibt es jetzt schon, wenn du an drei verschiedenen Tagen geübt hast (egal ob am Stück) – niemand verliert dadurch ein bereits erreichtes Abzeichen.",
+    ],
+  },
   {
     version: "1.11.0",
     date: "26.06.2026",
@@ -5475,41 +5482,31 @@ function dayOrdinal(ts) {
   return Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
 }
 
-// Aktuelle (AKTIVE) und laengste Serie aufeinanderfolgender Uebungstage.
-// current ist die noch laufende Serie: 0, sobald der letzte Uebungstag aelter als
-// gestern ist (Serie unterbrochen). best (Rekord) bleibt davon unberuehrt - eine
-// frueher erreichte Serie zaehlt weiter als Bestwert/Abzeichen.
-function computeStreaks(attempts) {
-  const days = [...new Set(attempts.map((a) => dayOrdinal(a.date)))].sort((a, b) => a - b);
-  if (!days.length) return { current: 0, best: 0 };
-  let best = 1, run = 1;
-  for (let i = 1; i < days.length; i++) {
-    run = days[i] - days[i - 1] === 1 ? run + 1 : 1;
-    if (run > best) best = run;
-  }
-  let current = 1;
-  for (let i = days.length - 1; i > 0; i--) {
-    if (days[i] - days[i - 1] === 1) current++; else break;
-  }
-  // Nur eine noch aktive Serie zaehlt: ist der letzte Uebungstag aelter als gestern
-  // (Differenz > 1 zum heutigen Tag), ist die Serie gerissen -> current = 0.
-  if (dayOrdinal(Date.now()) - days[days.length - 1] > 1) current = 0;
-  return { current, best };
+// Momentum-Reframe (Plan 2026, 3.4): bewusst KEINE Tages-Serie mehr - kein
+// "heute-noch-ueben-sonst-reisst-die-Serie"-Druck (Streak-Schuldgefuehl raus).
+// Stattdessen nur die Zahl der VERSCHIEDENEN Uebungstage als neutrales Dranbleiben-
+// Signal: keine Strafe fuer Luecken, keine "aktive" Serie, die auf 0 faellt.
+// dayOrdinal mappt einen Zeitpunkt auf den lokalen Kalendertag.
+function distinctPracticeDays(attempts) {
+  return new Set((Array.isArray(attempts) ? attempts : [])
+    .filter(Boolean).map((a) => dayOrdinal(a.date))).size;
 }
 
 // Abzeichen-Katalog. test(s) entscheidet aus den aggregierten Werten einer
 // Stelle, ob das Abzeichen verdient ist.
 // Leistungs-Abzeichen (Score/Aufwärtstrend) zählen bewusst nur aus dem
 // Prüfungsmodus: im Lernmodus lässt sich durch Auflösen leicht ein hoher Wert
-// erreichen. Fleiß-Abzeichen (erster Test, Serie, Hartnäckigkeit) bleiben
-// modusunabhängig.
+// erreichen. Dranbleiben-Abzeichen (erster Test, mehrere Tage, Hartnäckigkeit)
+// bleiben modusunabhängig.
 const BADGES = [
   { id: "erster-test", label: "Erster Schritt", desc: "Ersten Test zu dieser Stelle gemacht", test: (s) => s.count >= 1 },
   { id: "bestanden", label: "Bestanden", desc: "Im Prüfungsmodus mindestens 50 % erreicht", test: (s) => s.bestExamPct >= 50 },
   { id: "souveraen", label: "Souverän", desc: "Im Prüfungsmodus mindestens 70 % erreicht", test: (s) => s.bestExamPct >= 70 },
   { id: "spitze", label: "Spitzenreiter", desc: "Im Prüfungsmodus mindestens 90 % erreicht", test: (s) => s.bestExamPct >= 90 },
   { id: "aufwaerts", label: "Aufwärtstrend", desc: "Im Prüfungsmodus vom ersten zum letzten Versuch verbessert", test: (s) => s.examImproved },
-  { id: "drei-serie", label: "Drei am Stück", desc: "An 3 Tagen in Folge geübt", test: (s) => s.bestStreak >= 3 },
+  // Reframe (Plan 3.4): nicht mehr "3 Tage IN FOLGE" (Serien-Druck), sondern an 3
+  // VERSCHIEDENEN Tagen geuebt. id bleibt stabil (kein Daten-/Migrationsbezug).
+  { id: "drei-serie", label: "Drangeblieben", desc: "An 3 verschiedenen Tagen geübt", test: (s) => s.daysPracticed >= 3 },
   { id: "hartnaeckig", label: "Hartnäckig", desc: "10 Versuche zu dieser Stelle", test: (s) => s.count >= 10 },
   { id: "ernstfall", label: "Ernstfall", desc: "Sich an eine echte Prüfung gewagt", test: (s) => s.examCount >= 1 },
 ];
@@ -5528,11 +5525,11 @@ function computeJobProgress(job) {
   const examPcts = examByDate.map(attemptXp);
   const bestExamPct = examPcts.length ? Math.max(...examPcts) : 0;
   const examImproved = examByDate.length >= 2 && attemptXp(examByDate[examByDate.length - 1]) > attemptXp(examByDate[0]);
-  const streak = computeStreaks(attempts);
+  const daysPracticed = distinctPracticeDays(attempts);
   const stats = {
     count: attempts.length, bestPct, improved,
     examCount: examByDate.length, bestExamPct, examImproved,
-    currentStreak: streak.current, bestStreak: streak.best,
+    daysPracticed,
   };
   const badges = BADGES.map((b) => ({ id: b.id, label: b.label, desc: b.desc, earned: !!b.test(stats) }));
   return {
@@ -5540,7 +5537,7 @@ function computeJobProgress(job) {
     xpInLevel: lvl.xpInLevel, xpForNext: lvl.xpForNext,
     progressPct: lvl.xpForNext ? Math.round((lvl.xpInLevel / lvl.xpForNext) * 100) : 0,
     bestPct, count: attempts.length,
-    currentStreak: streak.current, bestStreak: streak.best,
+    daysPracticed,
     badges, earnedCount: badges.filter((b) => b.earned).length,
   };
 }
@@ -5588,8 +5585,8 @@ const BADGE_ICONS = {
   "spitze": '<svg viewBox="0 0 48 48" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 9 H33 V17 a9 9 0 0 1 -18 0 Z"/><path d="M15 11 H10 a3.5 3.5 0 0 0 4.5 6.5"/><path d="M33 11 H38 a3.5 3.5 0 0 1 -4.5 6.5"/><path d="M24 26 V31"/><path d="M19 39 H29"/><path d="M20.5 39 L22 31 H26 L27.5 39"/></svg>',
   // Aufwärtstrend — Trendpfeil
   "aufwaerts": '<svg viewBox="0 0 48 48" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="10 32 19 23 26 29 38 15"/><polyline points="30 15 38 15 38 23"/></svg>',
-  // Drei am Stück — Flamme
-  "drei-serie": '<svg viewBox="0 0 48 48" aria-hidden="true" fill="currentColor"><path d="M25 7 c4 6 8 9 8 16 a9 9 0 0 1 -18 0 c0 -4 2 -7 4 -9 c0 3 1 5 3 6 c2 -4 -2 -8 3 -13 z"/></svg>',
+  // Drangeblieben — Kalender mit Haken (kein Flammen-/Serien-Motiv mehr)
+  "drei-serie": '<svg viewBox="0 0 48 48" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="12" width="30" height="28" rx="3"/><path d="M9 20 H39"/><path d="M17 8 V14"/><path d="M31 8 V14"/><polyline points="18 29 22 33 30 24"/></svg>',
   // Hartnäckig — Gipfel
   "hartnaeckig": '<svg viewBox="0 0 48 48" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 36 L19 15 L27 27 L32 19 L40 36 Z"/><path d="M15.5 21 L19 15 L22.5 21"/></svg>',
 };
@@ -5752,13 +5749,11 @@ function buildJobProgressPanel(progress, opts) {
   xpText.textContent = `${progress.xpInLevel} / ${progress.xpForNext} XP bis Level ${progress.level + 1}`;
   panel.appendChild(xpText);
 
+  // Kein Tages-Serien-Zaehler mehr (Plan 3.4, Streak-Schuldgefuehl raus) - nur der
+  // neutrale Abzeichen-Stand. Level/XP tragen die Readiness-Erzaehlung.
   const meta = document.createElement("p");
   meta.className = "hint gami-meta";
-  const parts = [];
-  if (progress.currentStreak >= 2) parts.push(`Serie: ${progress.currentStreak} Tage in Folge`);
-  if (progress.bestStreak >= 2) parts.push(`Beste Serie: ${progress.bestStreak} Tage`);
-  parts.push(`${progress.earnedCount} von ${progress.badges.length} Abzeichen`);
-  meta.textContent = parts.join(" · ");
+  meta.textContent = `${progress.earnedCount} von ${progress.badges.length} Abzeichen`;
   panel.appendChild(meta);
 
   panel.appendChild(buildBadges(progress, opts.highlightBadges));
@@ -5777,7 +5772,7 @@ function renderResultGami(job, opts) {
 
   const heading = document.createElement("h3");
   heading.className = "gami-heading";
-  heading.textContent = "Dein Fortschritt bei dieser Stelle";
+  heading.textContent = "So bereit bist du für diese Stelle";
   container.appendChild(heading);
   container.appendChild(buildJobProgressPanel(progress, opts));
 
@@ -6727,7 +6722,7 @@ function renderJobBlock(job, opts) {
   });
   block.appendChild(trend);
 
-  // Spielfortschritt dieser Stelle (Level, XP, Serie, Abzeichen)
+  // Spielfortschritt dieser Stelle (Level, XP, Abzeichen)
   block.appendChild(buildJobProgressPanel(computeJobProgress(job)));
 
   // Versuche, neueste zuerst
