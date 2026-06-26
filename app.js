@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.10.0";
+const APP_VERSION = "1.11.0";
 
 const CHANGELOG = [
+  {
+    version: "1.11.0",
+    date: "26.06.2026",
+    items: [
+      "Neu: „Womit du im Gespräch rechnen solltest“ – zu jeder Stelle zeigt das Tool jetzt die wahrscheinlichsten Knackpunkte deiner Bewerbung (z. B. die Glaubwürdigkeitslücke beim Quereinstieg) mit einem konkreten Übungsfokus. Abgeleitet aus der Anzeige und – falls hinterlegt – deinem Profil. Erscheint im gehosteten Modus nach dem ersten Test einer Stelle.",
+    ],
+  },
   {
     version: "1.10.0",
     date: "26.06.2026",
@@ -1451,6 +1458,28 @@ function regroundImportedKernpunkte(impJob) {
   };
 }
 
+// Druckpunkte (Plan 2026, 3.3): abgeleitete Knackpunkte aus Stelle x Profil. Defensiv
+// normalisieren — nur Eintraege mit Titel zaehlen, Felder getrimmt, hart gedeckelt. Gibt
+// null zurueck, wenn nichts Verwertbares da ist (Feld wird dann gar nicht gesetzt → das
+// Panel erscheint nicht, alte/BYOK-Quizze ohne das Feld bleiben unveraendert).
+const DRUCKPUNKTE_MAX = 6;
+function normalizeDruckpunkte(d) {
+  if (!Array.isArray(d)) return null;
+  const out = [];
+  for (const it of d) {
+    if (!it || typeof it !== "object") continue;
+    const titel = typeof it.titel === "string" ? it.titel.trim() : "";
+    if (!titel) continue; // ohne Titel kein Druckpunkt
+    out.push({
+      titel,
+      begruendung: typeof it.begruendung === "string" ? it.begruendung.trim() : "",
+      uebungsfokus: typeof it.uebungsfokus === "string" ? it.uebungsfokus.trim() : "",
+    });
+    if (out.length >= DRUCKPUNKTE_MAX) break;
+  }
+  return out.length ? out : null;
+}
+
 function normalizeQuizData(result, jobText = "") {
   if (!result || typeof result !== "object" || !Array.isArray(result.fragen)) {
     throw new Error("Die Modellantwort hatte nicht die erwartete Form (keine Fragenliste).");
@@ -1583,6 +1612,7 @@ function normalizeQuizData(result, jobText = "") {
   }
   const zeit = Math.round(Number(result.empfohlene_zeit_minuten));
   const kp = normalizeKernpunkte(result.kernpunkte, jobText);
+  const dp = normalizeDruckpunkte(result.druckpunkte);
   return {
     titel: typeof result.titel === "string" && result.titel.trim() ? result.titel.trim() : "Einstellungstest",
     arbeitgeber: typeof result.arbeitgeber === "string" ? result.arbeitgeber.trim() : "",
@@ -1591,6 +1621,7 @@ function normalizeQuizData(result, jobText = "") {
     fragen,
     // Nur setzen, wenn wirklich etwas extrahiert wurde (sonst Feld weglassen).
     ...(kp ? { kernpunkte: kp } : {}),
+    ...(dp ? { druckpunkte: dp } : {}),
   };
 }
 
@@ -6456,6 +6487,16 @@ async function saveAttempt(result, durationMs, evalCost, evalTokens) {
         dropKpCache(curKey);
       }
     }
+    // Druckpunkte (Plan 3.3) job-level auffrischen — wie kernpunkte nur fuer DIESE Anzeige
+    // (curKey === job.key) und nur bei normalen Tests (kein Vertiefungsbogen, s. Guard oben).
+    // Ein spaeterer Test ohne druckpunkte (BYOK/local) laesst bestehende unberuehrt.
+    if (Array.isArray(quiz.druckpunkte) && quiz.druckpunkte.length) {
+      let dKey = null;
+      try { dKey = jobKey(quiz.jobText); } catch { /* egal */ }
+      if (dKey && dKey === job.key) {
+        job.druckpunkte = { v: 1, generatedAt: Date.now(), data: quiz.druckpunkte };
+      }
+    }
   }
   // identityKey aus den aktuellen Feldern der Stelle ableiten (nicht aus dem
   // einzelnen Versuch), damit er zur Stelle passt und ältere, vor diesem Feld
@@ -6503,6 +6544,7 @@ async function saveAttempt(result, durationMs, evalCost, evalTokens) {
   delete quizCopy.jobUrl;  // liegt am Job
   delete quizCopy.vertiefungFelder; // liegt als attempt.vertiefung am Versuch
   delete quizCopy.kernpunkte; // liegt am Job (job.kernpunkte), nicht doppelt je Versuch
+  delete quizCopy.druckpunkte; // liegt am Job (job.druckpunkte), nicht doppelt je Versuch
 
   const attempt = {
     date: Date.now(),
@@ -7044,6 +7086,63 @@ function buildKernpunktePanel(job) {
   return panel;
 }
 
+// Druckpunkte-Panel (Plan 3.3): abgeleitete Knackpunkte fuers Gespraech. Strukturierte
+// Karten (Titel + Begruendung + Uebungsfokus), bewusst getrennt von den belegten
+// Kernpunkten. Quelle ist job.druckpunkte (job-level, beim Abschluss gesetzt). Fehlt das
+// Feld oder ist es leer -> null (nichts anzeigen); alte/BYOK-Stellen bleiben unveraendert.
+function buildDruckpunktePanel(job) {
+  const raw = job && job.druckpunkte && Array.isArray(job.druckpunkte.data) ? job.druckpunkte.data : null;
+  if (!raw || !raw.length) return null;
+  const items = raw
+    .filter((it) => it && typeof it === "object" && typeof it.titel === "string" && it.titel.trim())
+    .slice(0, DRUCKPUNKTE_MAX);
+  if (!items.length) return null;
+
+  const panel = document.createElement("div");
+  panel.className = "druckpunkte-panel";
+  const heading = document.createElement("h3");
+  heading.textContent = "Womit du im Gespräch rechnen solltest";
+  panel.appendChild(heading);
+
+  const hint = document.createElement("p");
+  hint.className = "druckpunkte-hint hint";
+  hint.textContent = "Wahrscheinliche Knackpunkte, abgeleitet aus der Anzeige und deinem Profil – kein Faktencheck, sondern Vorbereitung.";
+  panel.appendChild(hint);
+
+  const list = document.createElement("div");
+  list.className = "druckpunkte-list";
+  items.forEach((it) => {
+    const card = document.createElement("div");
+    card.className = "druckpunkte-card";
+    const title = document.createElement("div");
+    title.className = "druckpunkte-card-title";
+    title.textContent = it.titel.trim();
+    card.appendChild(title);
+
+    const beg = typeof it.begruendung === "string" ? it.begruendung.trim() : "";
+    if (beg) {
+      const p = document.createElement("p");
+      p.className = "druckpunkte-begruendung";
+      p.textContent = beg;
+      card.appendChild(p);
+    }
+    const fok = typeof it.uebungsfokus === "string" ? it.uebungsfokus.trim() : "";
+    if (fok) {
+      const p = document.createElement("p");
+      p.className = "druckpunkte-fokus";
+      const label = document.createElement("span");
+      label.className = "druckpunkte-fokus-label";
+      label.textContent = "Übungsfokus: ";
+      p.appendChild(label);
+      p.appendChild(document.createTextNode(fok));
+      card.appendChild(p);
+    }
+    list.appendChild(card);
+  });
+  panel.appendChild(list);
+  return panel;
+}
+
 // Start-Panel der Subpage: Schwierigkeit und Fragenzahl stehen direkt sichtbar
 // ueber zwei Startknoepfen (Lern-/Pruefungsmodus) - kein aufklappbarer Bereich
 // mehr. Generiert wird erst beim ausdruecklichen Klick auf einen Startknopf,
@@ -7348,6 +7447,9 @@ function renderJob(job) {
   // eingehaengt, Screen wie bisher.
   const kpPanel = buildKernpunktePanel(job);
   if (kpPanel) block.insertBefore(kpPanel, block.children[2] || null);
+  // Druckpunkte direkt unter die Kernpunkte (bzw. in deren Slot, wenn keine da sind).
+  const dpPanel = buildDruckpunktePanel(job);
+  if (dpPanel) block.insertBefore(dpPanel, kpPanel ? kpPanel.nextSibling : (block.children[2] || null));
   const wrap = $("job-detail");
   wrap.innerHTML = "";
   wrap.appendChild(block);
@@ -8129,6 +8231,12 @@ async function importData(text) {
       if (impJob.kernpunkte && !existing.kernpunkte) {
         const rk = regroundImportedKernpunkte(impJob);
         if (rk) existing.kernpunkte = rk;
+      }
+      // Druckpunkte additiv aus dem Import nachtragen, falls lokal noch keine vorhanden
+      // sind. Defensiv: nur eine plausible Form (Wrapper mit data-Array) akzeptieren.
+      if (impJob.druckpunkte && typeof impJob.druckpunkte === "object" &&
+          Array.isArray(impJob.druckpunkte.data) && impJob.druckpunkte.data.length && !existing.druckpunkte) {
+        existing.druckpunkte = impJob.druckpunkte;
       }
       // Vertiefungs-Themenfelder aus dem Import uebernehmen: fehlt lokal eins
       // oder ist das importierte neuer (generatedAt), das importierte behalten -
