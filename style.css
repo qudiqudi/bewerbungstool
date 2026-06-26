@@ -304,6 +304,10 @@ input:focus, select:focus, textarea:focus {
 
 .hint { font-size: 0.78rem; color: var(--muted); margin: 0.3rem 0 0; }
 
+/* Guthaben-Zeile: Euro prominent, Credits als ruhige Klammer (muted). */
+#account-balance { font-size: 0.95rem; margin: 0.3rem 0 0; }
+#account-balance .balance-credits { color: var(--muted); font-size: 0.85em; }
+
 .row {
   display: flex;
   gap: 0.6rem;

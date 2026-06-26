@@ -8,13 +8,33 @@
        angepasst werden; der CI-Check erzwingt das). connect-src listet die
        genutzten Dienste: KI-Anbieter und der Jina-Reader fuers URL-Laden. Die
        localhost-Eintraege erlauben den lokalen Anbieter (Ollama :11434, LM Studio
-       :1234 oder eine eigene Adresse). Neue externe Hosts muessen hier ergaenzt
-       werden, sonst blockt der Browser sie. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-AS03majGGAgYGEK0v1Hwe170PaXGMA1A1goCTG9ZANs=' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self' https://api.jobreif.de https://api.anthropic.com https://api.openai.com https://api.deepseek.com https://r.jina.ai https://challenges.cloudflare.com http://localhost:* http://127.0.0.1:*; frame-src https://challenges.cloudflare.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; object-src 'none'; form-action 'self'">
+       :1234 oder eine eigene Adresse). *.paddle.com erlaubt das Aufladen-Overlay
+       (Paddle.js-Skript, Checkout-iframe, dessen API/Assets). Neue externe Hosts
+       muessen hier ergaenzt werden, sonst blockt der Browser sie. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-AS03majGGAgYGEK0v1Hwe170PaXGMA1A1goCTG9ZANs=' https://challenges.cloudflare.com https://*.paddle.com; style-src 'self' 'unsafe-inline' https://*.paddle.com; img-src 'self' https://*.paddle.com; font-src 'self' https://*.paddle.com; connect-src 'self' https://api.jobreif.de https://api.anthropic.com https://api.openai.com https://api.deepseek.com https://r.jina.ai https://challenges.cloudflare.com https://*.paddle.com http://localhost:* http://127.0.0.1:*; frame-src https://challenges.cloudflare.com https://*.paddle.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; object-src 'none'; form-action 'self'">
   <meta name="theme-color" content="#c5543a" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#3a2a25" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#c5543a">
   <title>jobreif.de – Einstellungstest-Simulator</title>
+  <meta name="description" content="jobreif.de macht aus jeder Stellenanzeige einen simulierten Einstellungstest mit KI-Feedback. Übe gezielt für dein Vorstellungsgespräch – kostenlos und ohne Installation.">
+  <link rel="canonical" href="https://jobreif.de/">
+  <meta name="robots" content="index, follow">
+  <!-- Open Graph / Social-Preview (Teilen in Messengern, sozialen Netzen).
+       Absolute URLs, weil Crawler sie ohne Seitenkontext abrufen. -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="jobreif.de">
+  <meta property="og:locale" content="de_DE">
+  <meta property="og:url" content="https://jobreif.de/">
+  <meta property="og:title" content="jobreif.de – Einstellungstest-Simulator">
+  <meta property="og:description" content="Aus jeder Stellenanzeige ein simulierter Einstellungstest mit KI-Feedback. Übe gezielt für dein Vorstellungsgespräch – kostenlos und ohne Installation.">
+  <meta property="og:image" content="https://jobreif.de/assets/social-preview.png">
+  <meta property="og:image:alt" content="jobreif.de – Einstellungstest-Simulator">
+  <meta property="og:image:width" content="2560">
+  <meta property="og:image:height" content="1280">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="jobreif.de – Einstellungstest-Simulator">
+  <meta name="twitter:description" content="Aus jeder Stellenanzeige ein simulierter Einstellungstest mit KI-Feedback. Übe gezielt für dein Vorstellungsgespräch – kostenlos und ohne Installation.">
+  <meta name="twitter:image" content="https://jobreif.de/assets/social-preview.png">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="assets/icons/icon.svg" type="image/svg+xml">
   <link rel="icon" type="image/png" sizes="32x32" href="assets/icons/favicon-32.png">
@@ -33,6 +53,44 @@
        Explizites Rendern: app.js erzeugt/fuehrt das Widget bei Bedarf aus. Ohne
        gesetzten Sitekey passiert nichts (BYOK/lokal brauchen kein Turnstile). -->
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+  <!-- Strukturierte Daten (schema.org) fuer Google & Co. Ein reiner JSON-LD-
+       Datenblock, kein ausfuehrbares Skript - faellt daher nicht unter die
+       script-src-CSP oben. -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "jobreif.de",
+    "url": "https://jobreif.de/",
+    "description": "Macht aus jeder Stellenanzeige einen simulierten Einstellungstest mit KI-Feedback. Übe gezielt für dein Vorstellungsgespräch.",
+    "applicationCategory": "EducationalApplication",
+    "operatingSystem": "Web",
+    "inLanguage": "de",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "EUR"
+    },
+    "featureList": [
+      "Einstellungstest aus Stellenanzeige (Text einfügen oder URL-Import)",
+      "Multiple-Choice- und offene Fragen",
+      "KI-Auswertung mit Punkten, Feedback und Musterantworten",
+      "Lernmodus und Prüfungsmodus",
+      "Wählbare Schwierigkeit und Fragenanzahl",
+      "Auswertung druckbar bzw. als PDF speicherbar"
+    ],
+    "creator": {
+      "@type": "Organization",
+      "name": "jobreif.de",
+      "url": "https://jobreif.de/"
+    },
+    "publisher": {
+      "@type": "Organization",
+      "name": "jobreif.de",
+      "url": "https://jobreif.de/"
+    }
+  }
+  </script>
 </head>
 <body>
   <header>
@@ -141,16 +199,32 @@
         <select id="tier">
           <option value="standard">Standard – empfohlen</option>
           <option value="guenstig">Günstig – schneller und sparsamer</option>
+          <option value="beste" hidden disabled>Beste (Opus) – höchste Qualität</option>
         </select>
+        <p id="tier-beste-hint" class="hint hidden"></p>
+        <p id="tier-free-hint" class="hint hidden"></p>
         <p class="hint">Im gehosteten Modus ist die Nutzung kostenlos (mit einem fairen Tageskontingent). Deine Eingaben werden zur Erstellung der Tests an unseren Dienst gesendet – Details im <a href="#" id="link-datenschutz-tier">Datenschutzhinweis</a>.</p>
       </div>
 
       <div id="row-account" class="hidden">
         <label>Konto</label>
         <p id="account-status" class="hint">Nicht angemeldet.</p>
+        <p id="account-balance" class="hidden"></p>
         <div id="account-loggedin" class="hidden">
           <div class="row wrap">
             <button id="btn-account-logout" type="button" class="ghost">Abmelden</button>
+          </div>
+          <div id="auto-credits-row" class="hidden">
+            <label><input type="checkbox" id="auto-use-credits"> Nach dem kostenlosen Tageskontingent automatisch Guthaben verwenden (ohne jedes Mal nachzufragen)</label>
+          </div>
+          <div id="topup" class="hidden">
+            <p class="hint">Guthaben aufladen (für die beste Qualität, Opus):</p>
+            <div class="row wrap">
+              <button type="button" class="ghost btn-topup" data-eur="3">3 €</button>
+              <button type="button" class="ghost btn-topup" data-eur="5">5 €</button>
+              <button type="button" class="ghost btn-topup" data-eur="10">10 €</button>
+            </div>
+            <p id="topup-msg" class="hint" role="status"></p>
           </div>
         </div>
         <div id="account-loggedout" class="hidden">
@@ -454,6 +528,18 @@
         <div class="row">
           <button id="btn-confirm-replace-learn" class="primary">Neuen Test starten</button>
           <button id="btn-confirm-replace-learn-cancel" class="ghost">Abbrechen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Overflow: Gratis-Tageskontingent aufgebraucht → Test gegen Guthaben (mit Bestätigung) -->
+    <div id="overflow-modal" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="overflow-title">
+      <div class="modal card">
+        <h2 id="overflow-title">Kostenloses Tageskontingent aufgebraucht</h2>
+        <p id="overflow-text"></p>
+        <div class="row">
+          <button id="btn-overflow-confirm" class="primary">Mit Guthaben erstellen</button>
+          <button id="btn-overflow-cancel" class="ghost">Abbrechen</button>
         </div>
       </div>
     </div>
