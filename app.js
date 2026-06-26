@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.12.0";
+const APP_VERSION = "1.13.0";
 
 const CHANGELOG = [
+  {
+    version: "1.13.0",
+    date: "26.06.2026",
+    items: [
+      "Deine Stellen werden zur Bewerbungs-Übersicht: Du kannst pro Stelle einen Status setzen (Verfolgt, Beworben, Gespräch, Zusage, Absage) und einen Gesprächstermin hinterlegen. Beides erscheint als kleine Markierung in „Meine Stellen“, ein anstehender Termin wird hervorgehoben – so behältst du den Überblick über deine ganze Suche. Alles optional und nur in deinem Browser.",
+    ],
+  },
   {
     version: "1.12.0",
     date: "26.06.2026",
@@ -6614,6 +6621,152 @@ function jobSubtitle(job) {
   return parts.join(" · ");
 }
 
+/* ---------- Bewerbungs-Cockpit (Plan 2026, 3.5) ---------- */
+// Optionaler Bewerbungs-Status + Gespraechstermin pro Stelle - macht die Stellenliste
+// zur Pipeline (Schaltzentrale der ganzen Suche). Neue OPTIONALE Job-Felder
+// (job.status, job.gespraechAm), defensiv gelesen; alte Stellen ohne die Felder bleiben
+// unveraendert. Reiner Client, keine neuen Storage-Keys (liegt am bestehenden Job-Objekt).
+const JOB_STATUS = [
+  { key: "verfolgt", label: "Verfolgt", cls: "st-verfolgt" },
+  { key: "beworben", label: "Beworben", cls: "st-beworben" },
+  { key: "gespraech", label: "Gespräch", cls: "st-gespraech" },
+  { key: "zusage", label: "Zusage", cls: "st-zusage" },
+  { key: "absage", label: "Absage", cls: "st-absage" },
+];
+const JOB_STATUS_DEFAULT = "verfolgt";
+const JOB_STATUS_BY_KEY = Object.fromEntries(JOB_STATUS.map((s) => [s.key, s]));
+function isValidStatus(k) { return typeof k === "string" && !!JOB_STATUS_BY_KEY[k]; }
+// Der EXPLIZIT gesetzte Status einer Stelle oder null (nicht gesetzt). Anzeige zeigt nur
+// bei gesetztem Status einen Chip - so bleibt die Liste fuer reine Uebungs-Stellen ruhig.
+function storedStatus(job) { return (job && isValidStatus(job.status)) ? job.status : null; }
+// Gespraechstermin (ms) defensiv: nur ein echter positiver Zeitstempel, sonst null.
+function jobGespraechAm(job) {
+  const t = job && job.gespraechAm;
+  return (typeof t === "number" && Number.isFinite(t) && t > 0) ? t : null;
+}
+// Datum ohne Uhrzeit (Termin); <input type="date"> braucht YYYY-MM-DD in LOKALER Zeit.
+function formatDay(ts) {
+  return new Date(ts).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+function toDateInputValue(ts) {
+  const d = new Date(ts), p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+function dateInputToTs(v) {
+  if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return null;
+  const [y, m, d] = v.split("-").map(Number);
+  const dt = new Date(y, m - 1, d); // lokale Mitternacht
+  // Unmoegliche Daten abweisen: new Date(2026, 1, 31) rollt auf Maerz weiter. Nur
+  // akzeptieren, wenn die Komponenten EXAKT zurueckkommen (kein stilles Verschieben).
+  if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return null;
+  return dt.getTime();
+}
+
+// Status/Termin einer Stelle persistieren (kleine, atomare Mutation ueber mutateHistory).
+// Findet die Stelle ueber den stabilen key. patch.status: gueltiger Wert wird gesetzt,
+// sonst Feld geloescht. patch.gespraechAm: positive Zahl setzt, falsy loescht (Termin weg).
+async function updateJobCockpit(job, patch) {
+  if (!job || !job.key) return;
+  await mutateHistory((h) => {
+    const j = h.jobs.find((x) => x && x.key === job.key);
+    // Stelle nicht gefunden -> false: KEIN No-op-Write (sonst koennte saveHistory unter
+    // Quota-Druck die Bereinigung ausloesen, obwohl sich nichts geaendert hat).
+    if (!j) return false;
+    if ("status" in patch) {
+      if (isValidStatus(patch.status)) j.status = patch.status; else delete j.status;
+    }
+    if ("gespraechAm" in patch) {
+      const g = patch.gespraechAm;
+      // Nur ein echter positiver Zeitstempel wird persistiert (gleicher Vertrag wie
+      // jobGespraechAm) - kein negativer Wert/String/NaN landet im Job-Objekt.
+      if (typeof g === "number" && Number.isFinite(g) && g > 0) j.gespraechAm = g; else delete j.gespraechAm;
+    }
+  });
+}
+
+// Status-Chip fuer die Anzeige (Listen/Kopf). Nur bei explizit gesetztem Status.
+function buildStatusChip(job) {
+  const k = storedStatus(job);
+  if (!k) return null;
+  const s = JOB_STATUS_BY_KEY[k];
+  const chip = document.createElement("span");
+  chip.className = "status-chip " + s.cls;
+  chip.textContent = s.label;
+  return chip;
+}
+// Termin-Chip: "Gespräch am ..." (kuenftig hervorgehoben) bzw. "Gespräch war ..." (vorbei).
+function buildTerminChip(job) {
+  const t = jobGespraechAm(job);
+  if (!t) return null;
+  const upcoming = dayOrdinal(t) >= dayOrdinal(Date.now());
+  const chip = document.createElement("span");
+  chip.className = "termin-chip " + (upcoming ? "upcoming" : "past");
+  chip.textContent = (upcoming ? "Gespräch am " : "Gespräch war ") + formatDay(t);
+  return chip;
+}
+// Zeile aus Status- + Termin-Chip (oder null, wenn beide fehlen) - fuer Karten/Kopf.
+function buildCockpitChips(job) {
+  const chip = buildStatusChip(job), termin = buildTerminChip(job);
+  if (!chip && !termin) return null;
+  const row = document.createElement("div");
+  row.className = "cockpit-chips";
+  if (chip) row.appendChild(chip);
+  if (termin) row.appendChild(termin);
+  return row;
+}
+
+// Editor-Panel fuer die Stellen-Subpage: Status waehlen + Gespraechstermin setzen/loeschen.
+function buildCockpitPanel(job) {
+  const panel = document.createElement("div");
+  panel.className = "cockpit-panel";
+  const h = document.createElement("h3");
+  h.textContent = "Status & Termin";
+  panel.appendChild(h);
+
+  const row = document.createElement("div");
+  row.className = "cockpit-status-row";
+  const current = storedStatus(job) || JOB_STATUS_DEFAULT;
+  JOB_STATUS.forEach((s) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip status-pick " + s.cls + (s.key === current ? " active" : "");
+    b.textContent = s.label;
+    b.setAttribute("aria-pressed", s.key === current ? "true" : "false");
+    b.addEventListener("click", async () => {
+      // Aktiven Chip in der Reihe umschalten (kein Voll-Rerender -> kein Scroll-Sprung).
+      row.querySelectorAll(".status-pick").forEach((el) => {
+        const on = el === b;
+        el.classList.toggle("active", on);
+        el.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+      job.status = s.key; // lokales Objekt mitziehen (Karte beim Zurueck konsistent)
+      await updateJobCockpit(job, { status: s.key });
+    });
+    row.appendChild(b);
+  });
+  panel.appendChild(row);
+
+  const dateRow = document.createElement("div");
+  dateRow.className = "cockpit-date-row";
+  const label = document.createElement("label");
+  label.className = "cockpit-date-label";
+  label.textContent = "Gesprächstermin";
+  const input = document.createElement("input");
+  input.type = "date";
+  input.className = "cockpit-date";
+  const t = jobGespraechAm(job);
+  if (t) input.value = toDateInputValue(t);
+  input.addEventListener("change", async () => {
+    const ts = dateInputToTs(input.value);
+    if (ts) job.gespraechAm = ts; else delete job.gespraechAm;
+    await updateJobCockpit(job, { gespraechAm: ts });
+  });
+  label.appendChild(input);
+  dateRow.appendChild(label);
+  panel.appendChild(dateRow);
+  return panel;
+}
+
 // Eine Stelle samt aller Versuche aus der Historie entfernen. Identifikation
 // ueber den stabilen key (Hash des Stellentexts, liegt auf jedem gespeicherten
 // Eintrag), zusaetzlich der urlKey als Rueckfall. Eine Referenzgleichheit
@@ -6701,6 +6854,12 @@ function renderJobBlock(job, opts) {
   sub.className = "hint";
   sub.textContent = `${attempts.length} Versuch${attempts.length === 1 ? "" : "e"} · Bester: ${best} % · Letzter: ${last} %`;
   title.appendChild(sub);
+  // Cockpit-Chips (Status/Termin) im Listen-/Verlaufskopf. Auf der Subpage NICHT, dort
+  // traegt das Status&Termin-Panel diese Infos (sonst doppelt).
+  if (!subpage) {
+    const chips = buildCockpitChips(job);
+    if (chips) title.appendChild(chips);
+  }
   head.appendChild(title);
   const actions = document.createElement("div");
   actions.className = "job-head-actions";
@@ -6833,6 +6992,9 @@ function buildHomeCard(job) {
   meta.className = "hint";
   meta.textContent = `${attempts.length} Versuch${attempts.length === 1 ? "" : "e"} · Level ${prog.level}`;
   main.appendChild(meta);
+  // Cockpit-Chips (Status/Termin), falls gesetzt - macht die Liste zur Pipeline.
+  const chips = buildCockpitChips(job);
+  if (chips) main.appendChild(chips);
 
   const side = document.createElement("div");
   side.className = "home-card-side";
@@ -7458,18 +7620,17 @@ let activeJob = null;
 function renderJob(job) {
   activeJob = job;
   const block = renderJobBlock(job, { subpage: true });
-  // Start-Panel direkt unter den Kopf (vor den Trend) setzen, damit der Titel
-  // zuerst kommt und die Startknoepfe gleich darunter sichtbar sind.
-  block.insertBefore(buildStartPanel(job), block.children[1] || null);
-  // Kernpunkte-Panel direkt unter das Start-Panel (vor den Trend), wenn die
-  // Stelle welche traegt. Reihenfolge: Titel -> Startknoepfe -> Kernpunkte ->
-  // Fortschritt/Verlauf. Alte Stellen ohne kernpunkte liefern null -> nichts
-  // eingehaengt, Screen wie bisher.
+  // Reihenfolge (stabil ueber nextSibling, statt fragiler children[i]-Indizes):
+  // Titel -> Startknoepfe -> Status&Termin (Cockpit) -> Kernpunkte -> Druckpunkte
+  // -> Fortschritt/Verlauf. Alte Stellen ohne kernpunkte/druckpunkte liefern null.
+  const startPanel = buildStartPanel(job);
+  block.insertBefore(startPanel, block.children[1] || null);
+  const cockpitPanel = buildCockpitPanel(job);
+  block.insertBefore(cockpitPanel, startPanel.nextSibling);
   const kpPanel = buildKernpunktePanel(job);
-  if (kpPanel) block.insertBefore(kpPanel, block.children[2] || null);
-  // Druckpunkte direkt unter die Kernpunkte (bzw. in deren Slot, wenn keine da sind).
+  if (kpPanel) block.insertBefore(kpPanel, cockpitPanel.nextSibling);
   const dpPanel = buildDruckpunktePanel(job);
-  if (dpPanel) block.insertBefore(dpPanel, kpPanel ? kpPanel.nextSibling : (block.children[2] || null));
+  if (dpPanel) block.insertBefore(dpPanel, (kpPanel || cockpitPanel).nextSibling);
   const wrap = $("job-detail");
   wrap.innerHTML = "";
   wrap.appendChild(block);
@@ -8233,6 +8394,10 @@ async function importData(text) {
           // Druckpunkte NICHT ungeprueft aus dem Spread uebernehmen: explizit auf die
           // gesaeuberte Wrapper-Form (oder undefined) ueberschreiben, analog kernpunkte.
           druckpunkte: sanitizeImportedDruckpunkte(impJob),
+          // Cockpit-Felder (Status/Termin) ebenfalls explizit ueberschreiben statt roh aus
+          // dem Spread: nur gueltige Werte, sonst undefined (Feld faellt weg).
+          status: isValidStatus(impJob.status) ? impJob.status : undefined,
+          gespraechAm: jobGespraechAm(impJob) || undefined,
           ...(impIKey ? { identityKey: impIKey } : {}),
         });
         newJobs++;
@@ -8273,6 +8438,10 @@ async function importData(text) {
           existing.themenfelder = impTf;
         }
       }
+      // Cockpit-Felder additiv nachtragen, falls lokal noch nicht gesetzt (nicht-destruktiv,
+      // nur gueltige Werte) - ein praepariertes Backup kann nichts Krummes unterschieben.
+      if (!isValidStatus(existing.status) && isValidStatus(impJob.status)) existing.status = impJob.status;
+      if (!jobGespraechAm(existing)) { const g = jobGespraechAm(impJob); if (g) existing.gespraechAm = g; }
       const seen = new Set(existing.attempts.map((a) => a.date));
       incoming.forEach((a) => {
         if (!seen.has(a.date)) {

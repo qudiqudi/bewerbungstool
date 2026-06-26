@@ -1477,6 +1477,69 @@ button.danger:hover { background: var(--red-soft); border-color: var(--red); }
 }
 .druckpunkte-fokus-label { font-weight: 600; color: var(--text-strong); }
 
+/* Bewerbungs-Cockpit (Plan 3.5): Status-/Termin-Chips auf Karten + Editor-Panel auf der
+   Subpage. Farben aus der bestehenden Palette (soft-Hintergrund + kraeftiger Text). */
+.cockpit-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
+}
+.status-chip, .termin-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.74rem;
+  font-weight: 600;
+  line-height: 1;
+  padding: 0.28rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.status-chip.st-verfolgt { background: var(--card-2); color: var(--muted); border-color: var(--border); }
+.status-chip.st-beworben { background: var(--primary-soft); color: var(--primary-dark); border-color: var(--primary-soft-border); }
+.status-chip.st-gespraech { background: var(--orange-soft); color: var(--orange); }
+.status-chip.st-zusage { background: var(--green-soft); color: var(--green); }
+.status-chip.st-absage { background: var(--red-soft); color: var(--red); }
+.termin-chip.upcoming { background: var(--primary-soft); color: var(--primary-dark); border-color: var(--primary-soft-border); }
+.termin-chip.past { background: var(--card-2); color: var(--muted); border-color: var(--border); }
+
+/* Editor-Panel auf der Stellen-Subpage */
+.cockpit-panel { margin: 0.4rem 0 1rem; }
+.cockpit-panel > h3 {
+  font-family: var(--display);
+  font-size: 0.95rem;
+  margin: 0 0 0.5rem;
+  color: var(--text-strong);
+}
+.cockpit-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.7rem;
+}
+/* Status-Auswahl-Chips erben das vorhandene .chip-Verhalten; der aktive bekommt den
+   Primaer-Akzent. */
+.chip.status-pick { font-size: 0.82rem; }
+.chip.status-pick.active { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-dark); }
+.cockpit-date-row { display: flex; }
+.cockpit-date-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.cockpit-date {
+  font: inherit;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  max-width: 12rem;
+}
+
 /* Anzeigentext-Fenster: gespeicherten jobText scrollbar und mit erhaltenen
    Zeilenumbruechen zeigen. */
 .jobtext-modal { max-width: min(680px, 92vw); }
