@@ -1433,6 +1433,50 @@ button.danger:hover { background: var(--red-soft); border-color: var(--red); }
 }
 .kernpunkte-action:hover { border-color: var(--primary); color: var(--primary); }
 .kernpunkte-action:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* Druckpunkte-Panel (Plan 3.3): abgeleitete Knackpunkte fuers Gespraech. Strukturierte
+   Karten (Titel + Begruendung + Uebungsfokus), optisch verwandt mit den Kernpunkten, aber
+   einspaltig und mit eigenem Akzent, damit "abgeleitet" nicht mit "belegt" verwechselt wird. */
+.druckpunkte-panel { margin: 0 0 1rem; }
+.druckpunkte-panel > h3 {
+  font-family: var(--display);
+  font-size: 0.95rem;
+  margin: 0 0 0.4rem;
+  color: var(--text-strong);
+}
+.druckpunkte-hint { margin: 0 0 0.6rem; }
+.druckpunkte-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+.druckpunkte-card {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--primary);
+  border-radius: 12px;
+  background: var(--card-2);
+  padding: 0.7rem 0.85rem;
+}
+.druckpunkte-card-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text-strong);
+  margin-bottom: 0.3rem;
+}
+.druckpunkte-begruendung {
+  margin: 0 0 0.4rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--text);
+}
+.druckpunkte-fokus {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.druckpunkte-fokus-label { font-weight: 600; color: var(--text-strong); }
+
 /* Anzeigentext-Fenster: gespeicherten jobText scrollbar und mit erhaltenen
    Zeilenumbruechen zeigen. */
 .jobtext-modal { max-width: min(680px, 92vw); }
