@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.14.0";
+const APP_VERSION = "1.15.0";
 
 const CHANGELOG = [
+  {
+    version: "1.15.0",
+    date: "27.06.2026",
+    items: [
+      "Bei der Gesprächsstufe haben wir die Auswahl „Leitungsrunde“ vorerst entfernt – sie hat in der Praxis keine treffsicheren Fragen erzeugt. Telefoninterview, Fachgespräch und Assessment-Center bleiben und schneiden den Test zuverlässig auf die jeweilige Runde zu.",
+    ],
+  },
   {
     version: "1.14.0",
     date: "26.06.2026",
@@ -664,7 +671,10 @@ function profilePayload() {
 // Gespraechsstufe (Plan 2026, 3.6): per-Test gewaehlte Interviewrunde aus dem Auswahlfeld.
 // Geschlossenes Enum, defensiv gelesen - nur ein bekannter Wert wird gesendet, sonst
 // undefined (Feld weggelassen → abwaertskompatibel, nur Hosted nutzt es).
-const GESPRAECHSSTUFEN = ["telefon", "fachgespraech", "assessment", "leitung"];
+// "leitung" bewusst NICHT mehr angeboten: die Stufe lieferte in der Live-Validierung keine
+// treffsicheren Finalrunden-Fragen (Modell fiel auf operative Stellen-Pflichten zurueck).
+// Das Backend-Enum behaelt "leitung" (Abwaertskompat), der Client bietet/sendet es nicht mehr.
+const GESPRAECHSSTUFEN = ["telefon", "fachgespraech", "assessment"];
 function gespraechsstufePayload() {
   const el = document.getElementById("gespraechsstufe");
   const v = el && typeof el.value === "string" ? el.value : "";
