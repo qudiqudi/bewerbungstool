@@ -1,71 +1,71 @@
-![jobreif.de – Einstellungstest-Simulator](assets/social-preview.png)
+![jobreif.de – aptitude test simulator](assets/social-preview.png)
 
 # jobreif.de
 
-Eine PWA, die aus jeder Stellenbeschreibung einen interaktiven, simulierten Einstellungstest erstellt – mit KI-Auswertung. Sie läuft im Browser, ohne Build-Schritt, und ist offline-fähig. Erreichbar unter [jobreif.de](https://jobreif.de).
+A PWA that turns any job description into an interactive, simulated aptitude test – with AI-based evaluation. It runs in the browser, with no build step, and works offline. Available at [jobreif.de](https://jobreif.de).
 
-## Jetzt auch ohne eigenen API-Key
+## Now also without your own API key
 
-Mit E-Mail oder Google anmelden und sofort loslegen – ein begrenztes Kontingent ist kostenlos. Wer mehr braucht, schaltet per Abrechnung frei. Der bisherige Weg bleibt: eigener API-Key, der nur im Browser liegt.
+Sign in with email or Google and start right away – a limited quota is free. Paid top-ups for higher demand are coming soon. The original path remains: your own API key, kept only in the browser.
 
-## So funktioniert's
+## How it works
 
-1. Stellenbeschreibung einfügen oder per URL laden (über den Jina-Reader `r.jina.ai`)
-2. Das Tool erstellt per LLM einen Fragenkatalog – Multiple-Choice und offene Fragen
-3. Fragen werden interaktiv beantwortet – im Lern- oder Prüfungsmodus
-4. Auswertung mit Punkten pro Frage, Feedback, Musterantworten und Gesamteinschätzung
+1. Paste a job description or load it by URL (via the Jina reader `r.jina.ai`)
+2. The tool uses an LLM to generate a set of questions – multiple-choice and open-ended
+3. You answer the questions interactively – in learning or exam mode
+4. Evaluation with points per question, feedback, model answers and an overall assessment
 
-## Zwei Modi
+## Two modes
 
-- **Lernmodus**: Jede Frage lässt sich direkt auflösen – richtige Antwort markiert, Erklärung je Option, lernrelevanter Hintergrund und Quellen. Aufgelöste Fragen werden in der Auswertung vermerkt.
-- **Prüfungsmodus**: Läuft auf einen vom Modell geschätzten Timer. Nach Ablauf abgeben oder bewusst überziehen (wird vermerkt). Erklärungen und Quellen erst in der Endauswertung.
+- **Learning mode**: Every question can be revealed right away – correct answer marked, an explanation per option, relevant background and sources. Revealed questions are noted in the evaluation.
+- **Exam mode**: Runs against a timer estimated by the model. When time is up, submit or deliberately run over (this is noted). Explanations and sources appear only in the final evaluation.
 
-In beiden Modi zeigt die Auswertung die benötigte Zeit und lässt sich drucken bzw. als PDF speichern.
+In both modes the evaluation shows the time you needed and can be printed or saved as a PDF.
 
-## Schwierigkeit
+## Difficulty
 
-„Schwer" heißt: Fragen, wie sie im echten Auswahlverfahren am wahrscheinlichsten gestellt werden. Die Stufe steuert deren Anteil im Test (Leicht ~10 %, Mittel ~30 %, Schwer ~60 %). Die Fragenanzahl ist wählbar (4 bis 30, Standard 10).
+"Hard" means: questions most likely to come up in a real selection process. The level controls their share of the test (Easy ~10%, Medium ~30%, Hard ~60%). The number of questions is adjustable (4 to 30, default 10).
 
-## Historie
+## History
 
-Jede Auswertung wird lokal gespeichert, pro Stelle gruppiert. Der Verlauf zeigt Verbesserungen als Balken; jeder Versuch lässt sich wieder öffnen, im Lernmodus erneut durchgehen oder als neuer Test wiederholen. Aus den Versuchen ergeben sich Erfahrungspunkte, Stufen, eine Übungsserie und Abzeichen. Ab Stufe 3 einer Stelle kommen Vertiefungen dazu: thematisch fokussierte, schwere Fragebögen (nur mit Cloud-Anbieter).
+Every evaluation is stored locally, grouped per position. The history shows improvements as bars; each attempt can be reopened, run through again in learning mode, or repeated as a new test. Attempts earn experience points, levels, a practice streak and badges. From level 3 of a position onward, deep-dives are added: thematically focused, hard questionnaires (cloud provider only).
 
-## Zugang und Modelle
+## Access and models
 
-- **Gehostet**: Mit E-Mail oder Google anmelden, kostenlos starten. Bei höherem Bedarf wird per Abrechnung freigeschaltet – kein eigener Key nötig.
-- **Eigener API-Key**: Der Key liegt ausschließlich im `localStorage` und geht direkt an den Anbieter (CORS). Kein Server sieht ihn.
+- **Hosted**: Sign in with email or Google and start for free. Paid top-ups for higher demand are coming soon – no key of your own needed.
+- **Your own API key**: The key lives exclusively in `localStorage` and goes directly to the provider (CORS). No server ever sees it.
 
-Unterstützte Modelle:
+Supported models:
 
 - Claude (Anthropic): Opus 4.8, Fable 5, Sonnet 4.6
 - OpenAI: GPT-5.1, GPT-5, GPT-4.1
 - DeepSeek: V3, R1
 
-Bewusst auf leistungsstarke Modelle beschränkt – kleine Modelle erzeugen keine zuverlässig strukturierten Fragenkataloge und bewerten freie Antworten zu oberflächlich.
+Deliberately limited to capable models – small models do not produce reliably structured question sets and evaluate open answers too superficially.
 
-Alternativ läuft alles kostenlos und lokal über **Ollama** oder **LM Studio**. Statt eines API-Keys trägt man die Server-Adresse in den Einstellungen ein; der Server muss Cross-Origin-Anfragen erlauben (LM Studio „Enable CORS", Ollama `OLLAMA_ORIGINS`). Kleine lokale Modelle sind oberflächlicher als die Cloud-Modelle.
+Alternatively, everything runs for free and locally via **Ollama** or **LM Studio**. Instead of an API key, you enter the server address in the settings; the server must allow cross-origin requests (LM Studio "Enable CORS", Ollama `OLLAMA_ORIGINS`). Small local models are more superficial than the cloud models.
 
-## Daten sichern
+## Backing up data
 
-In den Einstellungen lassen sich alle Daten als `jobreif-backup-<datum>.json` exportieren und auf einem anderen Gerät importieren. Der Import ist nicht-destruktiv: Stellen und Versuche werden zusammengeführt, vorhandene Daten bleiben erhalten.
+In the settings you can export all data as `jobreif-backup-<date>.json` and import it on another device. The import is non-destructive: positions and attempts are merged, existing data is preserved.
 
-## Lokal ausführen und Deployment
+## Running locally and deployment
 
-Beliebigen statischen Server starten, kein Build-Schritt:
+Start any static server, no build step:
 
 ```
 $ python3 -m http.server 8000
 # → http://localhost:8000
 ```
 
-Zum Deployen genügt statisches Hosting (z. B. GitHub Pages). Der Service-Worker-Cache ist nur über HTTPS aktiv; lokal läuft die App auch ohne.
+For deployment, static hosting is enough (e.g. GitHub Pages). The service worker cache is only active over HTTPS; locally the app runs without it too.
 
 ## Changelog
 
-Die wichtigsten Neuerungen zeigt das „Was ist neu"-Fenster in der App; der vollständige Verlauf liegt in den [GitHub-Releases](https://github.com/qudiqudi/jobreif/releases).
+The most important changes are shown in the "What's new" window in the app; the full history lives in the [GitHub releases](https://github.com/qudiqudi/jobreif/releases).
 
-## Lizenz
+## License
 
 Copyright (C) 2026 qudiqudi
 
-Freie Software unter der GNU Affero General Public License, Version 3 (AGPL-3.0). Nutzung, Änderung und Weiterverbreitung sind erlaubt, auch als gehosteter Dienst, solange Änderungen unter derselben Lizenz als Quellcode verfügbar bleiben. Details in [LICENSE](LICENSE). Ohne jede Gewährleistung.
+Free software under the GNU Affero General Public License, version 3 (AGPL-3.0). Use, modification and redistribution are permitted, including as a hosted service, as long as changes remain available as source code under the same license. Details in [LICENSE](LICENSE). Without any warranty.
