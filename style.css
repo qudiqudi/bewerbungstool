@@ -683,6 +683,24 @@ button.ghost {
 .zr-field.zr-correct { border-color: var(--green); background: var(--green-soft); color: var(--text-strong); }
 .zr-field.zr-wrong { border-color: var(--red); background: var(--red-soft); color: var(--text-strong); }
 
+/* Konzentration (Plan 3.x): die zu durchsuchende Zeichenreihe als gut scannbarer Monospace-Block.
+   Grosszuegiges letter-/line-spacing, damit einzelne Zeichen sauber zaehlbar sind; bricht um. */
+.konz-material {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 1.2rem;
+  letter-spacing: 0.12em;
+  line-height: 1.9;
+  word-spacing: 0.15em;
+  overflow-wrap: anywhere;
+  margin: 0 0 0.7rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-soft, var(--card));
+  color: var(--text-strong);
+  user-select: none;
+}
+
 /* Spaced Repetition (Plan 3.8): Review-Karten. Nutzt .zr-field und .option wie im Quiz. */
 .sr-progress { margin: 0 0 0.6rem; }
 .sr-frage { font-family: var(--display); font-size: 1.05rem; color: var(--text-strong); margin: 0 0 0.9rem; }
