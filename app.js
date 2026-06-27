@@ -2001,8 +2001,14 @@ function appendFiguralQuestion(quiz) {
   if (Array.isArray(quiz.vertiefungFelder) && quiz.vertiefungFelder.length) return;
   if (quiz.fragen.some((f) => f && f.typ === "figural")) return;
   const pz = generateFiguralPuzzle();
+  // id robust aus dem Maximum der vorhandenen ids ableiten, NICHT aus fragen.length:
+  // normalizeQuizData vergibt ids nach Original-Index und laesst bei uebersprungenen
+  // (kaputten) Eintraegen Luecken - fragen.length+1 koennte dann eine bestehende id
+  // treffen, und der id-basierte Ergebnis-Merge (runEvaluation) wuerde Ergebnisse
+  // vermischen.
+  const maxId = quiz.fragen.reduce((m, f) => Math.max(m, Number(f && f.id) || 0), 0);
   quiz.fragen.push({
-    id: quiz.fragen.length + 1,
+    id: maxId + 1,
     typ: "figural",
     kategorie: "Logisches Denken",
     schwierigkeit: "mittel",
@@ -4342,8 +4348,11 @@ function finalizeQuiz(result, ctx) {
     timer.deadline = 0;
     $("quiz-timer").classList.add("hidden");
   }
-  setQuizNotice(ctx.isLocal && !ctx.localAborted && Number.isFinite(ctx.total) && quiz.fragen.length < ctx.total
-    ? `Das lokale Modell konnte nur ${quiz.fragen.length} von ${ctx.total} gewünschten Fragen erzeugen. Für mehr Fragen ein größeres Modell verwenden oder erneut starten.`
+  // Undercount-Hinweis gegen die ECHTE (nicht-figurale) Fragenzahl: die clientseitig
+  // angehaengte Figural-Aufgabe darf den "n von total"-Vergleich nicht verfaelschen.
+  const realQ = quiz.fragen.filter((f) => f && f.typ !== "figural").length;
+  setQuizNotice(ctx.isLocal && !ctx.localAborted && Number.isFinite(ctx.total) && realQ < ctx.total
+    ? `Das lokale Modell konnte nur ${realQ} von ${ctx.total} gewünschten Fragen erzeugen. Für mehr Fragen ein größeres Modell verwenden oder erneut starten.`
     : "");
   // Neuer Lerntest: als fortsetzbar markieren und sofort sichern; ein evtl. zuvor
   // offener Lerntest wird durch den neuen ersetzt. Pruefungsmodus ist nicht fortsetzbar.
@@ -6959,7 +6968,9 @@ async function saveAttempt(result, durationMs, evalCost, evalTokens) {
   job.lastTestConfig = {
     mode,
     difficulty: quiz.schwierigkeitsgrad || "",
-    num: quiz.fragen.length,
+    // Die clientseitig angehaengte Figural-Aufgabe NICHT mitzaehlen - sonst wuerde
+    // "Test wiederholen" die angeforderte Fragenzahl bei jedem Lauf um eins hochtreiben.
+    num: quiz.fragen.filter((f) => f && f.typ !== "figural").length,
   };
 
   // Vertiefung: die Themenfeld-Ableitung war ein eigener bezahlter Aufruf. Ihre
