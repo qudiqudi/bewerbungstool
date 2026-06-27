@@ -58,6 +58,16 @@ function validate(cat) {
   }
   if (typeof cat.updatedAt !== "string" || !DATE_RE.test(cat.updatedAt)) fail("updatedAt: YYYY-MM-DD erwartet");
 
+  // staticPages: handgepflegte Seiten (z. B. /lernen/), die NICHT vom Generator
+  // erzeugt werden, aber in der Sitemap stehen muessen (sonst fallen sie raus).
+  if (cat.staticPages != null) {
+    if (!Array.isArray(cat.staticPages)) fail("staticPages: Array erwartet");
+    else cat.staticPages.forEach((s, i) => {
+      if (!s || typeof s.loc !== "string" || !s.loc.startsWith("/")) fail(`staticPages[${i}].loc: muss mit "/" beginnen`);
+      if (typeof s.lastmod !== "string" || !DATE_RE.test(s.lastmod)) fail(`staticPages[${i}].lastmod: YYYY-MM-DD erwartet`);
+    });
+  }
+
   const types = cat.testTypes;
   if (!types || typeof types !== "object" || Array.isArray(types)) {
     fail("testTypes: Objekt {key: {label, description}} erwartet");
@@ -335,8 +345,12 @@ function renderHub(cat) {
 }
 
 function renderSitemap(cat) {
+  const staticPages = Array.isArray(cat.staticPages) ? cat.staticPages : [];
   const urls = [
     { loc: `${cat.baseUrl}/`, lastmod: cat.updatedAt },
+    // Handgepflegte Bestandsseiten (z. B. /lernen/) — duerfen beim Neuschreiben
+    // der Sitemap NICHT verloren gehen.
+    ...staticPages.map((s) => ({ loc: `${cat.baseUrl}${s.loc}`, lastmod: s.lastmod })),
     { loc: `${cat.baseUrl}/einstellungstest/`, lastmod: cat.updatedAt },
     ...cat.pages.map((p) => ({ loc: `${cat.baseUrl}/einstellungstest/${p.slug}/`, lastmod: p.lastmod })),
   ];
@@ -389,7 +403,9 @@ async function main() {
   }
   await writeFile(path.join(root, "sitemap.xml"), renderSitemap(cat), "utf8");
 
-  console.log(`SEO generiert: Hub + ${cat.pages.length} Beruf-Seite(n), sitemap.xml mit ${cat.pages.length + 2} URLs.`);
+  const staticCount = Array.isArray(cat.staticPages) ? cat.staticPages.length : 0;
+  const sitemapUrls = 1 /* root */ + staticCount + 1 /* hub */ + cat.pages.length;
+  console.log(`SEO generiert: Hub + ${cat.pages.length} Beruf-Seite(n), sitemap.xml mit ${sitemapUrls} URLs.`);
   if (removed.length) console.log(`Entfernt (nicht mehr im Katalog): ${removed.join(", ")}`);
 }
 
