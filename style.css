@@ -746,6 +746,11 @@ button.ghost {
 .sr-solution.no { color: var(--red); }
 .sr-lerninfo { margin: 0 0 0.9rem; }
 
+/* Uebungs-Hub-Picker (Plan 3.x): Modul-Knopf mit Label + kleiner Fortschrittszeile. */
+.ueb-pick { display: flex; flex-direction: column; align-items: flex-start; gap: 0.15rem; }
+.ueb-pick-label { font-weight: 600; }
+.ueb-pick-stat { font-size: 0.85rem; color: var(--muted, #6b5d57); }
+
 .option::before {
   content: "";
   width: 20px;
