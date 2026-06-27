@@ -8,3 +8,4 @@
 
 # Lokale Notizen / Pläne (nicht eingecheckt)
 .local/
+scripts/gsc-status.mjs

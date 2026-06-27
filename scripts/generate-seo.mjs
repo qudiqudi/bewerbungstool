@@ -29,6 +29,17 @@ const outDir = path.join(root, "einstellungstest");
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
+// Mapping testType -> vertiefende Lernseite (/lernen/). Verlinkt die Berufsseiten
+// mit den vorhandenen Modul-Erklaerseiten (interne Vernetzung + Discovery der
+// bislang schwach verlinkten /lernen/-Seiten). fachwissen hat keine Lernseite.
+const LERNEN = {
+  zahlenreihe: "/lernen/zahlenreihen.html",
+  sprachlogik: "/lernen/sprachlogik.html",
+  konzentration: "/lernen/konzentration.html",
+  figural: "/lernen/figuren-matrizen.html",
+};
+const MAX_RELATED = 6;
+
 // --- HTML/XML-Escaping (selbst, ohne Abhaengigkeit) -------------------------
 function esc(s) {
   return String(s)
@@ -142,8 +153,33 @@ function renderPage(p, cat) {
 
   const typeList = p.testTypes.map((t) => {
     const def = testTypes[t];
-    return `<li><strong>${esc(def.label)}</strong> — ${esc(def.description)}</li>`;
+    const label = LERNEN[t]
+      ? `<a href="${LERNEN[t]}"><strong>${esc(def.label)}</strong></a>`
+      : `<strong>${esc(def.label)}</strong>`;
+    return `<li>${label} — ${esc(def.description)}</li>`;
   }).join("\n        ");
+
+  // Vorbereitungs-Tipps (optional, beruf-spezifisch) — echter Zusatzinhalt.
+  const tipps = Array.isArray(p.tipps) ? p.tipps.filter((x) => typeof x === "string" && x.trim()) : [];
+  const tippsHtml = tipps.length
+    ? `<section class="block">
+        <h2>So bereitest du dich vor</h2>
+        <ul class="tipps">
+        ${tipps.map((x) => `<li>${esc(x)}</li>`).join("\n        ")}
+        </ul>
+      </section>`
+    : "";
+
+  // Verwandte Berufe (interne Vernetzung) — bis MAX_RELATED andere Katalogseiten.
+  const related = cat.pages.filter((q) => q.slug !== p.slug).slice(0, MAX_RELATED);
+  const relatedHtml = related.length
+    ? `<section class="block">
+        <h2>Einstellungstest für andere Berufe</h2>
+        <ul class="related">
+        ${related.map((q) => `<li><a href="/einstellungstest/${esc(q.slug)}/">Einstellungstest ${esc(q.beruf)}</a></li>`).join("\n        ")}
+        </ul>
+      </section>`
+    : "";
 
   const samplesHtml = samples.length
     ? `<section class="block">
@@ -203,6 +239,7 @@ function renderPage(p, cat) {
   <meta property="og:url" content="${url}">
   <meta property="og:title" content="${esc(p.title)}">
   <meta property="og:description" content="${esc(p.description)}">
+  <meta property="og:image" content="${baseUrl}/assets/social-preview.png">
   ${ldHtml}
   <style>
     :root{--primary:#c5543a;--primary-dark:#a8442e;--bg:#fbf7f2;--card:#fff;--text:#3a322e;--muted:#7a6f68;--border:#e7ddd3;--radius:14px}
@@ -221,6 +258,11 @@ function renderPage(p, cat) {
     .block{margin-top:8px}
     ul.types,ul.samples{list-style:none;padding:0;margin:0}
     ul.types li{padding:10px 0;border-bottom:1px solid var(--border)}
+    ul.tipps{margin:.4em 0;padding-left:1.2em}
+    ul.tipps li{padding:4px 0}
+    ul.related{list-style:none;padding:0;margin:8px 0}
+    ul.related li{padding:8px 0;border-bottom:1px solid var(--border)}
+    ul.related a{font-weight:600}
     .samples li.sample{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;margin:12px 0;box-shadow:0 2px 8px -5px rgba(80,50,40,.25)}
     .sample-type{display:inline-block;font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--primary-dark);background:#f6e7e1;border-radius:999px;padding:3px 10px;margin-bottom:8px}
     .sample-q{font-weight:600;margin:.2em 0}
@@ -257,9 +299,13 @@ function renderPage(p, cat) {
 
     ${samplesHtml}
 
+    ${tippsHtml}
+
     ${faqHtml}
 
     <a class="cta" href="${esc(ctaUrl)}">Test für ${esc(p.beruf)} starten →</a>
+
+    ${relatedHtml}
   </main>
   <footer>
     <p>jobreif.de macht aus jeder Stellenanzeige einen simulierten Einstellungstest mit KI-Feedback. Deine Daten bleiben in deinem Browser. <a href="/">Zur App</a></p>

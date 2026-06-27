@@ -53,6 +53,11 @@
           "answer": "Antwort – ein Client stellt eine Anfrage, der Server liefert die Antwort; analog Frage → Antwort."
         }
       ],
+      "tipps": [
+        "Frische dein Wissen zu Netzwerken (OSI-Modell, IP/Subnetze), Betriebssystemen und Hardware auf – das sind die häufigsten Fachthemen.",
+        "Übe Zahlenreihen und figurale Aufgaben unter Zeitdruck; im echten Test zählt Tempo genauso wie Korrektheit.",
+        "Lies die konkrete Stellenanzeige genau – Schwerpunkte wie Support, Servervirtualisierung oder IT-Security tauchen oft in den Fachfragen auf."
+      ],
       "faq": [
         { "q": "Was wird im Einstellungstest für Fachinformatiker Systemintegration geprüft?", "a": "Meist eine Mischung aus IT-Fachwissen (Netzwerke, Betriebssysteme, Hardware), logischem Denken (Zahlenreihen, Matrizen) und Sprachverständnis. jobreif bildet beides ab: stellenspezifische Fachfragen plus standardisierte Eignungstest-Module." },
         { "q": "Kostet das Üben etwas?", "a": "Nein. Du kannst kostenlos und ohne Anmeldung einen Test aus einer Stellenanzeige erstellen und direkt üben." },
@@ -80,6 +85,11 @@
           "answer": "5-mal."
         }
       ],
+      "tipps": [
+        "Wiederhole technische Grundlagen: Werkstoffkunde, Fertigungsverfahren (Drehen, Fräsen) sowie Mess- und Prüftechnik.",
+        "Trainiere Kopfrechnen und Dreisatz – technische Rechenaufgaben kommen fast immer vor.",
+        "Übe figurale und räumliche Aufgaben; sie prüfen das technische Vorstellungsvermögen, das im Beruf zählt."
+      ],
       "faq": [
         { "q": "Welche Aufgaben kommen im Einstellungstest für Industriemechaniker?", "a": "Typisch sind technisches und mathematisches Grundverständnis, räumliches Vorstellungsvermögen (figurale Aufgaben), Konzentrationsaufgaben und Fragen zum Berufsbild. jobreif deckt diese Module ab und ergänzt Fachfragen aus deiner Anzeige." },
         { "q": "Wie realistisch sind die Aufgaben?", "a": "Die Eignungstest-Module orientieren sich an gängigen Testformaten; die Fachfragen entstehen aus der konkreten Stellenanzeige – damit übst du nah am echten Auswahlverfahren." },
@@ -97,7 +107,7 @@
       "samples": [
         {
           "type": "zahlenreihe",
-          "question": "Ein Artikel kostet 80 €, im Schlussverkauf 25 % günstiger. Setze die Logik fort – welcher Preis bleibt?",
+          "question": "Ein Artikel kostet 80 €, im Schlussverkauf 25 % günstiger. Welcher Preis bleibt?",
           "options": ["55 €", "60 €", "65 €", "70 €"],
           "answer": "60 € – 25 % von 80 € sind 20 €, also 80 − 20 = 60 €."
         },
@@ -107,6 +117,11 @@
           "options": ["Lager", "Präsentation", "Kasse", "Preis"],
           "answer": "Präsentation – der Kunde erhält Beratung, die Ware wird präsentiert (beides die zugewandte Leistung)."
         }
+      ],
+      "tipps": [
+        "Sicheres Prozentrechnen und Dreisatz sind Pflicht – übe Rabatt, Skonto und Mehrwertsteuer im Kopf.",
+        "Bereite dich auf Fragen zu Kundenorientierung, Warenkunde und Kassensituationen vor.",
+        "Achte bei Konzentrationsaufgaben auf Genauigkeit – im Einzelhandel zählt Sorgfalt bei Preisen und Beständen."
       ],
       "faq": [
         { "q": "Was wird im Einstellungstest für Einzelhandelskaufleute gefragt?", "a": "Häufig kaufmännisches Rechnen (Prozente, Dreisatz), Sprachverständnis, Konzentration und Fragen zu Kundenorientierung und Warenkunde. jobreif bildet das mit Modulen plus Fachfragen aus deiner Anzeige ab." },
@@ -136,6 +151,11 @@
           "answer": "Rendite – für einen Kredit zahlt man Zins, fürs Sparen erhält man eine Rendite (jeweils der Ertrag)."
         }
       ],
+      "tipps": [
+        "Verschaffe dir einen Überblick über Wirtschaft und Finanzthemen: Zinsen, Konten, Zahlungsverkehr und aktuelle Nachrichten.",
+        "Übe Prozent- und Zinsrechnung sicher – das ist der mathematische Kern des Tests.",
+        "Trainiere Logik- und Sprachaufgaben; Banken legen Wert auf analytisches Denken und klare Kommunikation."
+      ],
       "faq": [
         { "q": "Welche Themen hat der Einstellungstest für Bankkaufleute?", "a": "Oft Allgemein- und Wirtschaftswissen, logisches Denken (Zahlenreihen, Matrizen), Sprachverständnis und Konzentration. jobreif deckt diese Module ab und ergänzt Fachfragen aus deiner Anzeige." },
         { "q": "Kann ich gezielt für eine bestimmte Bank üben?", "a": "Ja – füge die konkrete Stellenanzeige ein, dann leitet jobreif die Fachfragen genau daraus ab." },
@@ -163,9 +183,177 @@
           "answer": "Tasten – das Fieber misst man mit dem Thermometer, den Puls ertastet man (Methode der Messung)."
         }
       ],
+      "tipps": [
+        "Frische einfache Mathematik auf: Dosierungen, Dreisatz und Umrechnungen (z. B. ml/Tropfen) kommen häufig vor.",
+        "Bereite dich auf Fragen zu Motivation, Empathie und Teamarbeit vor – Soft Skills sind in der Pflege zentral.",
+        "Übe Konzentrationsaufgaben; im Pflegealltag ist sorgfältiges Arbeiten unter Zeitdruck entscheidend."
+      ],
       "faq": [
         { "q": "Was kommt im Einstellungstest für die Pflegeausbildung dran?", "a": "Häufig Allgemeinwissen und einfache Mathematik (z. B. Dosierung, Dreisatz), Konzentration, Sprachverständnis und Fragen zu Motivation und Berufsbild. jobreif bildet Module plus Fachfragen aus deiner Anzeige ab." },
         { "q": "Bereitet mich das auch aufs Gespräch vor?", "a": "Ja – du bekommst offene Fragen und KI-Feedback zu deinen Antworten, ideal für das Vorstellungsgespräch in Klinik oder Pflegeeinrichtung." },
+        { "q": "Muss ich etwas installieren?", "a": "Nein. jobreif läuft direkt im Browser auf Handy und Computer, ganz ohne Installation." }
+      ],
+      "lastmod": "2026-06-27"
+    },
+    {
+      "slug": "mechatroniker",
+      "beruf": "Mechatroniker",
+      "title": "Einstellungstest Mechatroniker üben",
+      "description": "Einstellungstest Mechatroniker kostenlos üben: technisches Verständnis, Zahlenreihen, Sprachlogik und figurale Aufgaben – plus Fachfragen aus echter Stellenanzeige mit KI-Feedback.",
+      "intro": "Bereite dich auf den Einstellungstest als Mechatroniker vor: Mechanik, Elektrotechnik und Steuerungstechnik treffen hier zusammen. jobreif erstellt aus einer echten Stellenanzeige einen passgenauen Test und ergänzt die typischen Eignungstest-Module.",
+      "testTypes": ["fachwissen", "zahlenreihe", "sprachlogik", "figural"],
+      "samples": [
+        {
+          "type": "zahlenreihe",
+          "question": "Setze die Reihe fort: 1, 2, 4, 7, 11, ?",
+          "options": ["14", "15", "16", "18"],
+          "answer": "16 – die Abstände wachsen um 1: +1, +2, +3, +4, +5."
+        },
+        {
+          "type": "sprachlogik",
+          "question": "Motor verhält sich zu Antrieb wie Sensor zu …?",
+          "options": ["Messung", "Strom", "Gehäuse", "Kabel"],
+          "answer": "Messung – ein Motor sorgt für Antrieb, ein Sensor für die Messung (jeweils die Funktion des Bauteils)."
+        }
+      ],
+      "tipps": [
+        "Wiederhole Grundlagen aus Mechanik, Elektrotechnik und Steuerungstechnik – Mechatronik verbindet alle drei.",
+        "Übe technisches Rechnen (Ohmsches Gesetz, Übersetzungen) und logische Zahlenreihen.",
+        "Räumliches Vorstellungsvermögen lohnt sich: figurale Aufgaben und technische Skizzen kommen oft vor."
+      ],
+      "faq": [
+        { "q": "Was wird im Einstellungstest für Mechatroniker geprüft?", "a": "Meist technisches Verständnis (Mechanik, Elektrotechnik, Steuerungstechnik), logisches Denken (Zahlenreihen, figurale Aufgaben) und Grundrechnen. jobreif bildet diese Module ab und ergänzt Fachfragen aus deiner Anzeige." },
+        { "q": "Wie kann ich gezielt üben?", "a": "Füge eine echte Stellenanzeige ein – dann leitet jobreif die Fachfragen genau daraus ab. Die Eignungsmodule übst du zusätzlich im Üben-Bereich." },
+        { "q": "Brauche ich eine Anmeldung?", "a": "Nein, das Üben ist kostenlos und ohne Anmeldung direkt im Browser möglich." }
+      ],
+      "lastmod": "2026-06-27"
+    },
+    {
+      "slug": "kfz-mechatroniker",
+      "beruf": "Kfz-Mechatroniker",
+      "title": "Einstellungstest Kfz-Mechatroniker üben",
+      "description": "Einstellungstest Kfz-Mechatroniker kostenlos üben: Kfz-Technik, Zahlenreihen, Konzentration und figurale Logik – plus Fachfragen aus echter Stellenanzeige mit KI-Feedback.",
+      "intro": "Übe den Einstellungstest als Kfz-Mechatroniker mit realistischen Aufgaben rund um Motor, Elektronik und Diagnose. jobreif macht aus einer Stellenanzeige einen passenden Test und ergänzt klassische Eignungstest-Module.",
+      "testTypes": ["fachwissen", "zahlenreihe", "konzentration", "figural"],
+      "samples": [
+        {
+          "type": "zahlenreihe",
+          "question": "Setze die Reihe fort: 2, 6, 18, 54, ?",
+          "options": ["108", "150", "162", "216"],
+          "answer": "162 – jede Zahl wird mit 3 multipliziert."
+        },
+        {
+          "type": "konzentration",
+          "question": "Wie oft kommt die Ziffer 8 in dieser Reihe vor?  8 3 8 1 8 8 2 9 8 4",
+          "answer": "5-mal."
+        }
+      ],
+      "tipps": [
+        "Frische Kfz-Grundlagen auf: Motor, Bremsen, Elektrik/Elektronik und Diagnose.",
+        "Übe Kopfrechnen und technisches Verständnis – etwa Übersetzungen, Drücke und einfache Formeln.",
+        "Konzentrations- und figurale Aufgaben trainieren die Genauigkeit, die bei der Fehlersuche zählt."
+      ],
+      "faq": [
+        { "q": "Was kommt im Einstellungstest für Kfz-Mechatroniker?", "a": "Häufig technisches Verständnis (Kfz-Technik, Elektronik), Zahlenreihen, Konzentration und räumliches Denken. jobreif deckt diese Module ab und ergänzt Fachfragen aus deiner Anzeige." },
+        { "q": "Kann ich für eine bestimmte Werkstatt oder Marke üben?", "a": "Ja – füge die konkrete Stellenanzeige ein, dann leitet jobreif die Fachfragen genau daraus ab." },
+        { "q": "Funktioniert das auf dem Handy?", "a": "Ja, jobreif läuft direkt im Browser auf Smartphone, Tablet und Desktop – ohne Installation." }
+      ],
+      "lastmod": "2026-06-27"
+    },
+    {
+      "slug": "industriekaufmann",
+      "beruf": "Industriekaufmann",
+      "title": "Einstellungstest Industriekaufmann üben",
+      "description": "Einstellungstest Industriekaufmann/-frau kostenlos üben: kaufmännisches Rechnen, Sprachlogik, Konzentration und Fachfragen aus echter Stellenanzeige – mit KI-Feedback.",
+      "intro": "Bereite dich auf den Einstellungstest als Industriekaufmann vor: kaufmännisches Rechnen, Wirtschaftsverständnis und Sprachgefühl. jobreif erzeugt aus einer Stellenanzeige einen passgenauen Test und ergänzt die üblichen Eignungstest-Aufgaben.",
+      "testTypes": ["fachwissen", "sprachlogik", "zahlenreihe", "konzentration"],
+      "samples": [
+        {
+          "type": "zahlenreihe",
+          "question": "Eine Rechnung über 250 € wird mit 2 % Skonto bezahlt. Wie viel wird überwiesen?",
+          "options": ["240 €", "245 €", "247 €", "248 €"],
+          "answer": "245 € – 2 % von 250 € sind 5 €, also 250 − 5 = 245 €."
+        },
+        {
+          "type": "sprachlogik",
+          "question": "Einkauf verhält sich zu Lieferant wie Verkauf zu …?",
+          "options": ["Kunde", "Lager", "Markt", "Preis"],
+          "answer": "Kunde – beim Einkauf ist der Lieferant der Partner, beim Verkauf der Kunde."
+        }
+      ],
+      "tipps": [
+        "Sicheres kaufmännisches Rechnen ist zentral: Prozent, Dreisatz, Skonto und Kalkulation.",
+        "Verschaffe dir einen Überblick über betriebliche Abläufe: Einkauf, Vertrieb, Lager und Buchhaltung.",
+        "Übe Sprachlogik und Textverständnis – Industriekaufleute kommunizieren viel schriftlich."
+      ],
+      "faq": [
+        { "q": "Was wird im Einstellungstest für Industriekaufleute geprüft?", "a": "Häufig kaufmännisches Rechnen, Wirtschafts- und Allgemeinwissen, Sprachverständnis und Konzentration. jobreif bildet diese Module ab und ergänzt Fachfragen aus deiner Anzeige." },
+        { "q": "Hilft das auch fürs Vorstellungsgespräch?", "a": "Ja – du bekommst offene Fragen und KI-Feedback zu deinen Antworten, ein gutes Training für das Gespräch." },
+        { "q": "Ist das kostenlos?", "a": "Das Üben ist kostenlos und ohne Anmeldung direkt im Browser möglich." }
+      ],
+      "lastmod": "2026-06-27"
+    },
+    {
+      "slug": "verwaltungsfachangestellte",
+      "beruf": "Verwaltungsfachangestellte",
+      "title": "Einstellungstest Verwaltungsfachangestellte üben",
+      "description": "Einstellungstest Verwaltungsfachangestellte/r kostenlos üben: Allgemeinwissen, Sprachlogik, Zahlenreihen und Konzentration – plus Fachfragen aus echter Stellenanzeige mit KI-Feedback.",
+      "intro": "Übe den Einstellungstest für Verwaltungsfachangestellte mit realistischen Aufgaben zu Allgemeinwissen, Sprache und Logik. jobreif macht aus einer Stellenanzeige einen passenden Test und ergänzt die typischen Eignungstest-Module.",
+      "testTypes": ["fachwissen", "sprachlogik", "zahlenreihe", "konzentration"],
+      "samples": [
+        {
+          "type": "sprachlogik",
+          "question": "Antrag verhält sich zu Bescheid wie Frage zu …?",
+          "options": ["Antwort", "Formular", "Akte", "Amt"],
+          "answer": "Antwort – auf einen Antrag folgt ein Bescheid, auf eine Frage eine Antwort (jeweils die Reaktion)."
+        },
+        {
+          "type": "zahlenreihe",
+          "question": "Setze die Reihe fort: 5, 10, 20, 40, ?",
+          "options": ["60", "70", "80", "100"],
+          "answer": "80 – jede Zahl ist das Doppelte der vorigen."
+        }
+      ],
+      "tipps": [
+        "Frische Allgemeinwissen und rechtlich-politisches Grundverständnis auf (Verwaltungsaufbau, Grundrechte).",
+        "Übe sorgfältiges Arbeiten mit Texten und Zahlen – Konzentrationsaufgaben sind typisch.",
+        "Trainiere klare Rechtschreibung und Grammatik; korrekte Sprache ist im Amt wichtig."
+      ],
+      "faq": [
+        { "q": "Was wird im Einstellungstest für Verwaltungsfachangestellte geprüft?", "a": "Häufig Allgemeinwissen, Sprachverständnis und Rechtschreibung, logisches Denken (Zahlenreihen) und Konzentration. jobreif bildet diese Module ab und ergänzt Fachfragen aus deiner Anzeige." },
+        { "q": "Kann ich für eine bestimmte Behörde üben?", "a": "Ja – füge die konkrete Stellenanzeige ein, dann leitet jobreif die Fachfragen genau daraus ab." },
+        { "q": "Brauche ich eine Anmeldung?", "a": "Nein, das Üben ist kostenlos und ohne Anmeldung direkt im Browser möglich." }
+      ],
+      "lastmod": "2026-06-27"
+    },
+    {
+      "slug": "medizinische-fachangestellte",
+      "beruf": "Medizinische Fachangestellte (MFA)",
+      "title": "Einstellungstest Medizinische Fachangestellte (MFA) üben",
+      "description": "Einstellungstest MFA kostenlos üben: einfache Mathematik, Konzentration, Sprachlogik und Fachfragen aus echter Stellenanzeige – mit sofortigem KI-Feedback.",
+      "intro": "Bereite dich auf den Einstellungstest als Medizinische Fachangestellte (MFA) vor: Sorgfalt, Organisation und Grundrechnen stehen im Mittelpunkt. jobreif erstellt aus einer Stellenanzeige einen passenden Test und ergänzt typische Eignungstest-Aufgaben.",
+      "testTypes": ["fachwissen", "sprachlogik", "konzentration", "zahlenreihe"],
+      "samples": [
+        {
+          "type": "konzentration",
+          "question": "Wie oft kommt der Buchstabe R in dieser Reihe vor?  R T R E R B R K R M",
+          "answer": "5-mal."
+        },
+        {
+          "type": "sprachlogik",
+          "question": "Rezept verhält sich zu Medikament wie Überweisung zu …?",
+          "options": ["Facharzt", "Apotheke", "Termin", "Praxis"],
+          "answer": "Facharzt – ein Rezept führt zum Medikament, eine Überweisung zum Facharzt (jeweils das Ziel)."
+        }
+      ],
+      "tipps": [
+        "Wiederhole einfache Mathematik und Prozentrechnung (z. B. für Abrechnung und Dosierung).",
+        "Bereite dich auf Fragen zu Hygiene, Organisation und Umgang mit Patienten vor.",
+        "Übe Konzentrationsaufgaben – in der Praxis zählt Genauigkeit bei Terminen, Karteien und Abrechnung."
+      ],
+      "faq": [
+        { "q": "Was wird im Einstellungstest für MFA geprüft?", "a": "Häufig einfache Mathematik, Konzentration und Sorgfalt, Sprachverständnis und Fragen zu Organisation und Patientenumgang. jobreif bildet diese Module ab und ergänzt Fachfragen aus deiner Anzeige." },
+        { "q": "Bereitet mich das auch aufs Gespräch vor?", "a": "Ja – du bekommst offene Fragen und KI-Feedback zu deinen Antworten, ideal für das Gespräch in Praxis oder Klinik." },
         { "q": "Muss ich etwas installieren?", "a": "Nein. jobreif läuft direkt im Browser auf Handy und Computer, ganz ohne Installation." }
       ],
       "lastmod": "2026-06-27"

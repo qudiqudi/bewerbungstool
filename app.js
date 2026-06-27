@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.26.0";
+const APP_VERSION = "1.27.0";
 
 const CHANGELOG = [
+  {
+    version: "1.27.0",
+    date: "27.06.2026",
+    items: [
+      "Neuer Bereich „Einstellungstest nach Beruf“: öffentliche Übungsseiten für gefragte Berufe (z. B. Fachinformatiker, Mechatroniker, Pflege, Einzelhandel, Bank) mit Beispielaufgaben, Vorbereitungstipps und direktem Einstieg ins Üben. Erreichbar über den Link unten im Fenster.",
+    ],
+  },
   {
     version: "1.26.0",
     date: "27.06.2026",
