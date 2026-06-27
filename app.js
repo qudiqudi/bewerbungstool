@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.15.0";
+const APP_VERSION = "1.16.0";
 
 const CHANGELOG = [
+  {
+    version: "1.16.0",
+    date: "27.06.2026",
+    items: [
+      "Neu: Tests enthalten jetzt eine Zahlenreihen-Aufgabe – ein Klassiker echter Einstellungstests. Du tippst die gesuchte Zahl in ein eigenes Eingabefeld; ausgewertet wird sofort und exakt auf deinem Gerät (keine KI nötig). Im gehosteten Modus.",
+    ],
+  },
   {
     version: "1.15.0",
     date: "27.06.2026",
@@ -1049,7 +1056,7 @@ const QUESTIONS_SCHEMA = {
         type: "object",
         properties: {
           id: { type: "integer" },
-          typ: { type: "string", enum: ["multiple_choice", "offen", "reihenfolge"] },
+          typ: { type: "string", enum: ["multiple_choice", "offen", "reihenfolge", "zahlenreihe"] },
           kategorie: { type: "string", description: "z. B. Fachwissen, Soft Skills, Situativ" },
           schwierigkeit: {
             type: "string",
@@ -1542,7 +1549,7 @@ function normalizeQuizData(result, jobText = "") {
   if (!result || typeof result !== "object" || !Array.isArray(result.fragen)) {
     throw new Error("Die Modellantwort hatte nicht die erwartete Form (keine Fragenliste).");
   }
-  const validTyp = (t) => (t === "multiple_choice" || t === "offen" || t === "reihenfolge" ? t : "offen");
+  const validTyp = (t) => (t === "multiple_choice" || t === "offen" || t === "reihenfolge" || t === "zahlenreihe" ? t : "offen");
   const validDiff = (d) => (d === "leicht" || d === "mittel" || d === "schwer" ? d : "");
   const fragen = [];
   result.fragen.forEach((q, i) => {
@@ -1631,6 +1638,12 @@ function normalizeQuizData(result, jobText = "") {
         elemente = [];
         korrekte_reihenfolge = [];
       }
+    }
+    // Zahlenreihe (Plan 3.7): nur als eigener Typ behalten, wenn die korrekte_antwort wirklich
+    // eine Zahl ist (lokal/deterministisch bewertbar). Sonst defensiv auf "offen" zuruecksetzen
+    // (Textarea-Render + LLM-Bewertung) - kein Absturz bei einer krummen Modellantwort.
+    if (typ === "zahlenreihe" && !Number.isFinite(parseZahl(korrekte_antwort))) {
+      typ = "offen";
     }
 
     const quellen = Array.isArray(q.quellen)
@@ -1769,6 +1782,44 @@ function scoreReihenfolge(userOrder, correctOrder) {
   }
   const frac = total ? concordant / total : 1;
   return Math.round(frac * 10);
+}
+
+// Zahlenreihe (Plan 3.7): tolerantes Parsen einer Zahl-Eingabe. Akzeptiert deutsches
+// Dezimalkomma + Tausenderpunkte, ignoriert Leerzeichen/fuehrendes Plus. NaN, wenn der
+// String keine reine Zahl ist. MUSS sich mit dem Backend (quiz-quality.js parseNumericAnswer)
+// decken, damit "ist das eine Zahl?" client- und serverseitig gleich entschieden wird.
+function parseZahl(v) {
+  if (typeof v === "number") return Number.isFinite(v) ? v : NaN;
+  if (typeof v !== "string") return NaN;
+  let s = v.trim().replace(/\s/g, "").replace(/^\+/, "");
+  if (!s) return NaN;
+  const neg = s.startsWith("-");
+  if (neg) s = s.slice(1);
+  // Deutsche Konvention: Komma = Dezimaltrennzeichen, Punkt = Tausender.
+  if (s.includes(",")) {
+    s = s.replace(/\./g, "").replace(",", ".");          // "1.234,5" -> "1234.5"
+  } else if (/^\d{1,3}(\.\d{3})+$/.test(s)) {
+    s = s.replace(/\./g, "");                             // "1.024" / "1.234.567" -> Ganzzahl
+  }
+  // Sonst bleibt ein einzelner Punkt ein Dezimalpunkt ("1.5" -> 1.5).
+  if (!/^\d+(\.\d+)?$/.test(s)) return NaN;
+  const n = Number(s);
+  if (!Number.isFinite(n)) return NaN;
+  return neg ? -n : n;
+}
+
+// Deterministisches Scoring einer Zahlenreihe: exakte numerische Gleichheit (mit Epsilon
+// gegen Float-Rauschen) -> 10 Punkte, sonst 0. Keine LLM-Bewertung noetig.
+function scoreZahlenreihe(q, answerStr) {
+  const soll = parseZahl(q.korrekte_antwort);
+  const ist = parseZahl(answerStr);
+  const ok = Number.isFinite(soll) && Number.isFinite(ist) && Math.abs(soll - ist) < 1e-9;
+  return {
+    id: q.id,
+    punkte: ok ? 10 : 0,
+    feedback: ok ? "Richtig." : "Leider nicht die gesuchte Zahl.",
+    musterantwort: String(q.korrekte_antwort ?? ""),
+  };
 }
 
 /* ---------- LLM-Aufruf (Anthropic / OpenAI) ---------- */
@@ -4645,6 +4696,35 @@ function renderQuestion() {
     });
   } else if (q.typ === "reihenfolge" && Array.isArray(q.elemente) && q.elemente.length >= 2) {
     renderReihenfolge(q, area, locked, isRevealed);
+  } else if (q.typ === "zahlenreihe") {
+    // Zahlenreihe (Plan 3.7): eigenes Numeric-Eingabefeld fuer die gesuchte Zahl. Antwort als
+    // String in answers[current] (wie alle Typen); Bewertung laeuft lokal/deterministisch.
+    const wrap = document.createElement("div");
+    wrap.className = "zahlenreihe-input";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.inputMode = "decimal";
+    input.autocomplete = "off";
+    input.className = "zr-field";
+    input.setAttribute("aria-label", "Deine Antwort als Zahl");
+    input.placeholder = "Deine Antwort (Zahl)";
+    input.value = answers[current] || "";
+    if (locked) {
+      input.readOnly = true;
+      // Im aufgeloesten/Review-Zustand richtig/falsch einfaerben (defensiv: leere/krumme
+      // Eingabe gilt als falsch).
+      if (isRevealed) {
+        const ist = parseZahl(answers[current]);
+        const soll = parseZahl(q.korrekte_antwort);
+        const ok = Number.isFinite(ist) && Number.isFinite(soll) && Math.abs(ist - soll) < 1e-9;
+        input.classList.add(ok ? "zr-correct" : "zr-wrong");
+      }
+    } else {
+      input.addEventListener("input", () => { answers[current] = input.value; saveLearnSessionDebounced(); });
+      input.addEventListener("blur", saveLearnSession);
+    }
+    wrap.appendChild(input);
+    area.appendChild(wrap);
   } else {
     // Catch-all: offene Frage UND jeder unbekannte/zukuenftige typ -> Textarea,
     // damit ein Versuch aus einer neueren Version nie crasht.
@@ -4982,7 +5062,7 @@ function renderLearnArea(q, isRevealed) {
         [...correct].sort((a, b) => a - b).map((i) => q.optionen[i]).filter((t) => t).join(", ");
     } else {
       answerLine.textContent =
-        (q.typ === "multiple_choice" ? "Richtige Antwort: " : "Musterantwort: ") + (q.korrekte_antwort || "");
+        (q.typ === "multiple_choice" || q.typ === "zahlenreihe" ? "Richtige Antwort: " : "Musterantwort: ") + (q.korrekte_antwort || "");
     }
     box.appendChild(answerLine);
   }
@@ -5102,6 +5182,8 @@ async function runEvaluation() {
     const istReihenfolge = (q) =>
       q && q.typ === "reihenfolge" && Array.isArray(q.elemente) && q.elemente.length >= 2 &&
       Array.isArray(q.korrekte_reihenfolge) && q.korrekte_reihenfolge.length === q.elemente.length;
+    // Zahlenreihe (Plan 3.7): lokal/deterministisch scorebar, wenn die Loesung eine Zahl ist.
+    const istZahlenreihe = (q) => q && q.typ === "zahlenreihe" && Number.isFinite(parseZahl(q.korrekte_antwort));
 
     // Lokale Ergebniszeilen (Reihenfolge + Mehrfach-MC, auch unbeantwortete) und
     // kompakte Zusammenfassung fuer die Gesamteinschaetzung des Modells. modelFragen
@@ -5136,6 +5218,11 @@ async function runEvaluation() {
         localSummary.push({ frage: (q.frage || "").slice(0, 160), punkte });
       } else if (mcIsMulti(q)) {
         const res = scoreMultiMc(q, answers[i]);
+        if (mode === "lernen" && revealed[i]) res.feedback += " (im Lernmodus aufgelöst)";
+        localResults.push(res);
+        localSummary.push({ frage: (q.frage || "").slice(0, 160), punkte: res.punkte });
+      } else if (istZahlenreihe(q)) {
+        const res = scoreZahlenreihe(q, answers[i]);
         if (mode === "lernen" && revealed[i]) res.feedback += " (im Lernmodus aufgelöst)";
         localResults.push(res);
         localSummary.push({ frage: (q.frage || "").slice(0, 160), punkte: res.punkte });

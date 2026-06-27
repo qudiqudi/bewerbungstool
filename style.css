@@ -665,6 +665,24 @@ button.ghost {
   animation: fadeUp 0.3s ease both;
 }
 
+/* Zahlenreihe-Modul (Plan 3.7): Numeric-Eingabefeld fuer die gesuchte Zahl. */
+.zahlenreihe-input { margin: 0.2rem 0 0.3rem; }
+.zr-field {
+  font: inherit;
+  font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+  width: 100%;
+  max-width: 16rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--text);
+}
+.zr-field:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; border-color: var(--primary); }
+.zr-field.zr-correct { border-color: var(--green); background: var(--green-soft); color: var(--text-strong); }
+.zr-field.zr-wrong { border-color: var(--red); background: var(--red-soft); color: var(--text-strong); }
+
 .option::before {
   content: "";
   width: 20px;
