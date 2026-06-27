@@ -8684,7 +8684,7 @@ async function importData(text) {
   } catch {
     throw new Error("Die Datei ist kein gültiges JSON.");
   }
-  if (!data || typeof data !== "object" || (!data.settings && !data.history && !data.reports && !data.profile)) {
+  if (!data || typeof data !== "object" || (!data.settings && !data.history && !data.reports && !data.profile && !data.srDeck)) {
     throw new Error("Die Datei enthält keine erkennbaren Bewerbungstool-Daten.");
   }
 
