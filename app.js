@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.18.0";
+const APP_VERSION = "1.19.0";
 
 const CHANGELOG = [
+  {
+    version: "1.19.0",
+    date: "27.06.2026",
+    items: [
+      "Neu: Konzentrationsaufgaben. Tests können jetzt eine Sorgfalts-/Konzentrationsaufgabe enthalten, wie sie in vielen Einstellungstests vorkommt: In einer Zeichenreihe zählst du, wie oft ein bestimmtes Zeichen vorkommt. Die Auswertung erfolgt sofort und exakt auf deinem Gerät – und solche Aufgaben landen ebenfalls im Wiederholungs-Stapel „Fällige Übungen“.",
+    ],
+  },
   {
     version: "1.18.0",
     date: "27.06.2026",
@@ -1071,7 +1078,7 @@ const QUESTIONS_SCHEMA = {
         type: "object",
         properties: {
           id: { type: "integer" },
-          typ: { type: "string", enum: ["multiple_choice", "offen", "reihenfolge", "zahlenreihe", "sprachlogik"] },
+          typ: { type: "string", enum: ["multiple_choice", "offen", "reihenfolge", "zahlenreihe", "sprachlogik", "konzentration"] },
           kategorie: { type: "string", description: "z. B. Fachwissen, Soft Skills, Situativ" },
           schwierigkeit: {
             type: "string",
@@ -1564,7 +1571,7 @@ function normalizeQuizData(result, jobText = "") {
   if (!result || typeof result !== "object" || !Array.isArray(result.fragen)) {
     throw new Error("Die Modellantwort hatte nicht die erwartete Form (keine Fragenliste).");
   }
-  const validTyp = (t) => (t === "multiple_choice" || t === "offen" || t === "reihenfolge" || t === "zahlenreihe" || t === "sprachlogik" ? t : "offen");
+  const validTyp = (t) => (t === "multiple_choice" || t === "offen" || t === "reihenfolge" || t === "zahlenreihe" || t === "sprachlogik" || t === "konzentration" ? t : "offen");
   const validDiff = (d) => (d === "leicht" || d === "mittel" || d === "schwer" ? d : "");
   const fragen = [];
   result.fragen.forEach((q, i) => {
@@ -1661,6 +1668,18 @@ function normalizeQuizData(result, jobText = "") {
       typ = "offen";
     }
 
+    // Konzentration (Plan 3.x): die zu durchsuchende Reihe (material) und das zu zaehlende
+    // Zeichen (zielzeichen). Der Client zaehlt die Vorkommen SELBST deterministisch nach
+    // (immun gegen Modell-Verzaehler) - korrekte_antwort des Modells wird dafuer ignoriert.
+    // Nur als eigener Typ behalten, wenn beide Felder brauchbar sind; sonst defensiv "offen".
+    let material = typeof q.material === "string" ? q.material.trim() : "";
+    let zielzeichen = typeof q.zielzeichen === "string" ? q.zielzeichen.trim() : "";
+    if (typ === "konzentration" && (!material || !zielzeichen)) {
+      typ = "offen";
+      material = "";
+      zielzeichen = "";
+    }
+
     const quellen = Array.isArray(q.quellen)
       ? q.quellen
           .filter((s) => s && typeof s === "object")
@@ -1689,6 +1708,8 @@ function normalizeQuizData(result, jobText = "") {
       erklaerungen,
       elemente,
       korrekte_reihenfolge,
+      material,
+      zielzeichen,
       lerninfo: typeof q.lerninfo === "string" ? q.lerninfo : "",
       quellen,
     });
@@ -1834,6 +1855,30 @@ function scoreZahlenreihe(q, answerStr) {
     punkte: ok ? 10 : 0,
     feedback: ok ? "Richtig." : "Leider nicht die gesuchte Zahl.",
     musterantwort: String(q.korrekte_antwort ?? ""),
+  };
+}
+
+// Zaehlt die nicht-ueberlappenden Vorkommen von ziel in material (exakt, gross-/klein-
+// schreibungsgenau) - identisch zur Backend-countOccurrences. Leere Eingaben -> 0.
+function countMatches(material, ziel) {
+  if (typeof material !== "string" || typeof ziel !== "string" || ziel === "") return 0;
+  return material.split(ziel).length - 1;
+}
+// Die kanonisch richtige Anzahl einer Konzentrationsaufgabe: der Client RECHNET selbst nach
+// (vertraut nicht der moeglicherweise verzaehlten korrekte_antwort des Modells).
+function konzentrationSoll(q) {
+  return countMatches(q && q.material, q && q.zielzeichen);
+}
+// Deterministisches Scoring: exakte numerische Gleichheit mit der nachgezaehlten Anzahl.
+function scoreKonzentration(q, answerStr) {
+  const soll = konzentrationSoll(q);
+  const ist = parseZahl(answerStr);
+  const ok = Number.isFinite(ist) && ist === soll;
+  return {
+    id: q.id,
+    punkte: ok ? 10 : 0,
+    feedback: ok ? "Richtig." : `Leider nicht die richtige Anzahl. Das Zeichen „${q.zielzeichen}" kommt ${soll}-mal vor.`,
+    musterantwort: String(soll),
   };
 }
 
@@ -4718,18 +4763,26 @@ function renderQuestion() {
     });
   } else if (q.typ === "reihenfolge" && Array.isArray(q.elemente) && q.elemente.length >= 2) {
     renderReihenfolge(q, area, locked, isRevealed);
-  } else if (q.typ === "zahlenreihe") {
-    // Zahlenreihe (Plan 3.7): eigenes Numeric-Eingabefeld fuer die gesuchte Zahl. Antwort als
-    // String in answers[current] (wie alle Typen); Bewertung laeuft lokal/deterministisch.
+  } else if (q.typ === "zahlenreihe" || q.typ === "konzentration") {
+    // Zahlenreihe (Plan 3.7) und Konzentration (Plan 3.x): eigenes Numeric-Eingabefeld fuer die
+    // gesuchte Zahl/Anzahl. Antwort als String in answers[current] (wie alle Typen); Bewertung
+    // laeuft lokal/deterministisch. Bei Konzentration steht zusaetzlich die zu durchsuchende
+    // Zeichenreihe (material) als gut scannbarer Monospace-Block ueber dem Eingabefeld.
     const wrap = document.createElement("div");
     wrap.className = "zahlenreihe-input";
+    if (q.typ === "konzentration" && q.material) {
+      const mat = document.createElement("div");
+      mat.className = "konz-material";
+      mat.textContent = q.material;
+      area.appendChild(mat);
+    }
     const input = document.createElement("input");
     input.type = "text";
     input.inputMode = "decimal";
     input.autocomplete = "off";
     input.className = "zr-field";
-    input.setAttribute("aria-label", "Deine Antwort als Zahl");
-    input.placeholder = "Deine Antwort (Zahl)";
+    input.setAttribute("aria-label", q.typ === "konzentration" ? "Deine Antwort als Anzahl" : "Deine Antwort als Zahl");
+    input.placeholder = q.typ === "konzentration" ? "Anzahl" : "Deine Antwort (Zahl)";
     input.value = answers[current] || "";
     if (locked) {
       input.readOnly = true;
@@ -4737,8 +4790,9 @@ function renderQuestion() {
       // Eingabe gilt als falsch).
       if (isRevealed) {
         const ist = parseZahl(answers[current]);
-        const soll = parseZahl(q.korrekte_antwort);
-        const ok = Number.isFinite(ist) && Number.isFinite(soll) && Math.abs(ist - soll) < 1e-9;
+        const ok = q.typ === "konzentration"
+          ? Number.isFinite(ist) && ist === konzentrationSoll(q)
+          : Number.isFinite(ist) && Number.isFinite(parseZahl(q.korrekte_antwort)) && Math.abs(ist - parseZahl(q.korrekte_antwort)) < 1e-9;
         input.classList.add(ok ? "zr-correct" : "zr-wrong");
       }
     } else {
@@ -5082,6 +5136,9 @@ function renderLearnArea(q, isRevealed) {
       answerLine.textContent =
         "Richtige Antworten: " +
         [...correct].sort((a, b) => a - b).map((i) => q.optionen[i]).filter((t) => t).join(", ");
+    } else if (q.typ === "konzentration") {
+      // Kanonische Anzahl: clientseitig nachgezaehlt (nicht die evtl. verzaehlte Modell-Antwort).
+      answerLine.textContent = "Richtige Antwort: " + konzentrationSoll(q);
     } else {
       answerLine.textContent =
         (mcLike(q.typ) || q.typ === "zahlenreihe" ? "Richtige Antwort: " : "Musterantwort: ") + (q.korrekte_antwort || "");
@@ -5206,6 +5263,9 @@ async function runEvaluation() {
       Array.isArray(q.korrekte_reihenfolge) && q.korrekte_reihenfolge.length === q.elemente.length;
     // Zahlenreihe (Plan 3.7): lokal/deterministisch scorebar, wenn die Loesung eine Zahl ist.
     const istZahlenreihe = (q) => q && q.typ === "zahlenreihe" && Number.isFinite(parseZahl(q.korrekte_antwort));
+    // Konzentration (Plan 3.x): lokal/deterministisch scorebar, wenn material + zielzeichen da sind.
+    const istKonzentration = (q) => q && q.typ === "konzentration" &&
+      typeof q.material === "string" && q.material !== "" && typeof q.zielzeichen === "string" && q.zielzeichen !== "";
 
     // Lokale Ergebniszeilen (Reihenfolge + Mehrfach-MC, auch unbeantwortete) und
     // kompakte Zusammenfassung fuer die Gesamteinschaetzung des Modells. modelFragen
@@ -5245,6 +5305,11 @@ async function runEvaluation() {
         localSummary.push({ frage: (q.frage || "").slice(0, 160), punkte: res.punkte });
       } else if (istZahlenreihe(q)) {
         const res = scoreZahlenreihe(q, answers[i]);
+        if (mode === "lernen" && revealed[i]) res.feedback += " (im Lernmodus aufgelöst)";
+        localResults.push(res);
+        localSummary.push({ frage: (q.frage || "").slice(0, 160), punkte: res.punkte });
+      } else if (istKonzentration(q)) {
+        const res = scoreKonzentration(q, answers[i]);
         if (mode === "lernen" && revealed[i]) res.feedback += " (im Lernmodus aufgelöst)";
         localResults.push(res);
         localSummary.push({ frage: (q.frage || "").slice(0, 160), punkte: res.punkte });
@@ -7175,7 +7240,7 @@ function buildHomeCard(job) {
 const SR_DECK_KEY = "bewerbungstool.srdeck";
 const SR_DECK_MAX = 150;          // FIFO-Deckel (wie reports)
 const SR_DAY = 86400000;
-const SR_TYPES = ["zahlenreihe", "sprachlogik"];
+const SR_TYPES = ["zahlenreihe", "sprachlogik", "konzentration"];
 
 function loadSrDeck() {
   try {
@@ -7211,7 +7276,10 @@ function saveSrDeck(deck, protectedIds) {
 }
 // Stabile Karten-id aus typ + normalisiertem Fragetext (dedupt gleiche Aufgabe ueber Tests).
 function srCardId(q) {
-  const base = (q.typ || "") + "|" + String(q.frage || "").toLowerCase().replace(/\s+/g, " ").trim();
+  // Bei Konzentration variiert oft nur material/zielzeichen, nicht der (templatige) Fragetext -
+  // beide in die id aufnehmen, damit verschiedene Zeichenreihen verschiedene Karten bleiben.
+  const extra = q.typ === "konzentration" ? "|" + String(q.material || "") + "|" + String(q.zielzeichen || "") : "";
+  const base = (q.typ || "") + "|" + String(q.frage || "").toLowerCase().replace(/\s+/g, " ").trim() + extra;
   let h = 0;
   for (let i = 0; i < base.length; i++) { h = (h * 31 + base.charCodeAt(i)) | 0; }
   return (q.typ || "x") + "_" + (h >>> 0).toString(36);
@@ -7224,6 +7292,10 @@ function srPickFields(q) {
     korrekte_indizes: Array.isArray(q.korrekte_indizes) ? q.korrekte_indizes.slice(0, 8) : [],
     korrekte_antwort: typeof q.korrekte_antwort === "string" ? q.korrekte_antwort : "",
     erklaerungen: Array.isArray(q.erklaerungen) ? q.erklaerungen.slice(0, 8) : [],
+    // Konzentration: material + zielzeichen mitnehmen (sonst kann der Client die Karte nicht
+    // nachzaehlen/rendern). Defensiv als String; nur die ersten Zeichen kappen waere unsinnig.
+    material: typeof q.material === "string" ? q.material : "",
+    zielzeichen: typeof q.zielzeichen === "string" ? q.zielzeichen : "",
     lerninfo: typeof q.lerninfo === "string" ? q.lerninfo : "",
   };
 }
@@ -7231,6 +7303,11 @@ function srPickFields(q) {
 function srEligible(q) {
   if (!q || !SR_TYPES.includes(q.typ) || typeof q.frage !== "string" || !q.frage.trim()) return false;
   if (q.typ === "zahlenreihe") return Number.isFinite(parseZahl(q.korrekte_antwort));
+  // konzentration: braucht nicht-leeres material UND zielzeichen (Client zaehlt selbst nach).
+  if (q.typ === "konzentration") {
+    return typeof q.material === "string" && q.material.trim() !== ""
+      && typeof q.zielzeichen === "string" && q.zielzeichen.trim() !== "";
+  }
   // sprachlogik: braucht >=2 nicht-leere String-Optionen + genau eine bekannte richtige Option.
   // (String-Pruefung haelt fehlerhafte Import-Payloads draussen, die sonst beim Rendern
   // an opt.trim() crashen wuerden.)
@@ -7292,6 +7369,10 @@ function scoreSrCard(q, answer) {
   if (q.typ === "zahlenreihe") {
     return { correct: scoreZahlenreihe(q, answer).punkte === 10, musterantwort: String(q.korrekte_antwort || "") };
   }
+  if (q.typ === "konzentration") {
+    const r = scoreKonzentration(q, answer);
+    return { correct: r.punkte === 10, musterantwort: r.musterantwort };
+  }
   const correctIdx = mcCorrectIndices(q);
   const chosen = (q.optionen || []).indexOf(answer);
   const richtig = [...correctIdx][0];
@@ -7307,7 +7388,7 @@ function renderSrHomeCard() {
   const due = srDueCards().length;
   if (!due) { card.classList.add("hidden"); return; }
   card.classList.remove("hidden");
-  $("sr-text").textContent = `Fällige Übungen: ${due} ${due === 1 ? "Aufgabe" : "Aufgaben"} (Zahlenreihen & Sprachlogik) warten auf Wiederholung.`;
+  $("sr-text").textContent = `Fällige Übungen: ${due} ${due === 1 ? "Aufgabe" : "Aufgaben"} (Zahlenreihen, Sprachlogik & Konzentration) warten auf Wiederholung.`;
 }
 
 function openSrReview() {
@@ -7338,11 +7419,17 @@ function renderSrCardView() {
 
   const area = document.createElement("div");
   area.className = "sr-answer";
-  if (q.typ === "zahlenreihe") {
+  if (q.typ === "zahlenreihe" || q.typ === "konzentration") {
+    if (q.typ === "konzentration" && q.material) {
+      const mat = document.createElement("div");
+      mat.className = "konz-material";
+      mat.textContent = q.material;
+      area.appendChild(mat);
+    }
     const input = document.createElement("input");
     input.type = "text"; input.inputMode = "decimal"; input.autocomplete = "off"; input.className = "zr-field";
-    input.setAttribute("aria-label", "Deine Antwort als Zahl");
-    input.placeholder = "Deine Antwort (Zahl)";
+    input.setAttribute("aria-label", q.typ === "konzentration" ? "Deine Antwort als Anzahl" : "Deine Antwort als Zahl");
+    input.placeholder = q.typ === "konzentration" ? "Anzahl" : "Deine Antwort (Zahl)";
     input.value = s.answer || "";
     if (s.checked) {
       input.readOnly = true;
