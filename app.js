@@ -1793,10 +1793,19 @@ function parseZahl(v) {
   if (typeof v !== "string") return NaN;
   let s = v.trim().replace(/\s/g, "").replace(/^\+/, "");
   if (!s) return NaN;
-  if (s.includes(",")) s = s.replace(/\./g, "").replace(",", ".");
-  if (!/^-?\d+(\.\d+)?$/.test(s)) return NaN;
+  const neg = s.startsWith("-");
+  if (neg) s = s.slice(1);
+  // Deutsche Konvention: Komma = Dezimaltrennzeichen, Punkt = Tausender.
+  if (s.includes(",")) {
+    s = s.replace(/\./g, "").replace(",", ".");          // "1.234,5" -> "1234.5"
+  } else if (/^\d{1,3}(\.\d{3})+$/.test(s)) {
+    s = s.replace(/\./g, "");                             // "1.024" / "1.234.567" -> Ganzzahl
+  }
+  // Sonst bleibt ein einzelner Punkt ein Dezimalpunkt ("1.5" -> 1.5).
+  if (!/^\d+(\.\d+)?$/.test(s)) return NaN;
   const n = Number(s);
-  return Number.isFinite(n) ? n : NaN;
+  if (!Number.isFinite(n)) return NaN;
+  return neg ? -n : n;
 }
 
 // Deterministisches Scoring einer Zahlenreihe: exakte numerische Gleichheit (mit Epsilon
