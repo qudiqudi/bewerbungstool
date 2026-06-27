@@ -1,0 +1,104 @@
+/* Statische Lern-/SEO-Seiten (Plan 3.7b). Bewusst eigenständig und leichtgewichtig
+   (gut für Ladezeit/Core Web Vitals), in der Markenfarbe der App gehalten. */
+:root {
+  --primary: #c5543a;
+  --primary-dark: #a8412b;
+  --text: #2a211e;
+  --muted: #6b5d57;
+  --bg: #fbf6f3;
+  --card: #ffffff;
+  --border: #ecdcd5;
+  --radius: 14px;
+  --maxw: 760px;
+}
+@font-face {
+  font-family: "Sora";
+  src: url("/assets/fonts/Sora-variable.ttf") format("truetype");
+  font-weight: 400 800;
+  font-display: swap;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 1.05rem;
+  line-height: 1.65;
+  color: var(--text);
+  background: var(--bg);
+}
+.wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 1.1rem; }
+a { color: var(--primary-dark); }
+a:hover { color: var(--primary); }
+
+header.site {
+  background: var(--primary);
+  color: #fff;
+}
+header.site .wrap { display: flex; align-items: center; gap: 0.6rem; padding-top: 0.9rem; padding-bottom: 0.9rem; }
+header.site a.brand { color: #fff; text-decoration: none; font-family: "Sora", system-ui, sans-serif; font-weight: 800; font-size: 1.25rem; }
+header.site a.brand span { opacity: 0.85; font-weight: 600; }
+header.site .spacer { flex: 1; }
+header.site a.nav { color: #fff; text-decoration: none; font-weight: 600; font-size: 0.95rem; opacity: 0.95; }
+
+main { padding: 1.6rem 0 2.4rem; }
+h1 { font-family: "Sora", system-ui, sans-serif; font-weight: 800; font-size: 1.9rem; line-height: 1.2; margin: 0.4rem 0 0.8rem; color: var(--text); }
+h2 { font-family: "Sora", system-ui, sans-serif; font-weight: 700; font-size: 1.3rem; margin: 1.8rem 0 0.6rem; }
+.lead { font-size: 1.15rem; color: var(--muted); margin: 0 0 1.2rem; }
+p { margin: 0.7rem 0; }
+ul, ol { margin: 0.7rem 0; padding-left: 1.3rem; }
+li { margin: 0.35rem 0; }
+
+.crumbs { font-size: 0.9rem; color: var(--muted); margin: 0.2rem 0 0.6rem; }
+.crumbs a { color: var(--muted); }
+
+.example {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem;
+  margin: 1rem 0;
+}
+.example .mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 1.2rem;
+  letter-spacing: 0.1em;
+  word-spacing: 0.12em;
+}
+.example .solution { margin-top: 0.6rem; color: var(--primary-dark); font-weight: 600; }
+.fig-mini { display: grid; grid-template-columns: repeat(3, 2.4rem); gap: 5px; margin: 0.6rem 0; }
+.fig-mini div { display: flex; align-items: center; justify-content: center; aspect-ratio: 1/1; border: 1px solid var(--border); border-radius: 8px; background: var(--card); font-size: 1rem; }
+.fig-mini div.miss { color: var(--primary); font-weight: 700; border-style: dashed; }
+
+.cta {
+  display: inline-block;
+  background: var(--primary);
+  color: #fff;
+  text-decoration: none;
+  font-weight: 700;
+  padding: 0.8rem 1.4rem;
+  border-radius: var(--radius);
+  margin: 0.4rem 0;
+}
+.cta:hover { background: var(--primary-dark); color: #fff; }
+.cta-row { margin: 1.4rem 0; }
+
+.cards { display: grid; gap: 0.8rem; margin: 1.2rem 0; }
+@media (min-width: 560px) { .cards { grid-template-columns: 1fr 1fr; } }
+.cards a.card {
+  display: block;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem;
+  text-decoration: none;
+  color: var(--text);
+}
+.cards a.card:hover { border-color: var(--primary); }
+.cards a.card strong { font-family: "Sora", system-ui, sans-serif; display: block; font-size: 1.1rem; margin-bottom: 0.2rem; color: var(--text); }
+.cards a.card span { color: var(--muted); font-size: 0.98rem; }
+
+footer.site { border-top: 1px solid var(--border); color: var(--muted); font-size: 0.9rem; }
+footer.site .wrap { padding: 1.4rem 1.1rem 2rem; }
+footer.site a { color: var(--muted); }
+footer.site .row { margin-top: 0.4rem; }
