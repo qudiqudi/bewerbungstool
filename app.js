@@ -4,9 +4,17 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.25.0";
+const APP_VERSION = "1.26.0";
 
 const CHANGELOG = [
+  {
+    version: "1.26.0",
+    date: "27.06.2026",
+    items: [
+      "Der normale Fragebogen konzentriert sich jetzt ganz auf die jeweilige Stelle: die allgemeinen Eignungsaufgaben (Zahlenreihen, Konzentration, Figuren/Matrizen) sind dort nicht mehr enthalten. Diese kognitiven Tests erscheinen jetzt gezielt im Modus „Assessment-Center“ – wo sie auch in echten Verfahren vorkommen – und lassen sich jederzeit im Üben-Bereich trainieren.",
+      "Die Auswahl der Gesprächsstufe wurde gestrafft: „Fachgespräch“ ist entfallen, weil es sich vom normalen Fragebogen kaum noch unterschied. Es bleiben „Allgemein“ (stellenbezogener Standard), „Telefoninterview“ (breiteres Screening) und „Assessment-Center“ (Szenarien plus Eignungstests).",
+    ],
+  },
   {
     version: "1.25.0",
     date: "27.06.2026",
@@ -741,10 +749,12 @@ function profilePayload() {
 // Gespraechsstufe (Plan 2026, 3.6): per-Test gewaehlte Interviewrunde aus dem Auswahlfeld.
 // Geschlossenes Enum, defensiv gelesen - nur ein bekannter Wert wird gesendet, sonst
 // undefined (Feld weggelassen → abwaertskompatibel, nur Hosted nutzt es).
-// "leitung" bewusst NICHT mehr angeboten: die Stufe lieferte in der Live-Validierung keine
-// treffsicheren Finalrunden-Fragen (Modell fiel auf operative Stellen-Pflichten zurueck).
-// Das Backend-Enum behaelt "leitung" (Abwaertskompat), der Client bietet/sendet es nicht mehr.
-const GESPRAECHSSTUFEN = ["telefon", "fachgespraech", "assessment"];
+// "leitung" und "fachgespraech" bewusst NICHT mehr angeboten: leitung lieferte in der Live-
+// Validierung keine treffsicheren Finalrunden-Fragen; fachgespraech war nach dem Wegfall der
+// Eignungs-Module aus dem Standard inhaltlich nahezu deckungsgleich mit "Allgemein" (Live-
+// Vergleich). Das Backend-Enum behaelt beide (Abwaertskompat), der Client bietet/sendet sie
+// nicht mehr - alte gecachte Clients, die sie noch senden, funktionieren weiter.
+const GESPRAECHSSTUFEN = ["telefon", "assessment"];
 function gespraechsstufePayload() {
   const el = document.getElementById("gespraechsstufe");
   const v = el && typeof el.value === "string" ? el.value : "";
@@ -2136,10 +2146,10 @@ function generateUebungByType(typ) {
 function appendFiguralQuestion(quiz) {
   if (!quiz || !Array.isArray(quiz.fragen) || !quiz.fragen.length) return;
   if (Array.isArray(quiz.vertiefungFelder) && quiz.vertiefungFelder.length) return;
-  // Bei einer gewaehlten Gespraechsstufe gehoert eine generische Matrizenaufgabe nicht in den
-  // Test (Telefon/Fachgespraech/Finalrunde sind reine Gespraeche) - AUSNAHME Assessment-Center,
-  // wo figurale Eignungstests regulaerer Bestandteil sind. Spiegelt die Backend-Logik.
-  if (quiz.gespraechsstufe && quiz.gespraechsstufe !== "assessment") return;
+  // Generische Matrizenaufgaben sind ein Eignungstest und gehoeren NUR ins Assessment-Center.
+  // In jedem anderen Test - auch im Standard-Fragebogen ohne gewaehlte Stufe - bleiben sie weg
+  // (Produktentscheidung; spiegelt die Backend-Logik eignungsfrei()).
+  if (quiz.gespraechsstufe !== "assessment") return;
   if (quiz.fragen.some((f) => f && f.typ === "figural")) return;
   const pz = generateFiguralPuzzle();
   // id robust aus dem Maximum der vorhandenen ids ableiten, NICHT aus fragen.length:
