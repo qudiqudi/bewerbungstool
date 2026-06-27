@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.21.0";
+const APP_VERSION = "1.22.0";
 
 const CHANGELOG = [
+  {
+    version: "1.22.0",
+    date: "27.06.2026",
+    items: [
+      "Neu: Lernseiten zu den Aufgabentypen. Unter „Aufgabentypen üben“ (im Fuß der Seite) findest du jetzt kurze Erklärungen mit Beispielen zu Zahlenreihen, sprachlicher Logik, Konzentration und Figuren-/Matrizenaufgaben – mit direktem Sprung in den passenden Übungsbereich.",
+    ],
+  },
   {
     version: "1.21.0",
     date: "27.06.2026",
@@ -10118,7 +10125,25 @@ restoreDraft();
 // Waehlt die Startansicht. Reihenfolge: gehosteter Modus OHNE Anmeldung → Login-Gate
 // (Phase B, harte Pflicht). Sonst BYOK/lokal nicht eingerichtet → Onboarding. Sonst Home.
 // Lokaler Anbieter gilt mit gewaehltem Modell als eingerichtet, BYOK mit hinterlegtem Key.
+// Deep-Link aus den statischen Lernseiten (/lernen/...): ?ueben=<typ> oeffnet direkt den
+// Uebungs-Hub bzw. eine Runde. Rein lokal - kein Login/Anbieter noetig, daher VOR dem Gate.
+function consumeUebenDeepLink() {
+  let typ = null;
+  try { typ = new URLSearchParams(location.search).get("ueben"); } catch { return false; }
+  if (typ === null) return false;
+  // Param aus der URL entfernen, damit ein Reload nicht erneut ausloest und die Adresse sauber ist.
+  try {
+    const u = new URL(location.href);
+    u.searchParams.delete("ueben");
+    history.replaceState(history.state, "", u.pathname + (u.search ? u.search : "") + u.hash);
+  } catch { /* History-API nicht verfuegbar: egal */ }
+  if (["zahlenreihe", "konzentration", "figural"].includes(typ)) startPractice(typ);
+  else openPracticePicker();
+  return true;
+}
+
 function routeInitialView() {
+  if (consumeUebenDeepLink()) return; // Uebungs-Deep-Link hat Vorrang (lokal, ohne Gate)
   const provider0 = settings.provider || "hosted";
   if (provider0 === "hosted" && !settings.authToken) {
     promptHostedLogin(_authRedirectMsg || ""); // _authRedirectMsg: evtl. Fehler aus dem Redirect
