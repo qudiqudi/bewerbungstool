@@ -3358,7 +3358,7 @@ function mcCorrectIndices(q) {
     if (set.size) return set;
   }
   // Fallback: Single-Choice ueber Wortlaut
-  const ka = (q.korrekte_antwort || "").trim();
+  const ka = typeof q.korrekte_antwort === "string" ? q.korrekte_antwort.trim() : "";
   const idx = optionen.findIndex((o) => typeof o === "string" && o.trim() === ka);
   return new Set(idx >= 0 ? [idx] : []);
 }
@@ -7184,21 +7184,26 @@ function loadSrDeck() {
   } catch { /* ignorieren */ }
   return { v: 1, cards: {} };
 }
-function saveSrDeck(deck) {
+function saveSrDeck(deck, protectedIds) {
   // FIFO bei Quota wie bei reports: aelteste Karten (kleinstes added) zuerst verwerfen.
-  const trim = (d) => {
-    const ids = Object.keys(d.cards);
-    if (ids.length <= SR_DECK_MAX) return;
+  // protectedIds (optional, z. B. beim Import): diese Karten werden NIE verworfen, damit
+  // ein Import unter Speicherdruck garantiert keine vorhandenen lokalen Karten verdraengt.
+  const evictable = (d) => {
+    const ids = Object.keys(d.cards).filter((id) => !(protectedIds && protectedIds.has(id)));
     ids.sort((a, b) => (Number(d.cards[a].added) || 0) - (Number(d.cards[b].added) || 0));
-    for (const id of ids.slice(0, ids.length - SR_DECK_MAX)) delete d.cards[id];
+    return ids;
+  };
+  const trim = (d) => {
+    const surplus = Object.keys(d.cards).length - SR_DECK_MAX;
+    if (surplus <= 0) return;
+    for (const id of evictable(d).slice(0, surplus)) delete d.cards[id];
   };
   trim(deck);
   for (let i = 0; i < 5; i++) {
     try { localStorage.setItem(SR_DECK_KEY, JSON.stringify(deck)); return true; }
     catch {
-      const ids = Object.keys(deck.cards);
-      if (!ids.length) return false;
-      ids.sort((a, b) => (Number(deck.cards[a].added) || 0) - (Number(deck.cards[b].added) || 0));
+      const ids = evictable(deck);
+      if (!ids.length) return false; // nur noch geschuetzte Karten -> lieber nicht schreiben
       delete deck.cards[ids[0]];
     }
   }
@@ -8702,10 +8707,16 @@ async function importData(text) {
     const deck = loadSrDeck();
     // Nur in die freie Kapazitaet importieren: ein Import darf den FIFO-Trim in
     // saveSrDeck nie dazu bringen, vorhandene LOKALE Karten zu verdraengen.
-    let room = SR_DECK_MAX - Object.keys(deck.cards).length;
+    const protectedIds = new Set(Object.keys(deck.cards));
+    let room = SR_DECK_MAX - protectedIds.size;
     for (const [id, c] of Object.entries(data.srDeck.cards)) {
       if (room <= 0) break;
-      if (deck.cards[id] || !c || typeof c !== "object" || !c.q || !srEligible(c.q)) continue;
+      // Pro-Karte abkapseln: eine einzelne fehlerhafte Karte darf nicht den ganzen
+      // Import (settings/history/...) per Exception abbrechen.
+      let ok = false;
+      try { ok = !deck.cards[id] && !!c && typeof c === "object" && !!c.q && srEligible(c.q); }
+      catch { ok = false; }
+      if (!ok) continue;
       deck.cards[id] = {
         q: srPickFields(c.q),
         ease: Math.min(2.8, Math.max(1.3, Number(c.ease) || 2.5)),
@@ -8718,7 +8729,7 @@ async function importData(text) {
       srImported++;
       room--;
     }
-    if (srImported) saveSrDeck(deck);
+    if (srImported) saveSrDeck(deck, protectedIds);
   }
 
   let settingsImported = false;
