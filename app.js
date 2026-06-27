@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.20.0";
+const APP_VERSION = "1.21.0";
 
 const CHANGELOG = [
+  {
+    version: "1.21.0",
+    date: "27.06.2026",
+    items: [
+      "Neu: Üben-Bereich. Auf der Startseite kannst du jetzt jederzeit Figuren-/Matrizen-, Zahlenreihen- und Konzentrationsaufgaben gezielt trainieren – frisch generiert, beliebig viele Runden, sofort und exakt auf deinem Gerät ausgewertet. Ganz ohne einen Test zu einer Stelle zu erstellen.",
+    ],
+  },
   {
     version: "1.20.0",
     date: "27.06.2026",
@@ -841,6 +848,10 @@ function viewRecordKey(id) {
     if (!quiz) return null;
     return quiz.urlKey || (quiz.jobText ? jobKey(quiz.jobText) : null);
   }
+  // view-sr traegt den Modus: eine echte Wiederholung ("review") wird beim Zurueckblaettern
+  // wiederhergestellt; der fluechtige Uebungs-Modus bzw. die Typ-Auswahl ("practice") landet
+  // im Picker, NICHT in einer echten Review (die sonst faellige Deck-Karten verplanen wuerde).
+  if (id === "view-sr") return srSession && srSession.practice ? "practice" : (srSession ? "review" : "practice");
   return null;
 }
 
@@ -884,7 +895,14 @@ function restoreView(state) {
       if (job) openJob(job); else goHome();
     }
     else if (id === "view-history") { renderHistory(); showView("view-history"); }
-    else if (id === "view-sr") { if (srDueCards().length) openSrReview(); else goHome(); }
+    else if (id === "view-sr") {
+      // "review" nur wiederherstellen, wenn noch Karten faellig sind; der Uebungs-/Picker-
+      // Modus ("practice") fuehrt in den Picker (fluechtige Karten lassen sich nicht
+      // wiederherstellen) und beruehrt damit NIE das SR-Deck.
+      if (key === "review" && srDueCards().length) openSrReview();
+      else if (key === "practice") openPracticePicker();
+      else goHome();
+    }
     else if (id === "view-quiz" || id === "view-result") {
       // Nur zeigen, wenn der aktuell geladene Fragebogen noch der des Eintrags ist
       // (Live-Test oder eben angesehener Versuch). Sonst nicht den falschen Versuch
@@ -1991,6 +2009,67 @@ function figFamilyDiagonalCycle() {
 function generateFiguralPuzzle() {
   const families = [figFamilyShapeRowCountCol, figFamilyCountRowShapeCol, figFamilyDiagonalCycle];
   return families[Math.floor(Math.random() * families.length)]();
+}
+
+/* ---------- Uebungs-Hub (Plan 3.x): clientseitige On-Demand-Generatoren ----------
+   Frische, lokal/deterministisch bewertbare Aufgaben mit GARANTIERT korrekter Loesung (der
+   Client rechnet die Loesung selbst aus) - kein Modell, keine Tokens. Liefern Frage-Objekte,
+   die scoreSrCard/renderSrCardView direkt verarbeiten. */
+function uebRandInt(min, max) { return min + Math.floor(Math.random() * (max - min + 1)); }
+function uebPick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+// Zahlenreihe: zufaellige, ganzzahlige Bildungsregel; 5-6 Glieder, das naechste ist gesucht.
+function generateZahlenreiheUebung() {
+  const rules = [
+    () => { const a = uebRandInt(1, 12), d = uebRandInt(2, 9); return { seq: (n) => a + n * d, regel: `konstante Differenz +${d}` }; },
+    () => { const a = uebRandInt(40, 80), d = uebRandInt(2, 9); return { seq: (n) => a - n * d, regel: `konstante Differenz -${d}` }; },
+    () => { const a = uebRandInt(1, 4), r = uebRandInt(2, 3); return { seq: (n) => a * Math.pow(r, n), regel: `Faktor ×${r}` }; },
+    () => { const a = uebRandInt(1, 6), d0 = uebRandInt(1, 4), k = uebRandInt(1, 3); return { seq: (n) => a + n * d0 + k * (n * (n - 1) / 2), regel: `wachsende Differenz (Start +${d0}, je +${k} mehr)` }; },
+    () => { const a = uebRandInt(1, 10), x = uebRandInt(2, 6), y = uebRandInt(3, 8); return { seq: (n) => a + Math.ceil(n / 2) * x + Math.floor(n / 2) * y, regel: `abwechselnd +${x} / +${y}` }; },
+  ];
+  const r = uebPick(rules)();
+  const len = uebRandInt(5, 6);
+  const terms = [];
+  for (let n = 0; n < len; n++) terms.push(r.seq(n));
+  return {
+    typ: "zahlenreihe",
+    frage: "Setzen Sie die Zahlenreihe fort: " + terms.join(", ") + ", ?",
+    optionen: [], korrekte_indizes: [],
+    korrekte_antwort: String(r.seq(len)),
+    material: "", zielzeichen: "", erklaerungen: [],
+    lerninfo: "Bildungsregel: " + r.regel + ".",
+  };
+}
+
+// Konzentration: Reihe aus leicht verwechselbaren Einzelzeichen; Zielzeichen-Anzahl auf 3-9
+// gesteuert. Die App zaehlt selbst nach (scoreKonzentration), die Loesung ist also exakt.
+function generateKonzentrationUebung() {
+  const charset = ["b", "d", "p", "q", "6", "9", "m", "n", "a", "e", "c", "o"];
+  const target = uebPick(charset);
+  const others = charset.filter((c) => c !== target);
+  const len = uebRandInt(22, 32);
+  const wanted = Math.min(uebRandInt(3, 9), len);
+  const tokens = [];
+  for (let i = 0; i < len; i++) tokens.push(uebPick(others));
+  const positions = [];
+  while (positions.length < wanted) { const p = uebRandInt(0, len - 1); if (!positions.includes(p)) positions.push(p); }
+  positions.forEach((p) => { tokens[p] = target; });
+  const material = tokens.join(" ");
+  return {
+    typ: "konzentration",
+    frage: `Wie oft kommt das Zeichen „${target}" in der Reihe unten vor?`,
+    optionen: [], korrekte_indizes: [],
+    korrekte_antwort: String(countMatches(material, target)),
+    material, zielzeichen: target, erklaerungen: [],
+    lerninfo: "Konzentrationsaufgaben prüfen Sorgfalt – ruhig und systematisch zählen.",
+  };
+}
+
+// Frische Uebungsaufgabe nach Typ (figural | zahlenreihe | konzentration).
+function generateUebungByType(typ) {
+  if (typ === "zahlenreihe") return generateZahlenreiheUebung();
+  if (typ === "konzentration") return generateKonzentrationUebung();
+  return generateFiguralPuzzle();
 }
 
 // Haengt einem Standardtest (kein Vertiefungsbogen) GENAU EINE clientgenerierte Figural-Aufgabe
@@ -7634,6 +7713,47 @@ function openSrReview() {
   renderSrCardView();
 }
 
+// --- Uebungs-Hub (Plan 3.x): On-Demand-Training der standardisierten Module ---
+const UEB_BATCH = 8;
+const UEB_TYPEN = [
+  { typ: "figural", label: "Figuren / Matrizen" },
+  { typ: "zahlenreihe", label: "Zahlenreihen" },
+  { typ: "konzentration", label: "Konzentration" },
+];
+function uebLabel(typ) { const t = UEB_TYPEN.find((x) => x.typ === typ); return t ? t.label : typ; }
+
+// Typ-Auswahl im view-sr-Container rendern (kein Modell, kein Token-Verbrauch).
+function openPracticePicker() {
+  srSession = null;
+  showView("view-sr");
+  const wrap = $("sr-cards-container");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  const h = document.createElement("p");
+  h.className = "sr-frage";
+  h.textContent = "Was möchtest du üben?";
+  wrap.appendChild(h);
+  const hint = document.createElement("p");
+  hint.className = "hint";
+  hint.textContent = "Frisch generierte Aufgaben, sofort und exakt auf deinem Gerät ausgewertet.";
+  wrap.appendChild(hint);
+  UEB_TYPEN.forEach((t) => {
+    const btn = document.createElement("button");
+    btn.className = "option"; btn.type = "button"; btn.textContent = t.label;
+    btn.addEventListener("click", () => startPractice(t.typ));
+    wrap.appendChild(btn);
+  });
+}
+
+// Eine Uebungsrunde (Batch frisch generierter Karten) starten - fluechtig, kein SR-Deck.
+function startPractice(typ) {
+  const cards = [];
+  for (let i = 0; i < UEB_BATCH; i++) cards.push({ id: "ueb_" + typ + "_" + i, q: generateUebungByType(typ) });
+  srSession = { cards, i: 0, answer: "", checked: false, result: null, richtig: 0, geübt: 0, practice: true, genType: typ };
+  showView("view-sr");
+  renderSrCardView();
+}
+
 function renderSrCardView() {
   const wrap = $("sr-cards-container");
   if (!wrap || !srSession) return;
@@ -7678,9 +7798,24 @@ function renderSrCardView() {
     }
     area.appendChild(input);
   } else {
+    // Figural: ueber den Optionen das 3x3-Raster (letzte Zelle = Luecke) zeigen.
+    if (q.typ === "figural" && Array.isArray(q.matrix)) {
+      const grid = document.createElement("div");
+      grid.className = "fig-grid"; grid.setAttribute("aria-hidden", "true");
+      q.matrix.forEach((row) => {
+        (Array.isArray(row) ? row : []).forEach((cellStr) => {
+          const cell = document.createElement("div");
+          const empty = !cellStr;
+          cell.className = "fig-cell" + (empty ? " fig-cell-missing" : "");
+          cell.textContent = empty ? "?" : cellStr;
+          grid.appendChild(cell);
+        });
+      });
+      area.appendChild(grid);
+    }
     (q.optionen || []).forEach((opt) => {
       const btn = document.createElement("button");
-      let cls = "option";
+      let cls = q.typ === "figural" ? "option fig-option" : "option";
       if (s.answer === opt) cls += " selected";
       if (s.checked) {
         if (String(opt).trim() === (s.result.musterantwort || "").trim()) cls += " correct";
@@ -7722,10 +7857,13 @@ function renderSrCardView() {
       const res = scoreSrCard(q, s.answer);
       s.checked = true; s.result = res; s.geübt++;
       if (res.correct) s.richtig++;
-      // sofort persistieren (Plan aktualisieren), unabhaengig vom Rest der Session.
-      const deck = loadSrDeck();
-      scheduleSrCard(deck, s.cards[s.i].id, res.correct);
-      saveSrDeck(deck);
+      // Im Wiederhol-Modus den SR-Plan sofort aktualisieren; im Uebungs-Modus sind die
+      // Karten fluechtig (frisch generiert) und beruehren das Deck NICHT.
+      if (!s.practice) {
+        const deck = loadSrDeck();
+        scheduleSrCard(deck, s.cards[s.i].id, res.correct);
+        saveSrDeck(deck);
+      }
       renderSrCardView();
     });
     wrap.appendChild(check);
@@ -7734,19 +7872,34 @@ function renderSrCardView() {
 
 function renderSrSummary(wrap) {
   const s = srSession;
+  const practice = !!s.practice;
+  const genType = s.genType;
   const h = document.createElement("p");
   h.className = "sr-frage";
   h.textContent = "Geschafft!";
   wrap.appendChild(h);
   const p = document.createElement("p");
   p.className = "hint";
-  p.textContent = `${s.geübt} ${s.geübt === 1 ? "Aufgabe" : "Aufgaben"} wiederholt, ${s.richtig} richtig. Gut bewertete Aufgaben kommen erst spaeter wieder dran.`;
+  p.textContent = practice
+    ? `${s.geübt} ${s.geübt === 1 ? "Aufgabe" : "Aufgaben"} geübt, ${s.richtig} richtig.`
+    : `${s.geübt} ${s.geübt === 1 ? "Aufgabe" : "Aufgaben"} wiederholt, ${s.richtig} richtig. Gut bewertete Aufgaben kommen erst spaeter wieder dran.`;
   wrap.appendChild(p);
+  srSession = null;
+  if (practice) {
+    const again = document.createElement("button");
+    again.className = "primary"; again.type = "button"; again.textContent = "Noch eine Runde";
+    again.addEventListener("click", () => startPractice(genType));
+    wrap.appendChild(again);
+    const pick = document.createElement("button");
+    pick.className = "option"; pick.type = "button"; pick.textContent = "Anderes Modul üben";
+    pick.addEventListener("click", () => openPracticePicker());
+    wrap.appendChild(pick);
+  }
   const btn = document.createElement("button");
-  btn.className = "primary"; btn.type = "button"; btn.textContent = "Zurück zu Meine Stellen";
+  btn.className = practice ? "option" : "primary"; btn.type = "button";
+  btn.textContent = "Zurück zu Meine Stellen";
   btn.addEventListener("click", () => goHome());
   wrap.appendChild(btn);
-  srSession = null;
 }
 
 function renderHome() {
@@ -9431,6 +9584,7 @@ $("btn-home").addEventListener("click", goHome);
 $("btn-history-back").addEventListener("click", () => history.back());
 // Spaced Repetition (Plan 3.8)
 $("sr-card-btn").addEventListener("click", openSrReview);
+$("practice-card-btn").addEventListener("click", openPracticePicker);
 $("btn-sr-back").addEventListener("click", () => history.back());
 
 // Startliste und Stellen-Subpage
