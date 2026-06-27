@@ -7301,9 +7301,11 @@ function srPickFields(q) {
     korrekte_antwort: typeof q.korrekte_antwort === "string" ? q.korrekte_antwort : "",
     erklaerungen: Array.isArray(q.erklaerungen) ? q.erklaerungen.slice(0, 8) : [],
     // Konzentration: material + zielzeichen mitnehmen (sonst kann der Client die Karte nicht
-    // nachzaehlen/rendern). Defensiv als String; nur die ersten Zeichen kappen waere unsinnig.
-    material: typeof q.material === "string" ? q.material : "",
-    zielzeichen: typeof q.zielzeichen === "string" ? q.zielzeichen : "",
+    // nachzaehlen/rendern). GETRIMMT speichern, damit Eligibility-Pruefung und Zaehlung exakt
+    // denselben bereinigten Wert sehen - auch bei direkt importierten Karten (sonst koennte ein
+    // space-gepolstertes zielzeichen wie " d " als gueltig gelten, aber falsch zaehlen).
+    material: typeof q.material === "string" ? q.material.trim() : "",
+    zielzeichen: typeof q.zielzeichen === "string" ? q.zielzeichen.trim() : "",
     lerninfo: typeof q.lerninfo === "string" ? q.lerninfo : "",
   };
 }
@@ -7339,11 +7341,14 @@ function harvestSrCards(quiz) {
   }
   if (added) saveSrDeck(deck);
 }
-// Faellige Karten (due <= jetzt), aelteste Faelligkeit zuerst.
+// Faellige Karten (due <= jetzt), aelteste Faelligkeit zuerst. Defensiv NUR aktuell
+// SR-taugliche Karten zurueckgeben (srEligible): verschaerft sich der Eligibility-Vertrag
+// (z. B. Einzelzeichen-Ziel bei konzentration), bleiben Alt-Karten, die ihn nicht mehr
+// erfuellen, inert im Deck, statt mit falscher Bewertung in die Wiederholung zu geraten.
 function srDueCards(deck) {
   const now = Date.now();
   return Object.entries((deck || loadSrDeck()).cards)
-    .filter(([, c]) => c && c.q && (Number(c.due) || 0) <= now)
+    .filter(([, c]) => c && c.q && srEligible(c.q) && (Number(c.due) || 0) <= now)
     .sort((a, b) => (Number(a[1].due) || 0) - (Number(b[1].due) || 0))
     .map(([id, c]) => ({ id, ...c }));
 }
