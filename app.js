@@ -7761,20 +7761,24 @@ function loadUebenStats() {
 function saveUebenStats(stats) {
   try { localStorage.setItem(UEBEN_STATS_KEY, JSON.stringify(stats)); return true; } catch { return false; }
 }
+// Nicht-negative Ganzzahl; nicht-endliche Werte (z. B. Infinity aus 1e309 in einem Import)
+// werden auf 0 abgewiesen - sonst serialisierte JSON.stringify sie als null und korrumpierte
+// den Store.
+function uebNat(v) { const n = Number(v); return Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0; }
 // Eine abgeschlossene Uebungsrunde verbuchen. Werte werden additiv/maximiert fortgeschrieben.
 function recordPracticeRound(typ, attempted, correct, maxStreak) {
   if (!UEBEN_TYP_SET.has(typ)) return loadUebenStats();
-  const att = Math.max(0, Math.trunc(Number(attempted) || 0));
-  const cor = Math.min(att, Math.max(0, Math.trunc(Number(correct) || 0)));
-  const strk = Math.max(0, Math.trunc(Number(maxStreak) || 0));
+  const att = uebNat(attempted);
+  const cor = Math.min(att, uebNat(correct));
+  const strk = uebNat(maxStreak);
   if (att <= 0) return loadUebenStats();
   const stats = loadUebenStats();
   const prev = stats.byType[typ] && typeof stats.byType[typ] === "object" ? stats.byType[typ] : {};
   stats.byType[typ] = {
-    runs: Math.max(0, Math.trunc(Number(prev.runs) || 0)) + 1,
-    attempted: Math.max(0, Math.trunc(Number(prev.attempted) || 0)) + att,
-    correct: Math.max(0, Math.trunc(Number(prev.correct) || 0)) + cor,
-    bestStreak: Math.max(Math.max(0, Math.trunc(Number(prev.bestStreak) || 0)), strk),
+    runs: uebNat(prev.runs) + 1,
+    attempted: uebNat(prev.attempted) + att,
+    correct: uebNat(prev.correct) + cor,
+    bestStreak: Math.max(uebNat(prev.bestStreak), strk),
     lastPlayed: Date.now(),
   };
   saveUebenStats(stats);
@@ -9309,7 +9313,7 @@ async function importData(text) {
       const inc = data.uebenStats.byType[typ];
       if (!inc || typeof inc !== "object") continue;
       const cur = stats.byType[typ] && typeof stats.byType[typ] === "object" ? stats.byType[typ] : {};
-      const mx = (a, b) => Math.max(Math.max(0, Math.trunc(Number(a) || 0)), Math.max(0, Math.trunc(Number(b) || 0)));
+      const mx = (a, b) => Math.max(uebNat(a), uebNat(b));
       const next = {
         runs: mx(cur.runs, inc.runs),
         attempted: mx(cur.attempted, inc.attempted),
