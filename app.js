@@ -11,7 +11,7 @@ const CHANGELOG = [
     version: "1.24.0",
     date: "27.06.2026",
     items: [
-      "Mehr Abwechslung bei Figuren-/Matrizenaufgaben: Neben den bisherigen Mustern gibt es jetzt auch Aufgaben mit zwei Symbolen je Feld (eines je Zeile, eines je Spalte) sowie Muster, bei denen die Anzahl diagonal wandert – so wird das Üben weniger eintönig.",
+      "Mehr Abwechslung bei Figuren-/Matrizenaufgaben: ein größerer Symbolvorrat sowie neue Muster – Aufgaben mit zwei Symbolen je Feld (eines je Zeile, eines je Spalte) und Muster, bei denen die Anzahl diagonal wandert. So wird das Üben weniger eintönig.",
     ],
   },
   {
@@ -1953,7 +1953,7 @@ function scoreKonzentration(q, answerStr) {
 // Bewusst nur Glyphen aus Core-Fonts/WGL4 (Basis-Geometrie + Kartensymbole), die praktisch
 // ueberall rendern - exotischere Symbole (◆ U+25C6, ★, ✦ …) fehlen in manchen Fonts und kaemen
 // als leere Tofu-Kaestchen an. Alle hier wurden auf Render-Sicherheit geprueft.
-const FIG_SHAPES = ["●", "■", "▲", "▼", "♦", "♥", "♠", "♣"];
+const FIG_SHAPES = ["●", "○", "■", "□", "▲", "▼", "♦", "♥", "♠", "♣", "◐", "◑", "◒", "◓"];
 
 function figRepeat(glyph, n) { return new Array(Math.max(1, n)).fill(glyph).join(""); }
 function figShuffle(arr) {
