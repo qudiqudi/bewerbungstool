@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.16.0";
+const APP_VERSION = "1.17.0";
 
 const CHANGELOG = [
+  {
+    version: "1.17.0",
+    date: "27.06.2026",
+    items: [
+      "Tests können jetzt auch Sprachlogik-Aufgaben enthalten – verbale Denkaufgaben wie Analogien, Wortbeziehungen und logische Schlussfolgerungen, wie sie in vielen Einstellungstests vorkommen. Sie funktionieren wie eine Multiple-Choice-Frage.",
+    ],
+  },
   {
     version: "1.16.0",
     date: "27.06.2026",
@@ -1056,7 +1063,7 @@ const QUESTIONS_SCHEMA = {
         type: "object",
         properties: {
           id: { type: "integer" },
-          typ: { type: "string", enum: ["multiple_choice", "offen", "reihenfolge", "zahlenreihe"] },
+          typ: { type: "string", enum: ["multiple_choice", "offen", "reihenfolge", "zahlenreihe", "sprachlogik"] },
           kategorie: { type: "string", description: "z. B. Fachwissen, Soft Skills, Situativ" },
           schwierigkeit: {
             type: "string",
@@ -1549,7 +1556,7 @@ function normalizeQuizData(result, jobText = "") {
   if (!result || typeof result !== "object" || !Array.isArray(result.fragen)) {
     throw new Error("Die Modellantwort hatte nicht die erwartete Form (keine Fragenliste).");
   }
-  const validTyp = (t) => (t === "multiple_choice" || t === "offen" || t === "reihenfolge" || t === "zahlenreihe" ? t : "offen");
+  const validTyp = (t) => (t === "multiple_choice" || t === "offen" || t === "reihenfolge" || t === "zahlenreihe" || t === "sprachlogik" ? t : "offen");
   const validDiff = (d) => (d === "leicht" || d === "mittel" || d === "schwer" ? d : "");
   const fragen = [];
   result.fragen.forEach((q, i) => {
@@ -1559,13 +1566,13 @@ function normalizeQuizData(result, jobText = "") {
     let typ = validTyp(q.typ);
     let optionen = Array.isArray(q.optionen) ? q.optionen.filter((o) => typeof o === "string") : [];
     // Multiple-Choice ohne brauchbare Optionen ist nicht bedienbar -> offene Frage
-    if (typ === "multiple_choice" && optionen.length < 2) { typ = "offen"; optionen = []; }
+    if (mcLike(typ) && optionen.length < 2) { typ = "offen"; optionen = []; }
     // korrekte_indizes defensiv normalisieren: nur gueltige Optionsindizes,
     // ohne Duplikate. Additiv - alte Daten ohne das Feld bleiben [].
     let korrekte_antwort = typeof q.korrekte_antwort === "string" ? q.korrekte_antwort : "";
     let korrekte_indizes = [];
     let erklaerungen = Array.isArray(q.erklaerungen) ? q.erklaerungen.filter((e) => typeof e === "string") : [];
-    if (typ === "multiple_choice") {
+    if (mcLike(typ)) {
       korrekte_indizes = Array.isArray(q.korrekte_indizes)
         ? q.korrekte_indizes
             .map((n) => Number(n))
@@ -3348,12 +3355,19 @@ function mcCorrectIndices(q) {
   return new Set(idx >= 0 ? [idx] : []);
 }
 
+// Modul "sprachlogik" (Plan 3.7): verbale Logik-Aufgaben. Reiner MC-Alias - sie rendern,
+// normalisieren, scoren und werden angezeigt EXAKT wie multiple_choice (eigene Kategorie/Typ
+// nur fuer Generierung + spaetere SEO). mcLike() buendelt "verhaelt sich wie MC".
+function mcLike(typ) {
+  return typ === "multiple_choice" || typ === "sprachlogik";
+}
+
 // true, wenn die Frage als Mehrfachauswahl behandelt werden soll. Haengt an der
 // Zahl der RICHTIGEN Optionen, nicht an einem Schema-Flag: liefert das Modell
 // faelschlich nur eine richtige Option, faellt die Frage automatisch auf
 // sauberes Single-Choice zurueck.
 function mcIsMulti(q) {
-  return q.typ === "multiple_choice" && mcCorrectIndices(q).size > 1;
+  return mcLike(q.typ) && mcCorrectIndices(q).size > 1;
 }
 
 // Mehrfach-MC-Auswahl <-> answers-String. Format: JSON-Array der ausgewaehlten
@@ -3406,7 +3420,7 @@ function scoreMultiMc(q, answerStr) {
 // das Dedup pro Stelle; Optionen sortiert = reihenfolge-unabhaengig.
 function reportFrageKey(q) {
   const optionen = Array.isArray(q.optionen) ? q.optionen.map(normText).sort() : [];
-  return [normText(q.frage), q.typ === "multiple_choice" ? "mc" : "offen", ...optionen].join(" | ");
+  return [normText(q.frage), mcLike(q.typ) ? "mc" : "offen", ...optionen].join(" | ");
 }
 
 // Der exakte Schluessel oben faengt nur wortgleiche Wiederholungen. Schwache
@@ -4614,7 +4628,7 @@ function renderQuestion() {
   const hasAnswer = (answers[current] || "").trim() !== "";
   const locked = (isRevealed && hasAnswer) || reviewing;
 
-  if (q.typ === "multiple_choice" && mcIsMulti(q)) {
+  if (mcLike(q.typ) && mcIsMulti(q)) {
     // Mehrfach-MC: Checkbox-Logik (Klick toggelt), Auswahl als Index-Menge.
     // Die Hinweiszeile liegt in einem eigenen Container (nicht als Geschwister
     // der Options-Buttons), damit die nth-child-Animationsstaffelung und der
@@ -4664,7 +4678,7 @@ function renderQuestion() {
       optWrap.appendChild(btn);
     });
     area.appendChild(optWrap);
-  } else if (q.typ === "multiple_choice") {
+  } else if (mcLike(q.typ)) {
     q.optionen.forEach((opt, idx) => {
       const btn = document.createElement("button");
       let cls = "option";
@@ -5062,13 +5076,13 @@ function renderLearnArea(q, isRevealed) {
         [...correct].sort((a, b) => a - b).map((i) => q.optionen[i]).filter((t) => t).join(", ");
     } else {
       answerLine.textContent =
-        (q.typ === "multiple_choice" || q.typ === "zahlenreihe" ? "Richtige Antwort: " : "Musterantwort: ") + (q.korrekte_antwort || "");
+        (mcLike(q.typ) || q.typ === "zahlenreihe" ? "Richtige Antwort: " : "Musterantwort: ") + (q.korrekte_antwort || "");
     }
     box.appendChild(answerLine);
   }
 
   const erklaerungen = Array.isArray(q.erklaerungen) ? q.erklaerungen : [];
-  if (q.typ === "multiple_choice" && erklaerungen.length) {
+  if (mcLike(q.typ) && erklaerungen.length) {
     const ul = document.createElement("ul");
     ul.className = "option-explanations";
     q.optionen.forEach((opt, i) => {
@@ -6378,7 +6392,7 @@ function sanitizeReport(rep) {
     date: Number.isFinite(Number(rep.date)) ? Number(rep.date) : Date.now(),
     fragenKey: typeof rep.fragenKey === "string" ? clip(rep.fragenKey, 2000) : "",
     frage: clip(rep.frage, 600),
-    typ: rep.typ === "multiple_choice" ? "multiple_choice" : "offen",
+    typ: mcLike(rep.typ) ? "multiple_choice" : "offen",
     kategorie_fachlich: clip(rep.kategorie_fachlich, 200),
     korrekte_antwort: clip(rep.korrekte_antwort, 300),
     optionen: Array.isArray(rep.optionen) ? rep.optionen.slice(0, 8).map((o) => clip(o, 200)) : [],
@@ -9084,7 +9098,7 @@ $("btn-report-submit").addEventListener("click", () => {
   const saved = addReport({
     fragenKey: reportFrageKey(q),
     frage: clip(q.frage || "", 600),
-    typ: q.typ === "multiple_choice" ? "multiple_choice" : "offen",
+    typ: mcLike(q.typ) ? "multiple_choice" : "offen",
     kategorie_fachlich: clip(q.kategorie || "", 200),
     korrekte_antwort: kontext.answersSecret ? "" : clip(q.korrekte_antwort || "", 300),
     optionen,
