@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.23.0";
+const APP_VERSION = "1.24.0";
 
 const CHANGELOG = [
+  {
+    version: "1.24.0",
+    date: "27.06.2026",
+    items: [
+      "Mehr Abwechslung bei Figuren-/Matrizenaufgaben: Neben den bisherigen Mustern gibt es jetzt auch Aufgaben mit zwei Symbolen je Feld (eines je Zeile, eines je Spalte) sowie Muster, bei denen die Anzahl diagonal wandert – so wird das Üben weniger eintönig.",
+    ],
+  },
   {
     version: "1.23.0",
     date: "27.06.2026",
@@ -2019,9 +2026,39 @@ function figFamilyDiagonalCycle() {
   return figPuzzleObj(matrix, figFinalizeOptions(correct, cands), correct, "die Formen wandern diagonal durch.");
 }
 
+// Familie D: Kombination - jede Zelle traegt ZWEI Symbole; das erste bestimmt die Reihe,
+// das zweite die Spalte (disjunkte Symbolmengen, damit die Regel eindeutig ablesbar ist).
+function figFamilyComboRowCol() {
+  const both = figPick(FIG_SHAPES, 6);
+  const rowSh = both.slice(0, 3), colSh = both.slice(3, 6);
+  const cell = (r, c) => rowSh[r] + colSh[c];
+  const matrix = [0, 1, 2].map((r) => [0, 1, 2].map((c) => cell(r, c)));
+  const correct = cell(2, 2);
+  matrix[2][2] = "";
+  const cands = [
+    rowSh[2] + colSh[1], rowSh[1] + colSh[2], rowSh[0] + colSh[2],
+    rowSh[2] + colSh[0], rowSh[1] + colSh[1],
+  ];
+  return figPuzzleObj(matrix, figFinalizeOptions(correct, cands), correct, "erstes Symbol je Reihe, zweites Symbol je Spalte.");
+}
+// Familie E: gleiche Form, aber die ANZAHL wandert diagonal (1, 2, 3 je Diagonale).
+function figFamilyDiagonalCount() {
+  const sh = figPick(FIG_SHAPES, 1)[0];
+  const cnt = (r, c) => ((r + c) % 3) + 1;
+  const cell = (r, c) => figRepeat(sh, cnt(r, c));
+  const matrix = [0, 1, 2].map((r) => [0, 1, 2].map((c) => cell(r, c)));
+  const correct = cell(2, 2);
+  matrix[2][2] = "";
+  const cands = [figRepeat(sh, 1), figRepeat(sh, 2), figRepeat(sh, 3), figRepeat(sh, 4)];
+  return figPuzzleObj(matrix, figFinalizeOptions(correct, cands), correct, "gleiche Form, die Anzahl wandert diagonal (1, 2, 3).");
+}
+
 // Ein vollstaendiges, garantiert eindeutiges Figural-Raetsel bauen (zufaellige Familie).
 function generateFiguralPuzzle() {
-  const families = [figFamilyShapeRowCountCol, figFamilyCountRowShapeCol, figFamilyDiagonalCycle];
+  const families = [
+    figFamilyShapeRowCountCol, figFamilyCountRowShapeCol, figFamilyDiagonalCycle,
+    figFamilyComboRowCol, figFamilyDiagonalCount,
+  ];
   return families[Math.floor(Math.random() * families.length)]();
 }
 
