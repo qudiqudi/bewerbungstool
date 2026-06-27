@@ -1078,7 +1078,12 @@ const QUESTIONS_SCHEMA = {
         type: "object",
         properties: {
           id: { type: "integer" },
-          typ: { type: "string", enum: ["multiple_choice", "offen", "reihenfolge", "zahlenreihe", "sprachlogik", "konzentration"] },
+          // Hinweis: 'konzentration' ist bewusst NICHT in dieser BYOK-Generierungs-Enum. Der Typ
+          // braucht die Felder material/zielzeichen, die diese eingefrorene BYOK-Basis nicht fuehrt
+          // (sie in 'required' zu zwingen wuerde JEDE BYOK-Frage belasten). Konzentrationsaufgaben
+          // entstehen nur im Hosted-Modus (Backend-Schema); der Client RENDERT/scort sie ueber
+          // normalizeQuizData unabhaengig von diesem Schema.
+          typ: { type: "string", enum: ["multiple_choice", "offen", "reihenfolge", "zahlenreihe", "sprachlogik"] },
           kategorie: { type: "string", description: "z. B. Fachwissen, Soft Skills, Situativ" },
           schwierigkeit: {
             type: "string",
@@ -1674,7 +1679,10 @@ function normalizeQuizData(result, jobText = "") {
     // Nur als eigener Typ behalten, wenn beide Felder brauchbar sind; sonst defensiv "offen".
     let material = typeof q.material === "string" ? q.material.trim() : "";
     let zielzeichen = typeof q.zielzeichen === "string" ? q.zielzeichen.trim() : "";
-    if (typ === "konzentration" && (!material || !zielzeichen)) {
+    // Nur als konzentration behalten, wenn material da ist UND zielzeichen GENAU EIN Zeichen
+    // (Codepoint) ist - ein Mehrzeichen-Ziel waere gegen die space-getrennte material-Reihe
+    // unzaehlbar. Sonst defensiv auf "offen".
+    if (typ === "konzentration" && (!material || Array.from(zielzeichen).length !== 1)) {
       typ = "offen";
       material = "";
       zielzeichen = "";
@@ -7303,10 +7311,10 @@ function srPickFields(q) {
 function srEligible(q) {
   if (!q || !SR_TYPES.includes(q.typ) || typeof q.frage !== "string" || !q.frage.trim()) return false;
   if (q.typ === "zahlenreihe") return Number.isFinite(parseZahl(q.korrekte_antwort));
-  // konzentration: braucht nicht-leeres material UND zielzeichen (Client zaehlt selbst nach).
+  // konzentration: braucht nicht-leeres material UND genau EIN Zielzeichen (Client zaehlt selbst nach).
   if (q.typ === "konzentration") {
     return typeof q.material === "string" && q.material.trim() !== ""
-      && typeof q.zielzeichen === "string" && q.zielzeichen.trim() !== "";
+      && typeof q.zielzeichen === "string" && Array.from(q.zielzeichen.trim()).length === 1;
   }
   // sprachlogik: braucht >=2 nicht-leere String-Optionen + genau eine bekannte richtige Option.
   // (String-Pruefung haelt fehlerhafte Import-Payloads draussen, die sonst beim Rendern
