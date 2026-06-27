@@ -58,8 +58,10 @@ self.addEventListener("fetch", (event) => {
         // waehrend eines Deploys) wuerden sonst den funktionierenden
         // Offline-Fallback ueberschreiben
         // Einmal-Auth-URLs (Magic-Link/OAuth-Handoff) nie cachen, sonst landet
-        // ein Token dauerhaft im Cache.
-        if (res.ok && !/[?&](auth|code|session)=/.test(url.search)) {
+        // ein Token dauerhaft im Cache. URLSearchParams dekodiert die Parameter-
+        // namen genau wie app.js — sonst umginge z. B. ?c%6fde=… den Filter.
+        const isAuthUrl = ["auth", "code", "session"].some((k) => url.searchParams.has(k));
+        if (res.ok && !isAuthUrl) {
           const copy = res.clone();
           caches.open(CACHE)
             .then((cache) => cache.put(event.request, copy))
