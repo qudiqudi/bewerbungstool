@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.22.0";
+const APP_VERSION = "1.23.0";
 
 const CHANGELOG = [
+  {
+    version: "1.23.0",
+    date: "27.06.2026",
+    items: [
+      "Neu: Übungs-Fortschritt. Im Üben-Bereich siehst du jetzt je Modul deine Trefferquote und die Zahl der gespielten Runden, und nach jeder Runde deine längste Serie richtiger Antworten – damit du erkennst, wo du schon sicher bist und was sich zu üben lohnt. Alles bleibt lokal auf deinem Gerät.",
+    ],
+  },
   {
     version: "1.22.0",
     date: "27.06.2026",
@@ -7712,10 +7719,21 @@ function renderSrHomeCard() {
   $("sr-text").textContent = `Fällige Übungen: ${due} ${due === 1 ? "Aufgabe" : "Aufgaben"} (Zahlenreihen, Sprachlogik & Konzentration) warten auf Wiederholung.`;
 }
 
+// view-sr-Kopf je Modus setzen (Wiederholung vs. freies Ueben) - sonst stuende ueber dem
+// Uebungs-Picker der Wiederhol-Titel.
+function setSrHeader(mode) {
+  const t = $("sr-title"), sub = $("sr-subtitle");
+  if (t) t.textContent = mode === "practice" ? "Module üben" : "Übungen wiederholen";
+  if (sub) sub.textContent = mode === "practice"
+    ? "Frisch generierte Aufgaben, sofort und exakt auf deinem Gerät ausgewertet."
+    : "Zahlenreihen, Sprachlogik und Konzentration aus deinen Tests – im Abstand wiederholt, damit sie sitzen. Wird sofort auf deinem Gerät bewertet.";
+}
+
 function openSrReview() {
   const due = srDueCards();
   if (!due.length) { goHome(); return; }
   srSession = { cards: due, i: 0, answer: "", checked: false, result: null, richtig: 0, geübt: 0 };
+  setSrHeader("review");
   showView("view-sr");
   renderSrCardView();
 }
@@ -7729,9 +7747,56 @@ const UEB_TYPEN = [
 ];
 function uebLabel(typ) { const t = UEB_TYPEN.find((x) => x.typ === typ); return t ? t.label : typ; }
 
+// --- Uebungs-Statistik (Plan 3.x): rein lokaler Fortschritt je Modul (kein Server) ---
+const UEBEN_STATS_KEY = "bewerbungstool.uebenstats";
+const UEBEN_TYP_SET = new Set(UEB_TYPEN.map((t) => t.typ));
+// Defensiv lesen: nie werfen, immer eine brauchbare Form zurueckgeben.
+function loadUebenStats() {
+  try {
+    const d = JSON.parse(localStorage.getItem(UEBEN_STATS_KEY));
+    if (d && typeof d === "object" && d.byType && typeof d.byType === "object") return { v: 1, byType: d.byType };
+  } catch { /* ignorieren */ }
+  return { v: 1, byType: {} };
+}
+function saveUebenStats(stats) {
+  try { localStorage.setItem(UEBEN_STATS_KEY, JSON.stringify(stats)); return true; } catch { return false; }
+}
+// Nicht-negative Ganzzahl; nicht-endliche Werte (z. B. Infinity aus 1e309 in einem Import)
+// werden auf 0 abgewiesen - sonst serialisierte JSON.stringify sie als null und korrumpierte
+// den Store.
+function uebNat(v) { const n = Number(v); return Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0; }
+// Eine abgeschlossene Uebungsrunde verbuchen. Werte werden additiv/maximiert fortgeschrieben.
+function recordPracticeRound(typ, attempted, correct, maxStreak) {
+  if (!UEBEN_TYP_SET.has(typ)) return loadUebenStats();
+  const att = uebNat(attempted);
+  const cor = Math.min(att, uebNat(correct));
+  const strk = uebNat(maxStreak);
+  if (att <= 0) return loadUebenStats();
+  const stats = loadUebenStats();
+  const prev = stats.byType[typ] && typeof stats.byType[typ] === "object" ? stats.byType[typ] : {};
+  stats.byType[typ] = {
+    runs: uebNat(prev.runs) + 1,
+    attempted: uebNat(prev.attempted) + att,
+    correct: uebNat(prev.correct) + cor,
+    bestStreak: Math.max(uebNat(prev.bestStreak), strk),
+    lastPlayed: Date.now(),
+  };
+  saveUebenStats(stats);
+  return stats;
+}
+// Kompakte Trefferquote/Runden-Zeile fuer einen Typ; "" wenn noch nichts geuebt wurde.
+function uebStatsLine(typ, stats) {
+  const e = (stats || loadUebenStats()).byType[typ];
+  if (!e || !Number(e.attempted)) return "";
+  const pct = Math.round((Number(e.correct) || 0) / Number(e.attempted) * 100);
+  const runs = Math.max(0, Math.trunc(Number(e.runs) || 0));
+  return `Trefferquote ${pct} % · ${runs} ${runs === 1 ? "Runde" : "Runden"}`;
+}
+
 // Typ-Auswahl im view-sr-Container rendern (kein Modell, kein Token-Verbrauch).
 function openPracticePicker() {
   srSession = null;
+  setSrHeader("practice");
   showView("view-sr");
   const wrap = $("sr-cards-container");
   if (!wrap) return;
@@ -7740,13 +7805,14 @@ function openPracticePicker() {
   h.className = "sr-frage";
   h.textContent = "Was möchtest du üben?";
   wrap.appendChild(h);
-  const hint = document.createElement("p");
-  hint.className = "hint";
-  hint.textContent = "Frisch generierte Aufgaben, sofort und exakt auf deinem Gerät ausgewertet.";
-  wrap.appendChild(hint);
+  const stats = loadUebenStats();
   UEB_TYPEN.forEach((t) => {
     const btn = document.createElement("button");
-    btn.className = "option"; btn.type = "button"; btn.textContent = t.label;
+    btn.className = "option ueb-pick"; btn.type = "button";
+    const line = uebStatsLine(t.typ, stats);
+    const lbl = document.createElement("span"); lbl.className = "ueb-pick-label"; lbl.textContent = t.label;
+    btn.appendChild(lbl);
+    if (line) { const s = document.createElement("span"); s.className = "ueb-pick-stat"; s.textContent = line; btn.appendChild(s); }
     btn.addEventListener("click", () => startPractice(t.typ));
     wrap.appendChild(btn);
   });
@@ -7756,7 +7822,8 @@ function openPracticePicker() {
 function startPractice(typ) {
   const cards = [];
   for (let i = 0; i < UEB_BATCH; i++) cards.push({ id: "ueb_" + typ + "_" + i, q: generateUebungByType(typ) });
-  srSession = { cards, i: 0, answer: "", checked: false, result: null, richtig: 0, geübt: 0, practice: true, genType: typ };
+  srSession = { cards, i: 0, answer: "", checked: false, result: null, richtig: 0, geübt: 0, practice: true, genType: typ, curStreak: 0, maxStreak: 0 };
+  setSrHeader("practice");
   showView("view-sr");
   renderSrCardView();
 }
@@ -7864,6 +7931,11 @@ function renderSrCardView() {
       const res = scoreSrCard(q, s.answer);
       s.checked = true; s.result = res; s.geübt++;
       if (res.correct) s.richtig++;
+      // Im Uebungs-Modus die laengste Serie richtiger Antworten mitfuehren (Statistik).
+      if (s.practice) {
+        s.curStreak = res.correct ? (s.curStreak || 0) + 1 : 0;
+        if (s.curStreak > (s.maxStreak || 0)) s.maxStreak = s.curStreak;
+      }
       // Im Wiederhol-Modus den SR-Plan sofort aktualisieren; im Uebungs-Modus sind die
       // Karten fluechtig (frisch generiert) und beruehren das Deck NICHT.
       if (!s.practice) {
@@ -7881,6 +7953,9 @@ function renderSrSummary(wrap) {
   const s = srSession;
   const practice = !!s.practice;
   const genType = s.genType;
+  const geübt = s.geübt, richtig = s.richtig, maxStreak = s.maxStreak || 0;
+  // Uebungsrunde VOR dem Texten verbuchen, damit die Gesamt-Trefferquote diese Runde einschliesst.
+  const stats = practice ? recordPracticeRound(genType, geübt, richtig, maxStreak) : null;
   const h = document.createElement("p");
   h.className = "sr-frage";
   h.textContent = "Geschafft!";
@@ -7888,9 +7963,22 @@ function renderSrSummary(wrap) {
   const p = document.createElement("p");
   p.className = "hint";
   p.textContent = practice
-    ? `${s.geübt} ${s.geübt === 1 ? "Aufgabe" : "Aufgaben"} geübt, ${s.richtig} richtig.`
-    : `${s.geübt} ${s.geübt === 1 ? "Aufgabe" : "Aufgaben"} wiederholt, ${s.richtig} richtig. Gut bewertete Aufgaben kommen erst spaeter wieder dran.`;
+    ? `${geübt} ${geübt === 1 ? "Aufgabe" : "Aufgaben"} geübt, ${richtig} richtig.`
+    : `${geübt} ${geübt === 1 ? "Aufgabe" : "Aufgaben"} wiederholt, ${richtig} richtig. Gut bewertete Aufgaben kommen erst spaeter wieder dran.`;
   wrap.appendChild(p);
+  if (practice) {
+    const line = uebStatsLine(genType, stats);
+    const e = stats && stats.byType[genType];
+    const bits = [];
+    if (line) bits.push(line);
+    if (e && Number(e.bestStreak) > 0) bits.push(`längste Serie ${Number(e.bestStreak)}`);
+    if (bits.length) {
+      const st = document.createElement("p");
+      st.className = "hint";
+      st.textContent = `${uebLabel(genType)}: ${bits.join(" · ")}`;
+      wrap.appendChild(st);
+    }
+  }
   srSession = null;
   if (practice) {
     const again = document.createElement("button");
@@ -9142,6 +9230,7 @@ function exportData() {
     settings: exportedSettings,
     profile: loadProfile(), // nicht-identifizierendes Profil gehoert ins Backup (Plan 3.1)
     srDeck: loadSrDeck(), // Spaced-Repetition-Deck (Plan 3.8) gehoert ins Backup/den Umzug
+    uebenStats: loadUebenStats(), // Uebungs-Fortschritt je Modul (Plan 3.x) gehoert ins Backup
     history: loadHistory(),
     reports: loadReports(),
   };
@@ -9166,7 +9255,7 @@ async function importData(text) {
   } catch {
     throw new Error("Die Datei ist kein gültiges JSON.");
   }
-  if (!data || typeof data !== "object" || (!data.settings && !data.history && !data.reports && !data.profile && !data.srDeck)) {
+  if (!data || typeof data !== "object" || (!data.settings && !data.history && !data.reports && !data.profile && !data.srDeck && !data.uebenStats)) {
     throw new Error("Die Datei enthält keine erkennbaren Bewerbungstool-Daten.");
   }
 
@@ -9212,6 +9301,32 @@ async function importData(text) {
       room--;
     }
     if (srImported) saveSrDeck(deck, protectedIds);
+  }
+
+  // Uebungs-Statistik mergen: je Typ und Feld das MAXIMUM aus lokal und importiert nehmen
+  // (idempotent - ein erneuter Import blaeht nichts auf - und additiv, da ein reicheres
+  // Backup hoehere Werte mitbringt). Defensiv: nur bekannte Typen, nur Zahlen.
+  if (data.uebenStats && typeof data.uebenStats === "object" && data.uebenStats.byType && typeof data.uebenStats.byType === "object") {
+    const stats = loadUebenStats();
+    let merged = false;
+    for (const typ of UEBEN_TYP_SET) {
+      const inc = data.uebenStats.byType[typ];
+      if (!inc || typeof inc !== "object") continue;
+      const cur = stats.byType[typ] && typeof stats.byType[typ] === "object" ? stats.byType[typ] : {};
+      const mx = (a, b) => Math.max(uebNat(a), uebNat(b));
+      const next = {
+        runs: mx(cur.runs, inc.runs),
+        attempted: mx(cur.attempted, inc.attempted),
+        correct: mx(cur.correct, inc.correct),
+        bestStreak: mx(cur.bestStreak, inc.bestStreak),
+        lastPlayed: mx(cur.lastPlayed, inc.lastPlayed),
+      };
+      // correct nie groesser als attempted (Konsistenz nach dem Max-Merge).
+      next.correct = Math.min(next.correct, next.attempted);
+      stats.byType[typ] = next;
+      merged = true;
+    }
+    if (merged) saveUebenStats(stats);
   }
 
   let settingsImported = false;
