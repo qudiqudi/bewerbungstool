@@ -7226,8 +7226,12 @@ function srPickFields(q) {
 function srEligible(q) {
   if (!q || !SR_TYPES.includes(q.typ) || typeof q.frage !== "string" || !q.frage.trim()) return false;
   if (q.typ === "zahlenreihe") return Number.isFinite(parseZahl(q.korrekte_antwort));
-  // sprachlogik: braucht Optionen + genau eine bekannte richtige Option.
-  return Array.isArray(q.optionen) && q.optionen.length >= 2 && mcCorrectIndices(q).size === 1;
+  // sprachlogik: braucht >=2 nicht-leere String-Optionen + genau eine bekannte richtige Option.
+  // (String-Pruefung haelt fehlerhafte Import-Payloads draussen, die sonst beim Rendern
+  // an opt.trim() crashen wuerden.)
+  return Array.isArray(q.optionen) && q.optionen.length >= 2
+    && q.optionen.every((o) => typeof o === "string" && o.trim())
+    && mcCorrectIndices(q).size === 1;
 }
 // Beim Abschluss eines NORMALEN Tests (kein Vertiefungsbogen) die uebertragbaren Aufgaben
 // ins Deck ernten. Neue Karte: erste Wiederholung morgen. Vorhandene behalten ihren Plan.
@@ -7257,17 +7261,25 @@ function srDueCards(deck) {
 function scheduleSrCard(deck, id, correct) {
   const c = deck.cards[id];
   if (!c) return;
+  // Defensive: vorhandene Werte in gueltige Bereiche zwingen, bevor wir rechnen
+  // (ein manipuliertes/fehlerhaftes Import-Intervall darf nie ein negatives oder
+  // nie wieder faelliges Intervall erzeugen).
+  let ease = Math.min(2.8, Math.max(1.3, Number(c.ease) || 2.5));
+  let interval = Math.max(1, Math.round(Number(c.interval) || 1));
+  let reps = Math.max(0, Math.trunc(Number(c.reps) || 0));
+  let lapses = Math.max(0, Math.trunc(Number(c.lapses) || 0));
   if (correct) {
-    c.reps = (c.reps || 0) + 1;
-    c.ease = Math.min(2.8, (c.ease || 2.5) + 0.1);
-    c.interval = c.reps <= 1 ? 1 : c.reps === 2 ? 3 : c.reps === 3 ? 7 : Math.round((c.interval || 7) * c.ease);
+    reps += 1;
+    ease = Math.min(2.8, ease + 0.1);
+    interval = reps <= 1 ? 1 : reps === 2 ? 3 : reps === 3 ? 7 : Math.max(1, Math.round(interval * ease));
   } else {
-    c.lapses = (c.lapses || 0) + 1;
-    c.reps = 0;
-    c.ease = Math.max(1.3, (c.ease || 2.5) - 0.2);
-    c.interval = 1;
+    lapses += 1;
+    reps = 0;
+    ease = Math.max(1.3, ease - 0.2);
+    interval = 1;
   }
-  c.due = Date.now() + c.interval * SR_DAY;
+  c.ease = ease; c.interval = interval; c.reps = reps; c.lapses = lapses;
+  c.due = Date.now() + interval * SR_DAY;
   c.lastReviewed = Date.now();
 }
 // Lokale, deterministische Bewertung einer SR-Karte (kein LLM): { correct, musterantwort }.
@@ -7344,7 +7356,7 @@ function renderSrCardView() {
       let cls = "option";
       if (s.answer === opt) cls += " selected";
       if (s.checked) {
-        if (opt.trim() === (s.result.musterantwort || "").trim()) cls += " correct";
+        if (String(opt).trim() === (s.result.musterantwort || "").trim()) cls += " correct";
         else if (s.answer === opt) cls += " wrong";
       }
       btn.className = cls; btn.type = "button"; btn.textContent = opt;
@@ -8688,18 +8700,23 @@ async function importData(text) {
   let srImported = 0;
   if (data.srDeck && typeof data.srDeck === "object" && data.srDeck.cards && typeof data.srDeck.cards === "object") {
     const deck = loadSrDeck();
+    // Nur in die freie Kapazitaet importieren: ein Import darf den FIFO-Trim in
+    // saveSrDeck nie dazu bringen, vorhandene LOKALE Karten zu verdraengen.
+    let room = SR_DECK_MAX - Object.keys(deck.cards).length;
     for (const [id, c] of Object.entries(data.srDeck.cards)) {
+      if (room <= 0) break;
       if (deck.cards[id] || !c || typeof c !== "object" || !c.q || !srEligible(c.q)) continue;
       deck.cards[id] = {
         q: srPickFields(c.q),
-        ease: Number.isFinite(Number(c.ease)) ? Number(c.ease) : 2.5,
-        interval: Number.isFinite(Number(c.interval)) ? Number(c.interval) : 1,
-        reps: Number.isInteger(c.reps) ? c.reps : 0,
-        lapses: Number.isInteger(c.lapses) ? c.lapses : 0,
+        ease: Math.min(2.8, Math.max(1.3, Number(c.ease) || 2.5)),
+        interval: Math.max(1, Math.round(Number(c.interval) || 1)),
+        reps: Number.isFinite(Number(c.reps)) ? Math.max(0, Math.trunc(Number(c.reps))) : 0,
+        lapses: Number.isFinite(Number(c.lapses)) ? Math.max(0, Math.trunc(Number(c.lapses))) : 0,
         added: Number.isFinite(Number(c.added)) ? Number(c.added) : Date.now(),
         due: Number.isFinite(Number(c.due)) ? Number(c.due) : Date.now() + SR_DAY,
       };
       srImported++;
+      room--;
     }
     if (srImported) saveSrDeck(deck);
   }
