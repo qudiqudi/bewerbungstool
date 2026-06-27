@@ -3,37 +3,29 @@
   <url>
     <loc>https://jobreif.de/</loc>
     <lastmod>2026-06-27</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://jobreif.de/lernen/</loc>
+    <loc>https://jobreif.de/einstellungstest/</loc>
     <lastmod>2026-06-27</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://jobreif.de/lernen/zahlenreihen.html</loc>
+    <loc>https://jobreif.de/einstellungstest/fachinformatiker-systemintegration/</loc>
     <lastmod>2026-06-27</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://jobreif.de/lernen/sprachlogik.html</loc>
+    <loc>https://jobreif.de/einstellungstest/industriemechaniker/</loc>
     <lastmod>2026-06-27</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://jobreif.de/lernen/konzentration.html</loc>
+    <loc>https://jobreif.de/einstellungstest/kaufmann-im-einzelhandel/</loc>
     <lastmod>2026-06-27</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://jobreif.de/lernen/figuren-matrizen.html</loc>
+    <loc>https://jobreif.de/einstellungstest/bankkaufmann/</loc>
     <lastmod>2026-06-27</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://jobreif.de/einstellungstest/pflegefachmann/</loc>
+    <lastmod>2026-06-27</lastmod>
   </url>
 </urlset>

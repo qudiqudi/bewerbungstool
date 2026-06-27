@@ -20,6 +20,17 @@ jobs:
         run: |
           node --check app.js
           node --check sw.js
+          node --check scripts/generate-seo.mjs
 
       - name: Asset- und Manifest-Integrität prüfen
         run: node .github/scripts/check-integrity.js
+
+      - name: SEO-Output ist aktuell (kein Drift zum Katalog)
+        run: |
+          node scripts/generate-seo.mjs
+          if ! git diff --quiet -- einstellungstest sitemap.xml; then
+            echo "Generiertes SEO-Output weicht vom committeten Stand ab."
+            echo "Bitte 'node scripts/generate-seo.mjs' lokal laufen lassen und committen."
+            git --no-pager diff --stat -- einstellungstest sitemap.xml
+            exit 1
+          fi

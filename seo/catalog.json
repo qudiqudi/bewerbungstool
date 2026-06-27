@@ -1,0 +1,167 @@
+{
+  "version": 1,
+  "baseUrl": "https://jobreif.de",
+  "updatedAt": "2026-06-27",
+  "testTypes": {
+    "fachwissen": {
+      "label": "Fachwissen zur Stelle",
+      "description": "Fragen, die direkt aus der echten Stellenanzeige abgeleitet werden – genau auf die Aufgaben und Anforderungen dieser Position zugeschnitten."
+    },
+    "sprachlogik": {
+      "label": "Sprachlogik & Analogien",
+      "description": "Wortbeziehungen, Analogien und sprachliches Schlussfolgern, wie sie in vielen Einstellungstests vorkommen."
+    },
+    "zahlenreihe": {
+      "label": "Zahlenreihen",
+      "description": "Zahlenfolgen fortsetzen – testet logisches Denken und Rechensicherheit unter Zeitdruck."
+    },
+    "konzentration": {
+      "label": "Konzentration & Sorgfalt",
+      "description": "Zeichen zählen und Muster prüfen: misst Genauigkeit und Aufmerksamkeit bei monotonen Aufgaben."
+    },
+    "figural": {
+      "label": "Figurale Matrizen",
+      "description": "Bildliche Logik-Aufgaben: die fehlende Figur in einer Reihe erkennen – sprachfrei und beliebt in Eignungstests."
+    }
+  },
+  "pages": [
+    {
+      "slug": "fachinformatiker-systemintegration",
+      "beruf": "Fachinformatiker für Systemintegration",
+      "title": "Einstellungstest Fachinformatiker Systemintegration üben",
+      "description": "Übe den Einstellungstest für Fachinformatiker Systemintegration: Fachfragen aus echten Stellenanzeigen plus Sprachlogik, Zahlenreihen und figurale Aufgaben – kostenlos und mit KI-Feedback.",
+      "intro": "Bereite dich gezielt auf den Einstellungstest und das Vorstellungsgespräch als Fachinformatiker für Systemintegration vor. jobreif erzeugt aus einer echten Stellenanzeige einen passgenauen Test – inklusive der typischen Eignungstest-Module, die viele IT-Arbeitgeber einsetzen.",
+      "testTypes": ["fachwissen", "sprachlogik", "zahlenreihe", "figural"],
+      "samples": [
+        {
+          "type": "zahlenreihe",
+          "question": "Setze die Reihe fort: 3, 6, 12, 24, ?",
+          "options": ["30", "36", "48", "60"],
+          "answer": "48 – jede Zahl ist das Doppelte der vorigen."
+        },
+        {
+          "type": "sprachlogik",
+          "question": "Server verhält sich zu Client wie Frage zu …?",
+          "options": ["Netzwerk", "Antwort", "Kabel", "Protokoll"],
+          "answer": "Antwort – ein Client stellt eine Anfrage, der Server liefert die Antwort; analog Frage → Antwort."
+        }
+      ],
+      "faq": [
+        { "q": "Was wird im Einstellungstest für Fachinformatiker Systemintegration geprüft?", "a": "Meist eine Mischung aus IT-Fachwissen (Netzwerke, Betriebssysteme, Hardware), logischem Denken (Zahlenreihen, Matrizen) und Sprachverständnis. jobreif bildet beides ab: stellenspezifische Fachfragen plus standardisierte Eignungstest-Module." },
+        { "q": "Kostet das Üben etwas?", "a": "Nein. Du kannst kostenlos und ohne Anmeldung einen Test aus einer Stellenanzeige erstellen und direkt üben." },
+        { "q": "Brauche ich eine konkrete Stellenanzeige?", "a": "Es funktioniert am besten mit einer echten Anzeige (Text oder Link), weil die Fachfragen daraus abgeleitet werden. Du kannst aber auch eine allgemeine Beschreibung einfügen." }
+      ],
+      "lastmod": "2026-06-27"
+    },
+    {
+      "slug": "industriemechaniker",
+      "beruf": "Industriemechaniker",
+      "title": "Einstellungstest Industriemechaniker üben",
+      "description": "Einstellungstest Industriemechaniker kostenlos üben: technisches Verständnis, Zahlenreihen, Konzentration und figurale Logik – plus Fachfragen aus deiner echten Stellenanzeige mit KI-Feedback.",
+      "intro": "Trainiere den Einstellungstest für Industriemechaniker mit realistischen Aufgaben. jobreif macht aus einer Stellenanzeige einen passenden Test und ergänzt die klassischen Eignungstest-Module wie Zahlenreihen, Konzentration und figurale Matrizen.",
+      "testTypes": ["fachwissen", "zahlenreihe", "konzentration", "figural"],
+      "samples": [
+        {
+          "type": "zahlenreihe",
+          "question": "Setze die Reihe fort: 2, 5, 11, 23, ?",
+          "options": ["35", "41", "46", "47"],
+          "answer": "47 – jeweils verdoppeln und 1 addieren (×2 + 1)."
+        },
+        {
+          "type": "konzentration",
+          "question": "Wie oft kommt der Buchstabe E in dieser Reihe vor?  B E D E F E E C E A",
+          "answer": "5-mal."
+        }
+      ],
+      "faq": [
+        { "q": "Welche Aufgaben kommen im Einstellungstest für Industriemechaniker?", "a": "Typisch sind technisches und mathematisches Grundverständnis, räumliches Vorstellungsvermögen (figurale Aufgaben), Konzentrationsaufgaben und Fragen zum Berufsbild. jobreif deckt diese Module ab und ergänzt Fachfragen aus deiner Anzeige." },
+        { "q": "Wie realistisch sind die Aufgaben?", "a": "Die Eignungstest-Module orientieren sich an gängigen Testformaten; die Fachfragen entstehen aus der konkreten Stellenanzeige – damit übst du nah am echten Auswahlverfahren." },
+        { "q": "Läuft das auch auf dem Handy?", "a": "Ja, jobreif ist eine Web-App und funktioniert direkt im Browser auf Smartphone, Tablet und Desktop – ohne Installation." }
+      ],
+      "lastmod": "2026-06-27"
+    },
+    {
+      "slug": "kaufmann-im-einzelhandel",
+      "beruf": "Kaufmann im Einzelhandel",
+      "title": "Einstellungstest Kaufmann im Einzelhandel üben",
+      "description": "Einstellungstest Kaufmann/-frau im Einzelhandel kostenlos üben: Prozentrechnen, Sprachlogik, Konzentration und Fachfragen aus echten Stellenanzeigen – mit sofortigem KI-Feedback.",
+      "intro": "Bereite dich auf den Einstellungstest im Einzelhandel vor: kaufmännisches Rechnen, Sprachverständnis und Sorgfalt. jobreif erzeugt aus einer Stellenanzeige einen passgenauen Test und ergänzt die typischen Eignungstest-Aufgaben.",
+      "testTypes": ["fachwissen", "sprachlogik", "zahlenreihe", "konzentration"],
+      "samples": [
+        {
+          "type": "zahlenreihe",
+          "question": "Ein Artikel kostet 80 €, im Schlussverkauf 25 % günstiger. Setze die Logik fort – welcher Preis bleibt?",
+          "options": ["55 €", "60 €", "65 €", "70 €"],
+          "answer": "60 € – 25 % von 80 € sind 20 €, also 80 − 20 = 60 €."
+        },
+        {
+          "type": "sprachlogik",
+          "question": "Kunde verhält sich zu Beratung wie Ware zu …?",
+          "options": ["Lager", "Präsentation", "Kasse", "Preis"],
+          "answer": "Präsentation – der Kunde erhält Beratung, die Ware wird präsentiert (beides die zugewandte Leistung)."
+        }
+      ],
+      "faq": [
+        { "q": "Was wird im Einstellungstest für Einzelhandelskaufleute gefragt?", "a": "Häufig kaufmännisches Rechnen (Prozente, Dreisatz), Sprachverständnis, Konzentration und Fragen zu Kundenorientierung und Warenkunde. jobreif bildet das mit Modulen plus Fachfragen aus deiner Anzeige ab." },
+        { "q": "Hilft mir das auch fürs Vorstellungsgespräch?", "a": "Ja. Neben dem Test bekommst du offene Fragen und KI-Feedback zu deinen Antworten – gutes Training für das echte Gespräch." },
+        { "q": "Werden meine Daten gespeichert?", "a": "Deine Eingaben und Ergebnisse bleiben in deinem Browser. jobreif ist auf Datensparsamkeit ausgelegt." }
+      ],
+      "lastmod": "2026-06-27"
+    },
+    {
+      "slug": "bankkaufmann",
+      "beruf": "Bankkaufmann",
+      "title": "Einstellungstest Bankkaufmann üben",
+      "description": "Einstellungstest Bankkaufmann/-frau kostenlos üben: Wirtschaftswissen, Zahlenreihen, Sprachlogik und Fachfragen aus echten Stellenanzeigen – mit KI-Feedback und ohne Anmeldung.",
+      "intro": "Übe den Einstellungstest für Bankkaufleute mit realistischen Aufgaben zu Wirtschaft, Logik und Sprache. jobreif macht aus einer Stellenanzeige einen passenden Test und ergänzt die gängigen Eignungstest-Module.",
+      "testTypes": ["fachwissen", "sprachlogik", "zahlenreihe", "figural"],
+      "samples": [
+        {
+          "type": "zahlenreihe",
+          "question": "Setze die Reihe fort: 100, 95, 85, 70, ?",
+          "options": ["55", "50", "60", "45"],
+          "answer": "50 – die Abstände wachsen: −5, −10, −15, −20."
+        },
+        {
+          "type": "sprachlogik",
+          "question": "Kredit verhält sich zu Zins wie Sparen zu …?",
+          "options": ["Konto", "Rendite", "Bank", "Risiko"],
+          "answer": "Rendite – für einen Kredit zahlt man Zins, fürs Sparen erhält man eine Rendite (jeweils der Ertrag)."
+        }
+      ],
+      "faq": [
+        { "q": "Welche Themen hat der Einstellungstest für Bankkaufleute?", "a": "Oft Allgemein- und Wirtschaftswissen, logisches Denken (Zahlenreihen, Matrizen), Sprachverständnis und Konzentration. jobreif deckt diese Module ab und ergänzt Fachfragen aus deiner Anzeige." },
+        { "q": "Kann ich gezielt für eine bestimmte Bank üben?", "a": "Ja – füge die konkrete Stellenanzeige ein, dann leitet jobreif die Fachfragen genau daraus ab." },
+        { "q": "Ist das kostenlos?", "a": "Das Üben ist kostenlos und ohne Anmeldung möglich. Optional gibt es höhere Qualitätsstufen." }
+      ],
+      "lastmod": "2026-06-27"
+    },
+    {
+      "slug": "pflegefachmann",
+      "beruf": "Pflegefachmann / Pflegefachfrau",
+      "title": "Einstellungstest Pflegefachmann / Pflegefachfrau üben",
+      "description": "Einstellungstest Pflege kostenlos üben: Fachwissen, Konzentration, einfache Rechenaufgaben und Sprachlogik – plus Fragen aus echten Stellenanzeigen mit KI-Feedback.",
+      "intro": "Bereite dich auf den Einstellungstest und das Bewerbungsgespräch in der Pflege vor. jobreif erstellt aus einer Stellenanzeige einen passenden Test und ergänzt typische Eignungstest-Module wie Konzentration und einfache Rechenaufgaben.",
+      "testTypes": ["fachwissen", "sprachlogik", "zahlenreihe", "konzentration"],
+      "samples": [
+        {
+          "type": "konzentration",
+          "question": "Wie oft kommt die Ziffer 3 in dieser Reihe vor?  3 8 3 1 3 5 3 9 2 3",
+          "answer": "5-mal."
+        },
+        {
+          "type": "sprachlogik",
+          "question": "Fieber verhält sich zu Thermometer wie Puls zu …?",
+          "options": ["Stethoskop", "Blutdruck", "Herz", "Tasten"],
+          "answer": "Tasten – das Fieber misst man mit dem Thermometer, den Puls ertastet man (Methode der Messung)."
+        }
+      ],
+      "faq": [
+        { "q": "Was kommt im Einstellungstest für die Pflegeausbildung dran?", "a": "Häufig Allgemeinwissen und einfache Mathematik (z. B. Dosierung, Dreisatz), Konzentration, Sprachverständnis und Fragen zu Motivation und Berufsbild. jobreif bildet Module plus Fachfragen aus deiner Anzeige ab." },
+        { "q": "Bereitet mich das auch aufs Gespräch vor?", "a": "Ja – du bekommst offene Fragen und KI-Feedback zu deinen Antworten, ideal für das Vorstellungsgespräch in Klinik oder Pflegeeinrichtung." },
+        { "q": "Muss ich etwas installieren?", "a": "Nein. jobreif läuft direkt im Browser auf Handy und Computer, ganz ohne Installation." }
+      ],
+      "lastmod": "2026-06-27"
+    }
+  ]
+}
