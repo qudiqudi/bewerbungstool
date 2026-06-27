@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.19.0";
+const APP_VERSION = "1.20.0";
 
 const CHANGELOG = [
+  {
+    version: "1.20.0",
+    date: "27.06.2026",
+    items: [
+      "Neu: Figuren-/Matrizenaufgaben (Logisches Denken). Tests können jetzt eine abstrakte Musteraufgabe enthalten, wie sie in vielen Einstellungstests vorkommt: In einem 3×3-Raster fehlt die letzte Figur – du erkennst die Regel und wählst die passende Figur. Die Auswertung erfolgt sofort und exakt auf deinem Gerät.",
+    ],
+  },
   {
     version: "1.19.0",
     date: "27.06.2026",
@@ -1576,7 +1583,7 @@ function normalizeQuizData(result, jobText = "") {
   if (!result || typeof result !== "object" || !Array.isArray(result.fragen)) {
     throw new Error("Die Modellantwort hatte nicht die erwartete Form (keine Fragenliste).");
   }
-  const validTyp = (t) => (t === "multiple_choice" || t === "offen" || t === "reihenfolge" || t === "zahlenreihe" || t === "sprachlogik" || t === "konzentration" ? t : "offen");
+  const validTyp = (t) => (t === "multiple_choice" || t === "offen" || t === "reihenfolge" || t === "zahlenreihe" || t === "sprachlogik" || t === "konzentration" || t === "figural" ? t : "offen");
   const validDiff = (d) => (d === "leicht" || d === "mittel" || d === "schwer" ? d : "");
   const fragen = [];
   result.fragen.forEach((q, i) => {
@@ -1688,6 +1695,13 @@ function normalizeQuizData(result, jobText = "") {
       zielzeichen = "";
     }
 
+    // Figural (Plan 3.x): die Figural-Aufgabe wird im Normalfall clientseitig in finalizeQuiz
+    // INJIZIERT (appendFiguralQuestion), nicht vom Server geliefert. Dieser Zweig ist defensiv:
+    // taucht aus irgendeinem Grund ein typ='figural' in den Eingangsdaten auf (z. B. Import oder
+    // eine kuenftige Serverquelle), erzeugt der Client das konkrete, garantiert eindeutige Raetsel
+    // SELBST (LLMs liefern valide Matrizen unzuverlaessig) - statt eine leere Aufgabe zu rendern.
+    const figPz = typ === "figural" ? generateFiguralPuzzle() : null;
+
     const quellen = Array.isArray(q.quellen)
       ? q.quellen
           .filter((s) => s && typeof s === "object")
@@ -1709,16 +1723,18 @@ function normalizeQuizData(result, jobText = "") {
       typ,
       kategorie: typeof q.kategorie === "string" ? q.kategorie : "",
       schwierigkeit: validDiff(q.schwierigkeit),
-      frage,
-      optionen,
-      korrekte_antwort,
-      korrekte_indizes,
+      frage: figPz ? figPz.frage : frage,
+      optionen: figPz ? figPz.optionen : optionen,
+      korrekte_antwort: figPz ? figPz.korrekte_antwort : korrekte_antwort,
+      korrekte_indizes: figPz ? figPz.korrekte_indizes : korrekte_indizes,
       erklaerungen,
       elemente,
       korrekte_reihenfolge,
       material,
       zielzeichen,
-      lerninfo: typeof q.lerninfo === "string" ? q.lerninfo : "",
+      // Figural: das clientgenerierte 3x3-Raster (letzte Zelle ist die Luecke). Sonst [].
+      matrix: figPz ? figPz.matrix : (Array.isArray(q.matrix) ? q.matrix : []),
+      lerninfo: figPz ? figPz.lerninfo : (typeof q.lerninfo === "string" ? q.lerninfo : ""),
       quellen,
     });
   });
@@ -1887,6 +1903,146 @@ function scoreKonzentration(q, answerStr) {
     punkte: ok ? 10 : 0,
     feedback: ok ? "Richtig." : `Leider nicht die richtige Anzahl. Das Zeichen „${q.zielzeichen}" kommt ${soll}-mal vor.`,
     musterantwort: String(soll),
+  };
+}
+
+/* ---------- Figural-/Matrizen-Modul (Plan 3.x) ----------
+   Abstrakte Matrizen-Aufgaben sind job-unabhaengig; statt sie (unzuverlaessig) vom Modell
+   generieren zu lassen, erzeugt der CLIENT sie deterministisch aus festen Regel-Familien mit
+   GARANTIERT eindeutiger Loesung. 3x3-Raster, letzte Zelle ist die Luecke; Antwort als Single-
+   Choice (Figuren-Optionen) - lokal/deterministisch gescort, kein Modell-Call, keine Tokens. */
+// Bewusst nur Glyphen aus Core-Fonts/WGL4 (Basis-Geometrie + Kartensymbole), die praktisch
+// ueberall rendern - exotischere Symbole (◆ U+25C6, ★, ✦ …) fehlen in manchen Fonts und kaemen
+// als leere Tofu-Kaestchen an. Alle hier wurden auf Render-Sicherheit geprueft.
+const FIG_SHAPES = ["●", "■", "▲", "▼", "♦", "♥", "♠", "♣"];
+
+function figRepeat(glyph, n) { return new Array(Math.max(1, n)).fill(glyph).join(""); }
+function figShuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+function figPick(arr, n) { return figShuffle(arr).slice(0, n); }
+
+// Aus korrekter Figur + Kandidaten genau eine richtige Option bauen (max 5, gemischt, dedupt).
+function figFinalizeOptions(correct, candidates) {
+  const uniq = [];
+  for (const d of candidates) { if (d && d !== correct && !uniq.includes(d)) uniq.push(d); }
+  return figShuffle([correct, ...uniq.slice(0, 4)]);
+}
+function figPuzzleObj(matrix, optionen, correct, regel) {
+  return {
+    typ: "figural",
+    frage: "Welche Figur vervollständigt das Muster?",
+    matrix,
+    optionen,
+    korrekte_indizes: [optionen.indexOf(correct)],
+    korrekte_antwort: correct,
+    lerninfo: "Erkenne die Regel: " + regel,
+  };
+}
+
+// Familie A: feste Form je Reihe, feste Anzahl je Spalte.
+function figFamilyShapeRowCountCol() {
+  const shapes = figPick(FIG_SHAPES, 3);
+  const counts = figShuffle([1, 2, 3]);
+  const cell = (r, c) => figRepeat(shapes[r], counts[c]);
+  const matrix = [0, 1, 2].map((r) => [0, 1, 2].map((c) => cell(r, c)));
+  const correct = cell(2, 2);
+  matrix[2][2] = "";
+  const cands = [
+    figRepeat(shapes[2], counts[1]), figRepeat(shapes[0], counts[2]),
+    figRepeat(shapes[1], counts[2]), figRepeat(shapes[2], counts[2] === 3 ? 4 : counts[2] + 1),
+    figRepeat(shapes[0], counts[0]),
+  ];
+  return figPuzzleObj(matrix, figFinalizeOptions(correct, cands), correct, "pro Reihe eine feste Form, pro Spalte eine feste Anzahl.");
+}
+// Familie B: feste Anzahl je Reihe, feste Form je Spalte (Transponierte von A).
+function figFamilyCountRowShapeCol() {
+  const shapes = figPick(FIG_SHAPES, 3);
+  const counts = figShuffle([1, 2, 3]);
+  const cell = (r, c) => figRepeat(shapes[c], counts[r]);
+  const matrix = [0, 1, 2].map((r) => [0, 1, 2].map((c) => cell(r, c)));
+  const correct = cell(2, 2);
+  matrix[2][2] = "";
+  const cands = [
+    figRepeat(shapes[1], counts[2]), figRepeat(shapes[2], counts[0]),
+    figRepeat(shapes[2], counts[1]), figRepeat(shapes[0], counts[2]),
+    figRepeat(shapes[2], counts[2] === 3 ? 4 : counts[2] + 1),
+  ];
+  return figPuzzleObj(matrix, figFinalizeOptions(correct, cands), correct, "pro Spalte eine feste Form, pro Reihe eine feste Anzahl.");
+}
+// Familie C: die Formen wandern diagonal (cell = shapes[(r+c) mod 3]).
+function figFamilyDiagonalCycle() {
+  const shapes = figPick(FIG_SHAPES, 3);
+  const cell = (r, c) => shapes[(r + c) % 3];
+  const matrix = [0, 1, 2].map((r) => [0, 1, 2].map((c) => cell(r, c)));
+  const correct = cell(2, 2);
+  matrix[2][2] = "";
+  const unused = FIG_SHAPES.filter((s) => !shapes.includes(s));
+  const cands = [shapes[0], shapes[2], ...unused];
+  return figPuzzleObj(matrix, figFinalizeOptions(correct, cands), correct, "die Formen wandern diagonal durch.");
+}
+
+// Ein vollstaendiges, garantiert eindeutiges Figural-Raetsel bauen (zufaellige Familie).
+function generateFiguralPuzzle() {
+  const families = [figFamilyShapeRowCountCol, figFamilyCountRowShapeCol, figFamilyDiagonalCycle];
+  return families[Math.floor(Math.random() * families.length)]();
+}
+
+// Haengt einem Standardtest (kein Vertiefungsbogen) GENAU EINE clientgenerierte Figural-Aufgabe
+// an. Vollstaendig client-eigen (kein Server/Token noetig) - garantiert eindeutig, lokal scorebar.
+// Idempotent: ist schon eine Figural-Aufgabe vorhanden (z. B. defensiv aus normalize), nichts tun.
+function appendFiguralQuestion(quiz) {
+  if (!quiz || !Array.isArray(quiz.fragen) || !quiz.fragen.length) return;
+  if (Array.isArray(quiz.vertiefungFelder) && quiz.vertiefungFelder.length) return;
+  if (quiz.fragen.some((f) => f && f.typ === "figural")) return;
+  const pz = generateFiguralPuzzle();
+  // id robust aus dem Maximum der vorhandenen ids ableiten, NICHT aus fragen.length:
+  // normalizeQuizData vergibt ids nach Original-Index und laesst bei uebersprungenen
+  // (kaputten) Eintraegen Luecken - fragen.length+1 koennte dann eine bestehende id
+  // treffen, und der id-basierte Ergebnis-Merge (runEvaluation) wuerde Ergebnisse
+  // vermischen.
+  const maxId = quiz.fragen.reduce((m, f) => Math.max(m, Number(f && f.id) || 0), 0);
+  quiz.fragen.push({
+    id: maxId + 1,
+    typ: "figural",
+    kategorie: "Logisches Denken",
+    schwierigkeit: "mittel",
+    frage: pz.frage,
+    optionen: pz.optionen,
+    korrekte_antwort: pz.korrekte_antwort,
+    korrekte_indizes: pz.korrekte_indizes,
+    erklaerungen: [],
+    elemente: [],
+    korrekte_reihenfolge: [],
+    material: "",
+    zielzeichen: "",
+    matrix: pz.matrix,
+    lerninfo: pz.lerninfo,
+    quellen: [],
+  });
+}
+
+// true, wenn eine Frage eine valide, lokal scorebare Figural-Aufgabe ist.
+function istFiguralFrage(q) {
+  return q && q.typ === "figural" && Array.isArray(q.optionen) && q.optionen.length >= 2 &&
+    mcCorrectIndices(q).size === 1 && Array.isArray(q.matrix) && q.matrix.length >= 1;
+}
+// Lokales, deterministisches Single-Choice-Scoring (kein LLM).
+function scoreFigural(q, answer) {
+  const correctIdx = mcCorrectIndices(q);
+  const chosen = (q.optionen || []).indexOf(answer);
+  const richtig = [...correctIdx][0];
+  const ok = chosen >= 0 && correctIdx.has(chosen);
+  return {
+    id: q.id,
+    punkte: ok ? 10 : 0,
+    feedback: ok ? "Richtig." : "Leider nicht die passende Figur.",
+    musterantwort: q.optionen && q.optionen[richtig] != null ? q.optionen[richtig] : (q.korrekte_antwort || ""),
   };
 }
 
@@ -4153,6 +4309,10 @@ function finalizeQuiz(result, ctx) {
   if (ctx.urlKey) { quiz.urlKey = ctx.urlKey; quiz.jobUrl = ctx.jobUrl; }
   quiz.schwierigkeitsgrad = ctx.difficulty;
   if (ctx.vertiefungFelder) quiz.vertiefungFelder = ctx.vertiefungFelder;
+  // Figural-/Matrizenaufgabe (Plan 3.x) clientseitig an Standardtests anhaengen (nicht im
+  // Vertiefungsbogen). Muss VOR der answers/revealed-Initialisierung stehen, damit deren Laengen
+  // die zusaetzliche Frage einschliessen.
+  appendFiguralQuestion(quiz);
   quiz.genCost = ctx.genCost ?? null;
   quiz.genTokens = ctx.genTokens ?? null;
   // Generierungs-Provenienz festhalten (Anbieter/Tier/Modell, mit dem dieses
@@ -4188,8 +4348,11 @@ function finalizeQuiz(result, ctx) {
     timer.deadline = 0;
     $("quiz-timer").classList.add("hidden");
   }
-  setQuizNotice(ctx.isLocal && !ctx.localAborted && Number.isFinite(ctx.total) && quiz.fragen.length < ctx.total
-    ? `Das lokale Modell konnte nur ${quiz.fragen.length} von ${ctx.total} gewünschten Fragen erzeugen. Für mehr Fragen ein größeres Modell verwenden oder erneut starten.`
+  // Undercount-Hinweis gegen die ECHTE (nicht-figurale) Fragenzahl: die clientseitig
+  // angehaengte Figural-Aufgabe darf den "n von total"-Vergleich nicht verfaelschen.
+  const realQ = quiz.fragen.filter((f) => f && f.typ !== "figural").length;
+  setQuizNotice(ctx.isLocal && !ctx.localAborted && Number.isFinite(ctx.total) && realQ < ctx.total
+    ? `Das lokale Modell konnte nur ${realQ} von ${ctx.total} gewünschten Fragen erzeugen. Für mehr Fragen ein größeres Modell verwenden oder erneut starten.`
     : "");
   // Neuer Lerntest: als fortsetzbar markieren und sofort sichern; ein evtl. zuvor
   // offener Lerntest wird durch den neuen ersetzt. Pruefungsmodus ist nicht fortsetzbar.
@@ -4771,6 +4934,8 @@ function renderQuestion() {
     });
   } else if (q.typ === "reihenfolge" && Array.isArray(q.elemente) && q.elemente.length >= 2) {
     renderReihenfolge(q, area, locked, isRevealed);
+  } else if (istFiguralFrage(q)) {
+    renderFigural(q, area, locked, isRevealed);
   } else if (q.typ === "zahlenreihe" || q.typ === "konzentration") {
     // Zahlenreihe (Plan 3.7) und Konzentration (Plan 3.x): eigenes Numeric-Eingabefeld fuer die
     // gesuchte Zahl/Anzahl. Antwort als String in answers[current] (wie alle Typen); Bewertung
@@ -4838,6 +5003,56 @@ function renderQuestion() {
   $("btn-prev").disabled = current === 0;
   $("btn-next").textContent =
     current === total - 1 ? (reviewing ? "Zur Auswertung" : "Auswerten") : "Weiter";
+}
+
+// Rendert eine Figural-/Matrizen-Aufgabe in #answer-area: ein 3x3-Raster (letzte Zelle ist die
+// Luecke '?') ueber den waehlbaren Figuren-Optionen. Single-Choice; Antwort als Optionstext in
+// answers[current]. Aufloese-/Review-Einfaerbung wie bei MC (richtig gruen, falsch gewaehlt rot).
+function renderFigural(q, area, locked, isRevealed) {
+  const grid = document.createElement("div");
+  grid.className = "fig-grid";
+  grid.setAttribute("aria-hidden", "true"); // rein visuelles Muster; geloest wird ueber die Optionen
+  (q.matrix || []).forEach((row) => {
+    (Array.isArray(row) ? row : []).forEach((cellStr) => {
+      const cell = document.createElement("div");
+      const empty = !cellStr;
+      cell.className = "fig-cell" + (empty ? " fig-cell-missing" : "");
+      cell.textContent = empty ? "?" : cellStr;
+      grid.appendChild(cell);
+    });
+  });
+  area.appendChild(grid);
+
+  const optWrap = document.createElement("div");
+  optWrap.className = "fig-options";
+  const correctTxt = (q.korrekte_antwort || "").trim();
+  (q.optionen || []).forEach((opt, idx) => {
+    const btn = document.createElement("button");
+    let cls = "option fig-option";
+    if (answers[current] === opt) cls += " selected";
+    if (isRevealed) {
+      if (opt.trim() === correctTxt) cls += " correct";
+      else if (answers[current] === opt) cls += " wrong";
+    }
+    btn.className = cls;
+    btn.type = "button";
+    btn.textContent = opt;
+    btn.setAttribute("aria-label", "Figur " + (idx + 1));
+    btn.setAttribute("aria-pressed", answers[current] === opt ? "true" : "false");
+    if (!locked) {
+      btn.addEventListener("click", () => {
+        answers[current] = opt;
+        saveLearnSession();
+        renderQuestion();
+        const fresh = $("answer-area").querySelectorAll(".fig-option")[idx];
+        if (fresh) fresh.focus();
+      });
+    } else {
+      btn.disabled = true;
+    }
+    optWrap.appendChild(btn);
+  });
+  area.appendChild(optWrap);
 }
 
 // Rendert eine Reihenfolge-Aufgabe in #answer-area: eine sortierbare Liste mit
@@ -5149,7 +5364,7 @@ function renderLearnArea(q, isRevealed) {
       answerLine.textContent = "Richtige Antwort: " + konzentrationSoll(q);
     } else {
       answerLine.textContent =
-        (mcLike(q.typ) || q.typ === "zahlenreihe" ? "Richtige Antwort: " : "Musterantwort: ") + (q.korrekte_antwort || "");
+        (mcLike(q.typ) || q.typ === "zahlenreihe" || q.typ === "figural" ? "Richtige Antwort: " : "Musterantwort: ") + (q.korrekte_antwort || "");
     }
     box.appendChild(answerLine);
   }
@@ -5318,6 +5533,11 @@ async function runEvaluation() {
         localSummary.push({ frage: (q.frage || "").slice(0, 160), punkte: res.punkte });
       } else if (istKonzentration(q)) {
         const res = scoreKonzentration(q, answers[i]);
+        if (mode === "lernen" && revealed[i]) res.feedback += " (im Lernmodus aufgelöst)";
+        localResults.push(res);
+        localSummary.push({ frage: (q.frage || "").slice(0, 160), punkte: res.punkte });
+      } else if (istFiguralFrage(q)) {
+        const res = scoreFigural(q, answers[i]);
         if (mode === "lernen" && revealed[i]) res.feedback += " (im Lernmodus aufgelöst)";
         localResults.push(res);
         localSummary.push({ frage: (q.frage || "").slice(0, 160), punkte: res.punkte });
@@ -6748,7 +6968,9 @@ async function saveAttempt(result, durationMs, evalCost, evalTokens) {
   job.lastTestConfig = {
     mode,
     difficulty: quiz.schwierigkeitsgrad || "",
-    num: quiz.fragen.length,
+    // Die clientseitig angehaengte Figural-Aufgabe NICHT mitzaehlen - sonst wuerde
+    // "Test wiederholen" die angeforderte Fragenzahl bei jedem Lauf um eins hochtreiben.
+    num: quiz.fragen.filter((f) => f && f.typ !== "figural").length,
   };
 
   // Vertiefung: die Themenfeld-Ableitung war ein eigener bezahlter Aufruf. Ihre

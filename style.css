@@ -701,6 +701,42 @@ button.ghost {
   user-select: none;
 }
 
+/* Figural/Matrizen (Plan 3.x): 3x3-Raster (letzte Zelle = Luecke) + waehlbare Figuren-Optionen.
+   Nutzt .option fuer die Optionen; die Symbole werden gross und mit etwas Sperrung dargestellt. */
+.fig-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  max-width: 17rem;
+  margin: 0.2rem auto 1rem;
+  user-select: none;
+}
+.fig-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1 / 1;
+  font-size: 1.05rem;
+  line-height: 1.1;
+  letter-spacing: 0.04em;
+  padding: 2px;
+  text-align: center;
+  word-break: break-all;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--text-strong);
+}
+.fig-cell-missing {
+  color: var(--primary);
+  font-weight: 700;
+  font-size: 1.5rem;
+  border-style: dashed;
+  background: var(--bg-soft, var(--card));
+}
+.fig-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.fig-option { font-size: 1.2rem; letter-spacing: 0.05em; min-width: 3.4rem; text-align: center; }
+
 /* Spaced Repetition (Plan 3.8): Review-Karten. Nutzt .zr-field und .option wie im Quiz. */
 .sr-progress { margin: 0 0 0.6rem; }
 .sr-frage { font-family: var(--display); font-size: 1.05rem; color: var(--text-strong); margin: 0 0 0.9rem; }
