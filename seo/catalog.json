@@ -2,6 +2,13 @@
   "version": 1,
   "baseUrl": "https://jobreif.de",
   "updatedAt": "2026-06-27",
+  "staticPages": [
+    { "loc": "/lernen/", "lastmod": "2026-06-27" },
+    { "loc": "/lernen/zahlenreihen.html", "lastmod": "2026-06-27" },
+    { "loc": "/lernen/sprachlogik.html", "lastmod": "2026-06-27" },
+    { "loc": "/lernen/konzentration.html", "lastmod": "2026-06-27" },
+    { "loc": "/lernen/figuren-matrizen.html", "lastmod": "2026-06-27" }
+  ],
   "testTypes": {
     "fachwissen": {
       "label": "Fachwissen zur Stelle",
