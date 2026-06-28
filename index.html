@@ -10,8 +10,14 @@
        localhost-Eintraege erlauben den lokalen Anbieter (Ollama :11434, LM Studio
        :1234 oder eine eigene Adresse). *.paddle.com erlaubt das Aufladen-Overlay
        (Paddle.js-Skript, Checkout-iframe, dessen API/Assets). Neue externe Hosts
-       muessen hier ergaenzt werden, sonst blockt der Browser sie. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-AS03majGGAgYGEK0v1Hwe170PaXGMA1A1goCTG9ZANs=' https://challenges.cloudflare.com https://*.paddle.com; style-src 'self' 'unsafe-inline' https://*.paddle.com; img-src 'self' https://*.paddle.com; font-src 'self' https://*.paddle.com; connect-src 'self' https://api.jobreif.de https://api.anthropic.com https://api.openai.com https://api.deepseek.com https://r.jina.ai https://challenges.cloudflare.com https://*.paddle.com http://localhost:* http://127.0.0.1:*; frame-src https://challenges.cloudflare.com https://*.paddle.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; object-src 'none'; form-action 'self'">
+       muessen hier ergaenzt werden, sonst blockt der Browser sie.
+       style-src bewusst OHNE 'unsafe-inline' (F7): die App hat keine inline-<style>/
+       style="..."-Attribute mehr, dynamisches Styling laeuft ueber el.style.* (CSSOM,
+       von CSP nicht erfasst). CAVEAT vor Credits-Go-Live: das Paddle-Checkout-Overlay
+       unter dieser strengen style-src verifizieren — injiziert Paddle inline-<style>
+       in die Eltern-Seite, hier 'unsafe-inline' wieder ergaenzen (Paddle ist derzeit
+       dormant, siehe jobreif-credits-golive). -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-AS03majGGAgYGEK0v1Hwe170PaXGMA1A1goCTG9ZANs=' https://challenges.cloudflare.com https://*.paddle.com; style-src 'self' https://*.paddle.com; img-src 'self' https://*.paddle.com; font-src 'self' https://*.paddle.com; connect-src 'self' https://api.jobreif.de https://api.anthropic.com https://api.openai.com https://api.deepseek.com https://r.jina.ai https://challenges.cloudflare.com https://*.paddle.com http://localhost:* http://127.0.0.1:*; frame-src https://challenges.cloudflare.com https://*.paddle.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; object-src 'none'; form-action 'self'">
   <meta name="theme-color" content="#c5543a" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#3a2a25" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#c5543a">
@@ -266,7 +272,7 @@
       <p id="hint-local" class="hint hidden">Lokale Modelle laufen kostenlos auf deinem Rechner, sind aber meist kleiner als die Cloud-Modelle: Fragen und Bewertung können dadurch oberflächlicher ausfallen. Kleine Modelle neigen außerdem zu Halluzinationen – sie erfinden mitunter Angaben, die gar nicht in der Anzeige stehen (z.&nbsp;B. einen falschen Arbeitsort oder Arbeitgeber). Prüfe solche Angaben im Zweifel selbst. Für brauchbare Ergebnisse empfiehlt sich ein größeres Modell (ab ca. 8B, z.&nbsp;B. <code>llama3.1:8b</code> oder <code>qwen2.5:7b</code>).</p>
 
       <hr class="settings-divider">
-      <label>Dein Profil <span class="hint" style="font-weight:normal">(optional)</span></label>
+      <label>Dein Profil <span class="hint">(optional)</span></label>
       <p class="hint">Ein paar grobe Angaben zu dir – damit die Fragen besser zu deiner Ausgangslage passen (z.&nbsp;B. Quereinstieg statt Fachwechsel). Keine persönlichen Daten nötig, alles bleibt in deinem Browser. Wirkt aktuell nur im <strong>gehosteten Modus</strong>; bei eigenem Schlüssel oder lokalem Modell ändert es noch nichts.</p>
       <label for="profile-trajectory">Worum geht es bei dieser Bewerbung?</label>
       <select id="profile-trajectory">
@@ -293,7 +299,7 @@
         <option value="fortbildung">Meister · Techniker · Fachwirt · Zertifikat</option>
         <option value="umschulung_anerkennung">Umschulung · ausländischer Abschluss in Anerkennung</option>
       </select>
-      <label for="profile-branche">Branche / Bereich <span class="hint" style="font-weight:normal">(optional)</span></label>
+      <label for="profile-branche">Branche / Bereich <span class="hint">(optional)</span></label>
       <input type="text" id="profile-branche" maxlength="80" placeholder="z. B. Logistik, IT, Pflege" autocomplete="off">
 
       <div class="row">
@@ -403,7 +409,7 @@
       </div>
       <p class="hint">&bdquo;Schwer&ldquo; sind Fragen, wie sie im echten Auswahlverfahren für diese Stelle am wahrscheinlichsten gestellt werden &ndash; die Stufe steuert ihren Anteil im Test. Im Lernmodus wird die Schwierigkeit jeder Frage angezeigt.</p>
 
-      <label for="gespraechsstufe">Gesprächsstufe <span class="hint" style="font-weight:normal">(optional)</span></label>
+      <label for="gespraechsstufe">Gesprächsstufe <span class="hint">(optional)</span></label>
       <select id="gespraechsstufe">
         <option value="">Allgemein</option>
         <option value="telefon">Telefoninterview</option>

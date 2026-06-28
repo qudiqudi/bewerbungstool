@@ -302,7 +302,10 @@ input:focus, select:focus, textarea:focus {
   border-color: var(--primary);
 }
 
-.hint { font-size: 0.78rem; color: var(--muted); margin: 0.3rem 0 0; }
+/* font-weight:normal, damit Hints in fett gesetzten <label>s (font-weight:600) nicht erben.
+   Ersetzt die frueheren inline style="font-weight:normal" (F7: style-src ohne 'unsafe-inline').
+   Fuer Hints ausserhalb fetter Eltern ein No-op (erben ohnehin normal). */
+.hint { font-size: 0.78rem; color: var(--muted); margin: 0.3rem 0 0; font-weight: normal; }
 
 /* Guthaben-Zeile: Euro prominent, Credits als ruhige Klammer (muted). */
 #account-balance { font-size: 0.95rem; margin: 0.3rem 0 0; }
