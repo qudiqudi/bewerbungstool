@@ -57,7 +57,11 @@ self.addEventListener("fetch", (event) => {
         // Nur vollstaendige, erfolgreiche Antworten cachen: 404/500 (z. B.
         // waehrend eines Deploys) wuerden sonst den funktionierenden
         // Offline-Fallback ueberschreiben
-        if (res.ok) {
+        // Einmal-Auth-URLs (Magic-Link/OAuth-Handoff) nie cachen, sonst landet
+        // ein Token dauerhaft im Cache. URLSearchParams dekodiert die Parameter-
+        // namen genau wie app.js — sonst umginge z. B. ?c%6fde=… den Filter.
+        const isAuthUrl = ["auth", "code", "session"].some((k) => url.searchParams.has(k));
+        if (res.ok && !isAuthUrl) {
           const copy = res.clone();
           caches.open(CACHE)
             .then((cache) => cache.put(event.request, copy))
@@ -72,6 +76,16 @@ self.addEventListener("fetch", (event) => {
         // einer Unteradresse) auf die gecachte App-Huelle zurueckfallen, damit
         // die App offline laedt statt einer Browser-Fehlerseite.
         if (event.request.mode === "navigate") {
+          // Bei einer tiefen Adresse (z. B. /einstellungstest/x/) wuerde das
+          // Ausliefern der Root-Huelle das Dokument-URL auf der tiefen Adresse
+          // belassen — die relativen Asset-Refs der index.html zielten dann ins
+          // Leere und nichts laedt. Stattdessen offline auf "/" umleiten, damit
+          // die gecachte Huelle mit korrekten relativen Pfaden laedt; nur fuer
+          // "/" die Huelle direkt zurueckgeben (Redirect-Ziel ist als "."/
+          // "index.html" im Precache, also offline verfuegbar).
+          if (url.pathname !== "/") {
+            return Response.redirect(new URL("/", self.location.origin).href, 302);
+          }
           return (await caches.match("index.html")) || (await caches.match("."));
         }
         return Response.error();

@@ -29,6 +29,17 @@ const outDir = path.join(root, "einstellungstest");
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
+// Mapping testType -> vertiefende Lernseite (/lernen/). Verlinkt die Berufsseiten
+// mit den vorhandenen Modul-Erklaerseiten (interne Vernetzung + Discovery der
+// bislang schwach verlinkten /lernen/-Seiten). fachwissen hat keine Lernseite.
+const LERNEN = {
+  zahlenreihe: "/lernen/zahlenreihen.html",
+  sprachlogik: "/lernen/sprachlogik.html",
+  konzentration: "/lernen/konzentration.html",
+  figural: "/lernen/figuren-matrizen.html",
+};
+const MAX_RELATED = 6;
+
 // --- HTML/XML-Escaping (selbst, ohne Abhaengigkeit) -------------------------
 function esc(s) {
   return String(s)
@@ -57,6 +68,16 @@ function validate(cat) {
     fail('baseUrl: erwartet "https://host" ohne abschliessenden Slash');
   }
   if (typeof cat.updatedAt !== "string" || !DATE_RE.test(cat.updatedAt)) fail("updatedAt: YYYY-MM-DD erwartet");
+
+  // staticPages: handgepflegte Seiten (z. B. /lernen/), die NICHT vom Generator
+  // erzeugt werden, aber in der Sitemap stehen muessen (sonst fallen sie raus).
+  if (cat.staticPages != null) {
+    if (!Array.isArray(cat.staticPages)) fail("staticPages: Array erwartet");
+    else cat.staticPages.forEach((s, i) => {
+      if (!s || typeof s.loc !== "string" || !s.loc.startsWith("/")) fail(`staticPages[${i}].loc: muss mit "/" beginnen`);
+      if (typeof s.lastmod !== "string" || !DATE_RE.test(s.lastmod)) fail(`staticPages[${i}].lastmod: YYYY-MM-DD erwartet`);
+    });
+  }
 
   const types = cat.testTypes;
   if (!types || typeof types !== "object" || Array.isArray(types)) {
@@ -110,6 +131,39 @@ function validate(cat) {
   return errs;
 }
 
+// --- Geteilte Bausteine (F10: Berufseite + Hub nur einmal pflegen) ----------
+// F6: strikte CSP fuer die statischen SEO-Seiten. Diese Seiten nutzen nur
+// inline <style> (daher style-src 'unsafe-inline') und inline JSON-LD
+// (application/ld+json ist ein Datenblock, wird NICHT ausgefuehrt — script-src
+// 'self' blockt es nicht). Es gibt KEIN ausfuehrbares inline-<script>.
+const CSP = `<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'">`;
+
+// Gemeinsame Basis-Styles. Enthaelt @font-face fuer Sora (F8, exakt wie
+// /lernen/lernen.css), damit beide Seitentypen die Markenschrift laden statt
+// nur den System-Fallback. Seiten-spezifische Regeln bleiben inline.
+const BASE_CSS = `    :root{--primary:#c5543a;--primary-dark:#a8442e;--bg:#fbf7f2;--card:#fff;--text:#3a322e;--muted:#7a6f68;--border:#e7ddd3;--radius:14px}
+    *{box-sizing:border-box}
+    html{-webkit-text-size-adjust:100%}
+    @font-face{font-family:"Sora";src:url("/assets/fonts/Sora-variable.ttf") format("truetype");font-weight:400 800;font-display:swap}
+    body{margin:0;font-family:"Sora",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:var(--text);background:var(--bg);line-height:1.6}
+    a{color:var(--primary-dark)}
+    header.site{background:var(--primary);color:#fff;padding:14px 20px}
+    header.site a{color:#fff;text-decoration:none;font-weight:700;font-size:1.1rem}
+    main{max-width:760px;margin:0 auto;padding:28px 20px 56px}
+    nav.crumbs{font-size:.82rem;color:var(--muted);margin:4px 0 18px}
+    nav.crumbs a{color:var(--muted)}
+    h1{font-size:1.7rem;line-height:1.25;margin:.2em 0 .4em;color:#2c2521}
+    .lead{font-size:1.08rem;color:#4a413c}
+    footer{max-width:760px;margin:0 auto;padding:24px 20px 48px;font-size:.84rem;color:var(--muted);border-top:1px solid var(--border)}
+    footer a{color:var(--muted)}
+    @media(max-width:600px){h1{font-size:1.4rem}main{padding:20px 16px 44px}}`;
+
+// Identische Kopf-/Fusszeile beider Seitentypen.
+const HEADER = `  <header class="site"><a href="/">jobreif.de</a></header>`;
+const FOOTER = `  <footer>
+    <p>jobreif.de macht aus jeder Stellenanzeige einen simulierten Einstellungstest mit KI-Feedback. Deine Daten bleiben in deinem Browser. <a href="/">Zur App</a></p>
+  </footer>`;
+
 // --- Seitenbau --------------------------------------------------------------
 function renderSample(s, types) {
   const label = esc((types[s.type] && types[s.type].label) || s.type);
@@ -132,8 +186,33 @@ function renderPage(p, cat) {
 
   const typeList = p.testTypes.map((t) => {
     const def = testTypes[t];
-    return `<li><strong>${esc(def.label)}</strong> — ${esc(def.description)}</li>`;
+    const label = LERNEN[t]
+      ? `<a href="${LERNEN[t]}"><strong>${esc(def.label)}</strong></a>`
+      : `<strong>${esc(def.label)}</strong>`;
+    return `<li>${label} — ${esc(def.description)}</li>`;
   }).join("\n        ");
+
+  // Vorbereitungs-Tipps (optional, beruf-spezifisch) — echter Zusatzinhalt.
+  const tipps = Array.isArray(p.tipps) ? p.tipps.filter((x) => typeof x === "string" && x.trim()) : [];
+  const tippsHtml = tipps.length
+    ? `<section class="block">
+        <h2>So bereitest du dich vor</h2>
+        <ul class="tipps">
+        ${tipps.map((x) => `<li>${esc(x)}</li>`).join("\n        ")}
+        </ul>
+      </section>`
+    : "";
+
+  // Verwandte Berufe (interne Vernetzung) — bis MAX_RELATED andere Katalogseiten.
+  const related = cat.pages.filter((q) => q.slug !== p.slug).slice(0, MAX_RELATED);
+  const relatedHtml = related.length
+    ? `<section class="block">
+        <h2>Einstellungstest für andere Berufe</h2>
+        <ul class="related">
+        ${related.map((q) => `<li><a href="/einstellungstest/${esc(q.slug)}/">Einstellungstest ${esc(q.beruf)}</a></li>`).join("\n        ")}
+        </ul>
+      </section>`
+    : "";
 
   const samplesHtml = samples.length
     ? `<section class="block">
@@ -180,6 +259,7 @@ function renderPage(p, cat) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  ${CSP}
   <title>${esc(p.title)}</title>
   <meta name="description" content="${esc(p.description)}">
   <link rel="canonical" href="${url}">
@@ -193,24 +273,19 @@ function renderPage(p, cat) {
   <meta property="og:url" content="${url}">
   <meta property="og:title" content="${esc(p.title)}">
   <meta property="og:description" content="${esc(p.description)}">
+  <meta property="og:image" content="${baseUrl}/assets/social-preview.png">
   ${ldHtml}
   <style>
-    :root{--primary:#c5543a;--primary-dark:#a8442e;--bg:#fbf7f2;--card:#fff;--text:#3a322e;--muted:#7a6f68;--border:#e7ddd3;--radius:14px}
-    *{box-sizing:border-box}
-    html{-webkit-text-size-adjust:100%}
-    body{margin:0;font-family:"Sora",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:var(--text);background:var(--bg);line-height:1.6}
-    a{color:var(--primary-dark)}
-    header.site{background:var(--primary);color:#fff;padding:14px 20px}
-    header.site a{color:#fff;text-decoration:none;font-weight:700;font-size:1.1rem}
-    main{max-width:760px;margin:0 auto;padding:28px 20px 56px}
-    nav.crumbs{font-size:.82rem;color:var(--muted);margin:4px 0 18px}
-    nav.crumbs a{color:var(--muted)}
-    h1{font-size:1.7rem;line-height:1.25;margin:.2em 0 .4em;color:#2c2521}
+${BASE_CSS}
     h2{font-size:1.25rem;margin:1.6em 0 .5em;color:#2c2521}
-    .lead{font-size:1.08rem;color:#4a413c}
     .block{margin-top:8px}
     ul.types,ul.samples{list-style:none;padding:0;margin:0}
     ul.types li{padding:10px 0;border-bottom:1px solid var(--border)}
+    ul.tipps{margin:.4em 0;padding-left:1.2em}
+    ul.tipps li{padding:4px 0}
+    ul.related{list-style:none;padding:0;margin:8px 0}
+    ul.related li{padding:8px 0;border-bottom:1px solid var(--border)}
+    ul.related a{font-weight:600}
     .samples li.sample{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;margin:12px 0;box-shadow:0 2px 8px -5px rgba(80,50,40,.25)}
     .sample-type{display:inline-block;font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--primary-dark);background:#f6e7e1;border-radius:999px;padding:3px 10px;margin-bottom:8px}
     .sample-q{font-weight:600;margin:.2em 0}
@@ -223,13 +298,10 @@ function renderPage(p, cat) {
     .cta{display:block;text-align:center;margin:28px 0 8px;background:var(--primary);color:#fff;text-decoration:none;font-weight:700;padding:16px 22px;border-radius:var(--radius);box-shadow:0 10px 24px -12px rgba(197,84,58,.7)}
     .cta:hover{background:var(--primary-dark)}
     .cta-note{text-align:center;font-size:.84rem;color:var(--muted);margin:0}
-    footer{max-width:760px;margin:0 auto;padding:24px 20px 48px;font-size:.84rem;color:var(--muted);border-top:1px solid var(--border)}
-    footer a{color:var(--muted)}
-    @media(max-width:600px){h1{font-size:1.4rem}main{padding:20px 16px 44px}}
   </style>
 </head>
 <body>
-  <header class="site"><a href="/">jobreif.de</a></header>
+${HEADER}
   <main>
     <nav class="crumbs"><a href="/">Start</a> › <a href="/einstellungstest/">Einstellungstest</a> › ${esc(p.beruf)}</nav>
     <h1>${esc(p.title)}</h1>
@@ -247,13 +319,15 @@ function renderPage(p, cat) {
 
     ${samplesHtml}
 
+    ${tippsHtml}
+
     ${faqHtml}
 
     <a class="cta" href="${esc(ctaUrl)}">Test für ${esc(p.beruf)} starten →</a>
+
+    ${relatedHtml}
   </main>
-  <footer>
-    <p>jobreif.de macht aus jeder Stellenanzeige einen simulierten Einstellungstest mit KI-Feedback. Deine Daten bleiben in deinem Browser. <a href="/">Zur App</a></p>
-  </footer>
+${FOOTER}
 </body>
 </html>
 `;
@@ -264,6 +338,9 @@ function renderPage(p, cat) {
 function renderHub(cat) {
   const { baseUrl } = cat;
   const url = `${baseUrl}/einstellungstest/`;
+  // Einmal definiert, fuer <meta name="description"> und og:description (F9).
+  const desc = "Einstellungstest gezielt nach Beruf üben: Fachfragen aus echten Stellenanzeigen plus Sprachlogik, Zahlenreihen, Konzentration und figurale Aufgaben – kostenlos mit KI-Feedback.";
+  const title = "Einstellungstest nach Beruf üben – jobreif.de";
   const items = cat.pages.map((p) =>
     `<li><a href="/einstellungstest/${esc(p.slug)}/">Einstellungstest ${esc(p.beruf)}</a></li>`).join("\n        ");
   const ld = {
@@ -279,8 +356,9 @@ function renderHub(cat) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Einstellungstest nach Beruf üben – jobreif.de</title>
-  <meta name="description" content="Einstellungstest gezielt nach Beruf üben: Fachfragen aus echten Stellenanzeigen plus Sprachlogik, Zahlenreihen, Konzentration und figurale Aufgaben – kostenlos mit KI-Feedback.">
+  ${CSP}
+  <title>${esc(title)}</title>
+  <meta name="description" content="${esc(desc)}">
   <link rel="canonical" href="${url}">
   <meta name="robots" content="index, follow">
   <meta name="theme-color" content="#c5543a">
@@ -290,33 +368,22 @@ function renderHub(cat) {
   <meta property="og:site_name" content="jobreif.de">
   <meta property="og:locale" content="de_DE">
   <meta property="og:url" content="${url}">
-  <meta property="og:title" content="Einstellungstest nach Beruf üben – jobreif.de">
+  <meta property="og:title" content="${esc(title)}">
+  <meta property="og:description" content="${esc(desc)}">
+  <meta property="og:image" content="${baseUrl}/assets/social-preview.png">
   <script type="application/ld+json">${jsonLd(ld)}</script>
   <style>
-    :root{--primary:#c5543a;--primary-dark:#a8442e;--bg:#fbf7f2;--card:#fff;--text:#3a322e;--muted:#7a6f68;--border:#e7ddd3;--radius:14px}
-    *{box-sizing:border-box}
-    body{margin:0;font-family:"Sora",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:var(--text);background:var(--bg);line-height:1.6}
-    a{color:var(--primary-dark)}
-    header.site{background:var(--primary);color:#fff;padding:14px 20px}
-    header.site a{color:#fff;text-decoration:none;font-weight:700;font-size:1.1rem}
-    main{max-width:760px;margin:0 auto;padding:28px 20px 56px}
-    nav.crumbs{font-size:.82rem;color:var(--muted);margin:4px 0 18px}
-    nav.crumbs a{color:var(--muted)}
-    h1{font-size:1.7rem;line-height:1.25;margin:.2em 0 .4em;color:#2c2521}
-    .lead{font-size:1.08rem;color:#4a413c}
+${BASE_CSS}
     ul.berufe{list-style:none;padding:0;margin:20px 0}
     ul.berufe li{margin:0 0 10px}
     ul.berufe a{display:block;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;text-decoration:none;font-weight:600;box-shadow:0 2px 8px -5px rgba(80,50,40,.25)}
     ul.berufe a:hover{border-color:var(--primary)}
     .cta{display:block;text-align:center;margin:24px 0 4px;background:var(--primary);color:#fff;text-decoration:none;font-weight:700;padding:16px 22px;border-radius:var(--radius)}
     .cta:hover{background:var(--primary-dark)}
-    footer{max-width:760px;margin:0 auto;padding:24px 20px 48px;font-size:.84rem;color:var(--muted);border-top:1px solid var(--border)}
-    footer a{color:var(--muted)}
-    @media(max-width:600px){h1{font-size:1.4rem}main{padding:20px 16px 44px}}
   </style>
 </head>
 <body>
-  <header class="site"><a href="/">jobreif.de</a></header>
+${HEADER}
   <main>
     <nav class="crumbs"><a href="/">Start</a> › Einstellungstest</nav>
     <h1>Einstellungstest nach Beruf üben</h1>
@@ -326,17 +393,19 @@ function renderHub(cat) {
     </ul>
     <a class="cta" href="/?ref=einstellungstest-hub">Eigene Stellenanzeige einfügen →</a>
   </main>
-  <footer>
-    <p>jobreif.de macht aus jeder Stellenanzeige einen simulierten Einstellungstest mit KI-Feedback. Deine Daten bleiben in deinem Browser. <a href="/">Zur App</a></p>
-  </footer>
+${FOOTER}
 </body>
 </html>
 `;
 }
 
 function renderSitemap(cat) {
+  const staticPages = Array.isArray(cat.staticPages) ? cat.staticPages : [];
   const urls = [
     { loc: `${cat.baseUrl}/`, lastmod: cat.updatedAt },
+    // Handgepflegte Bestandsseiten (z. B. /lernen/) — duerfen beim Neuschreiben
+    // der Sitemap NICHT verloren gehen.
+    ...staticPages.map((s) => ({ loc: `${cat.baseUrl}${s.loc}`, lastmod: s.lastmod })),
     { loc: `${cat.baseUrl}/einstellungstest/`, lastmod: cat.updatedAt },
     ...cat.pages.map((p) => ({ loc: `${cat.baseUrl}/einstellungstest/${p.slug}/`, lastmod: p.lastmod })),
   ];
@@ -389,7 +458,9 @@ async function main() {
   }
   await writeFile(path.join(root, "sitemap.xml"), renderSitemap(cat), "utf8");
 
-  console.log(`SEO generiert: Hub + ${cat.pages.length} Beruf-Seite(n), sitemap.xml mit ${cat.pages.length + 2} URLs.`);
+  const staticCount = Array.isArray(cat.staticPages) ? cat.staticPages.length : 0;
+  const sitemapUrls = 1 /* root */ + staticCount + 1 /* hub */ + cat.pages.length;
+  console.log(`SEO generiert: Hub + ${cat.pages.length} Beruf-Seite(n), sitemap.xml mit ${sitemapUrls} URLs.`);
   if (removed.length) console.log(`Entfernt (nicht mehr im Katalog): ${removed.join(", ")}`);
 }
 

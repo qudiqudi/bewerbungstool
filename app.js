@@ -4,9 +4,25 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.26.0";
+const APP_VERSION = "1.27.1";
 
 const CHANGELOG = [
+  {
+    version: "1.27.1",
+    date: "28.06.2026",
+    items: [
+      "Mehr Transparenz beim Import per Link: Beim Einlesen einer Stellenanzeige über ihre Internetadresse ist jetzt klar ausgewiesen, dass die Seite über einen Drittanbieter-Dienst (Jina AI) geladen wird. „Text einfügen“ bleibt wie bisher komplett lokal im Browser.",
+      "Datensicherung mit Warnung: Enthält deine Backup-Datei einen gespeicherten API-Schlüssel, weist die App vor dem Speichern darauf hin – damit die Datei bewusst sicher aufbewahrt wird.",
+      "Offline-Verbesserung: Auch tiefe Seiten (z. B. die Einstellungstest-Berufsseiten) laden jetzt offline zuverlässig die App statt einer Fehlerseite.",
+    ],
+  },
+  {
+    version: "1.27.0",
+    date: "27.06.2026",
+    items: [
+      "Neuer Bereich „Einstellungstest nach Beruf“: öffentliche Übungsseiten für gefragte Berufe (z. B. Fachinformatiker, Mechatroniker, Pflege, Einzelhandel, Bank) mit Beispielaufgaben, Vorbereitungstipps und direktem Einstieg ins Üben. Erreichbar über den Link unten im Fenster.",
+    ],
+  },
   {
     version: "1.26.0",
     date: "27.06.2026",
@@ -2345,6 +2361,15 @@ function requiredOpusCredits() {
   return Number.isFinite(creditsState.opusTestCredits) ? creditsState.opusTestCredits : OPUS_TEST_CREDITS;
 }
 
+// Vom Server gemeldeter Opus-Preis als ALLEINIGE Grundlage fuer Preis-ANZEIGEN und
+// Abbuchungs-Bestaetigungen; null = der Worker hat (noch) keinen Wert geliefert. Anders als
+// requiredOpusCredits() (Vorpruefungs-Untergrenze MIT Konstanten-Fallback) faellt das hier
+// bewusst NIE auf eine Client-Konstante zurueck — ein echter Preisstring oder eine Abbuchung
+// darf nie auf einem geratenen Wert beruhen, sonst koennte er vom Server-Preis abweichen.
+function serverOpusCredits() {
+  return Number.isFinite(creditsState.opusTestCredits) ? creditsState.opusTestCredits : null;
+}
+
 // Ist die Opus-Stufe fuer das aktuelle Konto gedeckt? Bestaetigter Flag-an-Zustand UND
 // mindestens die Testkosten (nicht nur > 0 — mit 1..59 Credits liefe der Nutzer sonst in ein
 // Server-402). Der Server bleibt die letzte Instanz; das hier ist die ehrliche Vorpruefung.
@@ -2433,8 +2458,12 @@ function updateTierHint() {
   const beste = sel.querySelector('option[value="beste"]');
   if (!beste || beste.hidden) { hint.classList.add("hidden"); hint.textContent = ""; return; }
   if (sel.value === "beste" && !beste.disabled) {
-    // Ausgewaehlt und gedeckt → Kostenhinweis.
-    hint.innerHTML = `Beste Qualität (Opus) kostet etwa <strong>${formatGuthabenEuro(requiredOpusCredits())} pro Test</strong>.`;
+    // Ausgewaehlt und gedeckt → Kostenhinweis. Preis ausschliesslich aus dem Server-Wert; liegt
+    // er (noch) nicht vor, einen neutralen Platzhalter zeigen statt der Client-Konstante (F-2).
+    const c = serverOpusCredits();
+    hint.innerHTML = c === null
+      ? "Beste Qualität (Opus): <strong>Preis wird geladen …</strong>"
+      : `Beste Qualität (Opus) kostet etwa <strong>${formatGuthabenEuro(c)} pro Test</strong>.`;
     hint.classList.remove("hidden");
   } else if (beste.disabled) {
     // Gesperrt (ausgewaehlt oder nur sichtbar) → Guthaben fehlt; Aufladen anbieten.
@@ -2526,11 +2555,13 @@ const PADDLE_CONFIG = {
   },
 };
 
-// Umgebung: Default sandbox; beim Go-Live (prod-Token+price-IDs gesetzt) auf "production"
-// stellen. localStorage-Override nur fuer Tests.
+// Umgebung: sobald das prod-Token eingetragen ist (Go-Live konfiguriert), automatisch
+// "production" — das Befuellen des Tokens genuegt, kein separater Code-Edit. Solange prod
+// UNkonfiguriert ist (leeres Token), bleibt sandbox der Default. Der localStorage-Override
+// gewinnt immer (manuelle Eskalation/Test-Schalter).
 function paddleEnv() {
   try { const o = localStorage.getItem("bewerbungstool.paddleEnv"); if (o === "production" || o === "sandbox") return o; } catch {}
-  return "sandbox";
+  return PADDLE_CONFIG.production && PADDLE_CONFIG.production.token ? "production" : "sandbox";
 }
 function paddleConfig() { return PADDLE_CONFIG[paddleEnv()] || PADDLE_CONFIG.sandbox; }
 
@@ -2599,6 +2630,10 @@ async function pollBalanceAfterPurchase() {
 let _topupBusy = false;
 async function startTopup(euros) {
   if (_topupBusy) return;
+  // F-4b: Aufladen ist inert, solange Credits nicht freigeschaltet sind — spiegelt das
+  // serverseitige Gate von /api/checkout-intent. Ohne bestaetigtes Flag NICHTS einleiten
+  // (kein Intent, kein Paddle-Overlay), damit der Kaufpfad dormant bleibt, bis Credits live sind.
+  if (!creditsState.creditsEnabled) return;
   if (!settings.authToken) { promptHostedLogin(); return; }
   _topupBusy = true;
   try {
@@ -2763,7 +2798,10 @@ async function consumeAuthRedirect() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code, verifier }),
       });
-      if (r.ok) { const d = await r.json(); setAuthToken(d.token); _authRedirectMsg = "Erfolgreich angemeldet."; }
+      // Erfolg nur bei tatsaechlich vorhandenem Token-String — ein 2xx ohne
+      // Token ist kein gueltiges Login.
+      const d = r.ok ? await r.json().catch(() => null) : null;
+      if (d && typeof d.token === "string" && d.token) { setAuthToken(d.token); _authRedirectMsg = "Erfolgreich angemeldet."; }
       else _authRedirectMsg = "Die Anmeldung ist fehlgeschlagen oder abgelaufen. Bitte erneut versuchen.";
     } catch { _authRedirectMsg = "Anmeldung fehlgeschlagen. Bitte erneut versuchen."; }
     return true;
@@ -2774,7 +2812,9 @@ async function consumeAuthRedirect() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token: magic }),
     });
-    if (r.ok) { const d = await r.json(); setAuthToken(d.token); _authRedirectMsg = "Erfolgreich angemeldet."; }
+    // Erfolg nur bei tatsaechlich vorhandenem Token-String (2xx ohne Token zaehlt nicht).
+    const d = r.ok ? await r.json().catch(() => null) : null;
+    if (d && typeof d.token === "string" && d.token) { setAuthToken(d.token); _authRedirectMsg = "Erfolgreich angemeldet."; }
     else _authRedirectMsg = "Der Anmeldelink ist ungültig oder abgelaufen.";
   } catch { _authRedirectMsg = "Anmeldung fehlgeschlagen. Bitte erneut versuchen."; }
   return true;
@@ -4229,8 +4269,11 @@ async function generateQuiz(opts = {}) {
       }
       if (!canAffordBeste()) {
         // Flag an, aber Guthaben deckt keinen Opus-Test → NICHT still downgraden, sondern
-        // klar aufs Aufladen/eine andere Stufe hinweisen (die Absicht bleibt erhalten).
-        showError(`Dein Guthaben reicht für die beste Qualität (Opus) nicht aus (etwa ${formatGuthabenEuro(requiredOpusCredits())} pro Test). Du kannst in den Einstellungen aufladen oder eine andere Qualitätsstufe wählen.`);
+        // klar aufs Aufladen/eine andere Stufe hinweisen (die Absicht bleibt erhalten). Den Preis
+        // nur nennen, wenn der maßgebliche Server-Wert vorliegt — nie die Client-Konstante (F-2).
+        const opusPrice = serverOpusCredits();
+        const opusPriceHinweis = opusPrice === null ? "" : ` (etwa ${formatGuthabenEuro(opusPrice)} pro Test)`;
+        showError(`Dein Guthaben reicht für die beste Qualität (Opus) nicht aus${opusPriceHinweis}. Du kannst in den Einstellungen aufladen oder eine andere Qualitätsstufe wählen.`);
         return;
       }
     }
@@ -4581,6 +4624,26 @@ async function startHostedGeneration(ctx) {
   try {
     // Stufe einmal bestimmen und konsistent fuer Body UND Provenienz verwenden.
     const tierSent = effectiveTier();
+    // F-1: Eine bezahlte Opus-Generierung ("beste") bucht Guthaben ab — wie der Gratis-Overflow
+    // darf das NIE ohne ausdrueckliche Bestaetigung passieren (CLAUDE.md: Kosten nie unbeabsichtigt).
+    // Vor dem ERSTEN bezahlten Dispatch bestaetigen, ausser der Nutzer hat das Opt-in "automatisch
+    // Guthaben verwenden" gesetzt (gleiche Symmetrie wie der Overflow-Pfad). Die Affordability ist
+    // in generateQuiz bereits fail-closed geprueft (canAffordBeste).
+    if (tierSent === "beste" && !settings.autoUseCredits) {
+      const price = serverOpusCredits(); // maßgeblicher Server-Preis, NIE die Client-Konstante (F-2)
+      if (price === null) {
+        // Server-Preis (noch) unbekannt → NICHTS auf Basis eines geratenen Werts abbuchen. Sauber
+        // abbrechen, Stand frisch holen und zum erneuten Versuch bitten.
+        hideLoading();
+        refreshBalance();
+        showError("Der Preis für die beste Qualität (Opus) konnte gerade nicht bestätigt werden. Bitte kurz warten und erneut versuchen.");
+        return;
+      }
+      hideLoading();
+      const ok = await openOverflowConfirm({ tier: "beste", priceCredits: price, lead: "opus" });
+      if (!ok) { refreshBalance(); return; } // abgebrochen → kein Test, kein Charge
+      showLoading("Test wird gestartet...");
+    }
     let paidOverflow = false; // wurde der Test per Gratis-Overflow (Kontingent aufgebraucht) bezahlt?
     let res = await postGenerationJob(ctx, tierSent, false);
     // 402 quota-exhausted = Gratis-Tageskontingent aufgebraucht. Erst NACH ausdruecklicher
@@ -9284,6 +9347,15 @@ function exportData() {
   // koennte von jedem, der die Datei liest, bis zum Logout/Ablauf als Bearer replayt werden
   // (Codex-Review R8). Beim Import wird ein fremdes Token ohnehin nicht uebernommen.
   const { authToken, ...exportedSettings } = loadSettings();
+  // apiKey (BYOK-Provider-Schluessel) bleibt bewusst im Backup: beim Umzug zwischen Geraeten/
+  // Browsern ist er die Credential, die der Nutzer mitnehmen will (CLAUDE.md: Keys nie verwerfen).
+  // Anders als der kurzlebige authToken (R8, oben herausgefiltert) ist er aber ein langlebiges,
+  // abrechenbares Geheimnis — daher VOR dem Download einmal warnen (nur wenn wirklich gesetzt),
+  // damit die Klartext-Datei nicht arglos in Cloud/Mail/geteilten Speicher landet.
+  if (exportedSettings.apiKey && !confirm(
+    "Achtung: Diese Sicherung enthält deinen gespeicherten API-Schlüssel im Klartext. " +
+    "Bewahre die Datei sicher auf und teile sie mit niemandem. Fortfahren?"
+  )) return;
   const data = {
     app: "bewerbungstool",
     version: 1,
@@ -9889,11 +9961,18 @@ $("btn-confirm-replace-learn-cancel").addEventListener("click", closeConfirmRepl
 // CLAUDE.md-Leitplanke). Promise-basiert: resolve(true)=erstellen, resolve(false)=abbrechen.
 let overflowConfirmResolve = null;
 let overflowConfirmReturnFocus = null;
-function openOverflowConfirm({ tier, priceCredits }) {
+function openOverflowConfirm({ tier, priceCredits, lead }) {
   const euro = formatGuthabenEuro(Number.isFinite(priceCredits) ? priceCredits : tierPriceCredits(tier));
+  // lead="opus": die bezahlte Opus-Stufe (F-1) — hier ist kein Gratis-Kontingent im Spiel, daher
+  // ohne die "Tageskontingent aufgebraucht"-Einleitung (und mit passendem Titel). Sonst der
+  // Gratis-Overflow-Fall (Default). Titel je Aufruf setzen, da das Modal geteilt wird.
+  const opus = lead === "opus";
+  const titleEl = $("overflow-title");
+  if (titleEl) titleEl.textContent = opus ? "Beste Qualität (Opus) – kostenpflichtig" : "Kostenloses Tageskontingent aufgebraucht";
+  const intro = opus ? "" : "Dein kostenloses Tageskontingent für heute ist aufgebraucht. ";
   // euro/Label aus kontrollierten Werten (Zahl bzw. fester Stufenname) → kein XSS.
   $("overflow-text").innerHTML =
-    `Dein kostenloses Tageskontingent für heute ist aufgebraucht. Diesen Test in Qualität ` +
+    `${intro}Diesen Test in Qualität ` +
     `<strong>${tierLabelFor(tier)}</strong> für <strong>${euro}</strong> aus deinem Guthaben erstellen?`;
   overflowConfirmReturnFocus = document.activeElement;
   $("overflow-modal").classList.remove("hidden");
