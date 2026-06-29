@@ -409,6 +409,16 @@
       </div>
       <p class="hint">&bdquo;Schwer&ldquo; sind Fragen, wie sie im echten Auswahlverfahren für diese Stelle am wahrscheinlichsten gestellt werden &ndash; die Stufe steuert ihren Anteil im Test. Im Lernmodus wird die Schwierigkeit jeder Frage angezeigt.</p>
 
+      <label for="create-tier">Qualitätsstufe</label>
+      <select id="create-tier">
+        <option value="standard">Standard – empfohlen</option>
+        <option value="guenstig">Günstig – schneller und sparsamer</option>
+        <option value="beste" hidden disabled>Beste (Opus) – höchste Qualität</option>
+      </select>
+      <p id="create-tier-beste-hint" class="hint hidden"></p>
+      <p id="create-tier-free-hint" class="hint hidden"></p>
+      <p class="hint">Bestimmt Modell, Qualität und Kosten dieses Tests. <strong>Standard</strong> ist empfohlen, <strong>Günstig</strong> erstellt schneller und sparsamer (etwas weniger Fragen möglich), <strong>Beste (Opus)</strong> liefert die höchste Qualität. Voreingestellt ist deine globale Wahl aus den Einstellungen &ndash; hier nur für diesen Test änderbar.</p>
+
       <label for="gespraechsstufe">Gesprächsstufe <span class="hint">(optional)</span></label>
       <select id="gespraechsstufe">
         <option value="">Allgemein</option>
