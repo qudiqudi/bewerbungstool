@@ -379,7 +379,7 @@
           <input type="url" id="job-url" placeholder="https://beispiel.de/stellenanzeige">
           <button id="btn-fetch-url">Laden</button>
         </div>
-        <p class="hint">Die Adresse wird über den Drittanbieter-Reader Jina AI (<code>r.jina.ai</code>) als Text geladen und danach unter &bdquo;Text einfügen&ldquo; zur Kontrolle angezeigt. Falls das Laden fehlschlägt, dort den Text manuell einfügen.</p>
+        <p class="hint">Im gehosteten Modus wird die Adresse serverseitig von jobreif (<code>api.jobreif.de</code>) als Text geladen. Mit eigenem Schlüssel oder lokalem Modell läuft das Laden über den Drittanbieter-Reader Jina AI (<code>r.jina.ai</code>) direkt aus deinem Browser. Der Text wird danach unter &bdquo;Text einfügen&ldquo; zur Kontrolle angezeigt. Falls das Laden fehlschlägt, dort den Text manuell einfügen.</p>
       </div>
 
       <div id="source-text" class="hidden">
@@ -655,21 +655,21 @@
 
         <h3>Zwei Betriebsarten</h3>
         <p><strong>Gehostet (Standard):</strong> Die KI läuft über unseren Dienst. Wenn du einen Test erstellst oder auswerten lässt, werden die dafür nötigen Eingaben an unsere Server gesendet.</p>
-        <p><strong>Eigener Schlüssel oder lokales Modell:</strong> In den Einstellungen kannst du stattdessen einen eigenen API-Schlüssel hinterlegen oder ein lokales Modell verwenden. Dann läuft die Testerstellung und Auswertung nicht über unsere Server – die Daten gehen direkt an den von dir gewählten Anbieter oder bleiben bei einem lokalen Modell vollständig auf deinem Rechner. Ausnahmen bleiben der Import per URL (läuft in jedem Fall über Jina AI, siehe „Stellenanzeige per URL laden“) und das Melden einer Frage (geht in jedem Fall an uns, siehe „Gemeldete Fragen“).</p>
+        <p><strong>Eigener Schlüssel oder lokales Modell:</strong> In den Einstellungen kannst du stattdessen einen eigenen API-Schlüssel hinterlegen oder ein lokales Modell verwenden. Dann läuft die Testerstellung und Auswertung nicht über unsere Server – die Daten gehen direkt an den von dir gewählten Anbieter oder bleiben bei einem lokalen Modell vollständig auf deinem Rechner. Ausnahmen bleiben der Import per URL (in dieser Betriebsart läuft er über Jina AI direkt aus deinem Browser, siehe „Stellenanzeige per URL laden“) und das Melden einer Frage (geht in jedem Fall an uns, siehe „Gemeldete Fragen“).</p>
 
         <h3>Welche Daten im gehosteten Modus übertragen werden</h3>
         <p>Je nach Funktion: der Text der Stellenanzeige, die gewählten Test-Optionen (Anzahl der Fragen, Schwierigkeit, Lern- oder Prüfungsmodus) und die Qualitätsstufe; beim Auswerten zusätzlich die Fragen samt hinterlegter Musterlösung, deine Antworten und der Zeitverlauf; beim Vertiefen eine Zusammenfassung deiner bisher am schlechtesten beantworteten Fragen (mit Punktzahl), damit der Test gezielt nachschärfen kann. Jede gehostete Anfrage ist zudem über deinen Anmelde-Token deinem Konto zugeordnet (siehe „Konto im gehosteten Modus“). Ohne Anmeldung kannst du stattdessen einen eigenen Schlüssel oder ein lokales Modell nutzen, dann fallen keine Kontodaten an.</p>
         <p>Bitte beachte: Stellenanzeigen und besonders deine Antworten können personenbezogene oder sensible Angaben enthalten. Gib im gehosteten Modus nichts ein, das nicht über fremde Dienste laufen soll – wenn du das vermeiden willst, nutze einen eigenen Schlüssel oder ein lokales Modell.</p>
 
         <h3>Stellenanzeige per URL laden</h3>
-        <p>Wenn du eine Stellenanzeige über „Per URL laden“ importierst, wird die eingegebene Adresse – ggf. in normalisierten Varianten, etwa bei LinkedIn, Indeed, StepStone, Onlyfy oder der Arbeitsagentur – an den Dienst Jina AI (<code>r.jina.ai</code>) gesendet. Jina ruft die Seite ab und liefert den lesbaren Text zurück. Das geschieht unabhängig von der gewählten Betriebsart – also auch mit eigenem Schlüssel oder lokalem Modell. Wenn du das vermeiden willst, füge den Anzeigentext stattdessen über „Text einfügen“ direkt ein.</p>
+        <p>Wenn du eine Stellenanzeige über „Per URL laden“ importierst, wird die eingegebene Adresse – ggf. in normalisierten Varianten, etwa bei Indeed, StepStone, Onlyfy oder der Arbeitsagentur – verarbeitet, um den lesbaren Anzeigentext zu gewinnen. Wer das verarbeitet, hängt von der Betriebsart ab: <strong>Im gehosteten Modus</strong> ruft unser Server (<code>api.jobreif.de</code>) die Seite selbst ab und liefert den Text zurück – die Adresse geht also an uns, nicht an einen Drittanbieter. <strong>Mit eigenem Schlüssel oder lokalem Modell</strong> wird die Adresse stattdessen an den Dienst Jina AI (<code>r.jina.ai</code>) gesendet; der Abruf läuft direkt aus deinem Browser. LinkedIn-Anzeigen lassen sich nicht automatisch laden – dafür gibt es unter „Text einfügen“ das Lesezeichen „jobreif-Import“. Wenn du jeden externen Abruf vermeiden willst, füge den Anzeigentext stattdessen über „Text einfügen“ direkt ein.</p>
 
         <h3>Wer die Daten verarbeitet (Empfänger)</h3>
         <ul>
           <li>Cloudflare – Hosting unseres Vermittlungs-Servers (weltweit verteilte Server) sowie Bot-Schutz über Cloudflare Turnstile beim Anmelden und bei den KI-Anfragen (Themenfelder ableiten, Test erstellen und auswerten)</li>
           <li>OpenRouter – leitet die Anfrage an das jeweilige KI-Modell weiter</li>
           <li>Der jeweilige Modellanbieter je nach Qualitätsstufe (z. B. OpenAI, Anthropic, DeepSeek)</li>
-          <li>Jina AI – ruft beim Import per URL die Stellenanzeige ab und liefert den Text zurück</li>
+          <li>Jina AI – ruft beim Import per URL die Stellenanzeige ab und liefert den Text zurück; nur mit eigenem Schlüssel oder lokalem Modell (im gehosteten Modus übernimmt das unser eigener Server)</li>
           <li>Resend – versendet in unserem Auftrag den Anmeldelink per E-Mail</li>
         </ul>
         <p>Diese Anbieter verarbeiten die übermittelten Inhalte jeweils nur, um die genannte Funktion zu erbringen. Dabei ist eine Übermittlung in Länder außerhalb der EU (u. a. USA) möglich. Soweit Daten in Drittländer übertragen werden, stützen wir das auf die Standardvertragsklauseln der EU-Kommission; soweit ein Empfänger nach dem EU-US Data Privacy Framework zertifiziert ist (z. B. Cloudflare, OpenAI), zusätzlich darauf. Eine Kopie dieser Garantien erhältst du über die unten genannte Kontaktadresse.</p>

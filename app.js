@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.27.6";
+const APP_VERSION = "1.27.7";
 
 const CHANGELOG = [
+  {
+    version: "1.27.7",
+    date: "29.06.2026",
+    items: [
+      "Schnellerer und privaterer URL-Import: Im gehosteten Modus wird die Stellenanzeige jetzt direkt über jobreif geladen, statt über einen Drittanbieter-Reader. Schlägt das Laden fehl, bekommst du eine klarere Erklärung (z. B. Seite nicht gefunden, Zeitüberschreitung oder durch Bot-Schutz blockiert) statt einer technischen Fehlermeldung. Mit eigenem Schlüssel oder lokalem Modell bleibt der bisherige Weg über deinen eigenen Browser unverändert.",
+    ],
+  },
   {
     version: "1.27.6",
     date: "29.06.2026",
@@ -3720,13 +3727,105 @@ async function fetchJobPostingJsonLd(u) {
   return "";
 }
 
+// Hosted-Import (Phase 1b): uebersetzt die TYPISIERTEN Fehlercodes von
+// POST /api/import (siehe Backend-import.js) in stabile, hilfreiche du-Form-
+// Meldungen. BEWUSST eine EIGENE Tabelle, NICHT hostedErrorMessage: dort mappt
+// Status 503 auf "LLM-Tageskontingent erschoepft" — der Import-Endpoint liefert
+// aber NIE 503, und eine versehentliche Quota-Meldung beim URL-Laden waere
+// irrefuehrend. Unbekannte/fehlende Codes fallen defensiv auf eine generische
+// Meldung mit Hinweis aufs manuelle Einfuegen zurueck.
+function importErrorMessage(code, status) {
+  switch (code) {
+    case "linkedin":
+      // Backstop: der Client kurzschliesst LinkedIn schon vor dem Aufruf; sollte
+      // der Code dennoch ankommen, dieselbe klare Anleitung wie der Kurzschluss.
+      return LINKEDIN_BLOCKED_MSG;
+    case "not-found":
+      return "Die Seite wurde nicht gefunden (404). Bitte die Adresse prüfen oder die Stellenbeschreibung über „Text einfügen“ manuell einfügen.";
+    case "timeout":
+      return "Das Laden der Seite hat zu lange gebraucht. Bitte erneut versuchen oder die Stellenbeschreibung über „Text einfügen“ manuell einfügen.";
+    case "blocked":
+      return "Die Seite ist durch einen Bot-Schutz gesichert und konnte nicht ausgelesen werden (häufig bei Indeed). Bitte die Stellenbeschreibung über „Text einfügen“ manuell einfügen.";
+    case "no-content":
+      return "Aus der Seite konnte kein Anzeigentext ausgelesen werden (vermutlich eine JavaScript-Anwendung). Bitte die Stellenbeschreibung über „Text einfügen“ manuell einfügen.";
+    case "rate-limited":
+      return "Du hast gerade zu viele Importe gestartet. Bitte kurz warten und erneut versuchen.";
+    case "turnstile":
+      return "Sicherheitsprüfung fehlgeschlagen. Bitte die Seite neu laden und erneut versuchen.";
+    case "bad-url":
+    case "validation":
+      return "Die URL ist ungültig. Bitte eine vollständige https-Adresse der Stellenanzeige einfügen.";
+    case "too-large":
+    case "bad-json":
+      return "Die Anfrage war ungültig. Bitte die URL prüfen oder die Stellenbeschreibung über „Text einfügen“ manuell einfügen.";
+    case "fetch-failed":
+      return "Die Seite konnte nicht geladen werden. Bitte die Adresse prüfen oder die Stellenbeschreibung über „Text einfügen“ manuell einfügen.";
+    case "import-unavailable":
+      return "Der Import-Dienst ist momentan nicht erreichbar. Bitte später erneut versuchen oder die Stellenbeschreibung über „Text einfügen“ manuell einfügen.";
+    default:
+      return "Die Seite konnte nicht geladen werden" + (status ? " (HTTP " + status + ")" : "") + ". Bitte die Stellenbeschreibung über „Text einfügen“ manuell einfügen.";
+  }
+}
+
+// Hosted-Pfad des URL-Imports: laedt die Anzeige SERVERSEITIG ueber
+// POST https://api.jobreif.de/api/import (statt des Drittanbieter-Readers
+// r.jina.ai). Gleiche Schreib-Posture wie die anderen Hosted-Endpoints
+// (Bearer-Anmeldung + Turnstile, Aktion "import", an den Body gebunden;
+// Testkonten sind serverseitig ausgenommen). Antwort bei Erfolg
+// { text, tier, sourceUrl } → wir nutzen text. Fehler kommen TYPISIERT als
+// { error } und werden via importErrorMessage in du-Form uebersetzt.
+async function fetchJobViaBackend(url) {
+  requireHostedLoginOrThrow(); // Backstop: ohne Anmeldung kein Hosted-Import
+  const body = JSON.stringify({ url });
+  const headers = { "Content-Type": "application/json", ...authHeaders() };
+  // cData an genau diesen Body binden (Hash des exakt gesendeten Strings).
+  const token = await getTurnstileToken("import", await sha256hex(body));
+  if (token) headers["CF-Turnstile-Token"] = token;
+
+  let res;
+  try {
+    res = await fetch(hostedBase() + "/api/import", { method: "POST", headers, body });
+  } catch {
+    throw new Error("Keine Verbindung zum Dienst. Bitte Internetverbindung prüfen und erneut versuchen.");
+  }
+
+  // 401 (auth-required / abgelaufene Sitzung) wie bei den anderen Hosted-Calls:
+  // Token verwerfen, zur Anmeldung fuehren, Aufruf still abbrechen.
+  if (res.status === 401) { handleHostedUnauthorized(); throw new Error(LOGIN_REDIRECT); }
+  if (!res.ok) throw new Error(importErrorMessage(await hostedErrorCode(res), res.status));
+
+  let data;
+  try { data = await res.json(); } catch { data = null; }
+  const text = data && typeof data.text === "string" ? data.text : "";
+  if (!text) {
+    // 200 ohne brauchbaren Text sollte serverseitig nicht vorkommen (Erfolg liefert
+    // immer text) — defensiv dieselbe "kein Inhalt"-Anleitung wie no-content.
+    throw new Error(importErrorMessage("no-content"));
+  }
+  return text;
+}
+
 async function fetchJobFromUrl(url) {
-  // Proaktiver Kurzschluss fuer LinkedIn: beide Pfade (JSON-LD aus dem rohen
-  // HTML wie auch der r.jina.ai-Reader) sind durch LinkedIns externe Sperre
-  // (451/999) aussichtslos und enden nach ~25s im generischen Fehler. Wir
-  // sparen die doomed Wartezeit und sagen dem Nutzer direkt, was zu tun ist.
+  // Proaktiver Kurzschluss fuer LinkedIn: beide Pfade (serverseitiger Import wie
+  // auch der r.jina.ai-Reader) sind durch LinkedIns externe Sperre (451/999)
+  // aussichtslos und enden sonst im generischen Fehler. Wir sparen die doomed
+  // Wartezeit und sagen dem Nutzer direkt, was zu tun ist. Gilt fuer ALLE Modi.
   if (isLinkedInUrl(url)) {
     throw new Error(LINKEDIN_BLOCKED_MSG);
+  }
+
+  // Sauber nach Betriebsart verzweigen (NUR nach provider, NICHT nach Token):
+  // - Gehostet → IMMER serverseitiger Import ueber api.jobreif.de (ersetzt den
+  //   Drittanbieter r.jina.ai; die URL verlaesst nur unseren Server). Fehlt die
+  //   Anmeldung, fuehrt fetchJobViaBackend ueber requireHostedLoginOrThrow zur
+  //   Anmeldung statt still auf Jina zurueckzufallen — sonst wuerde die im Hosted-
+  //   Modus zugesagte serverseitige Verarbeitung (Datenschutzhinweis) unterlaufen,
+  //   indem die URL doch an einen Drittanbieter ginge. Ein stellenbezogener Import
+  //   verlangt im Hosted-Modus ohnehin die (kostenlose) Anmeldung.
+  // - BYOK/lokal → UNVERAENDERTER Client-Reader unten: r.jina.ai laeuft im EIGENEN
+  //   Browser des Nutzers. Bewusst KEINE Regression dieses Pfads.
+  if ((settings.provider || "hosted") === "hosted") {
+    return await fetchJobViaBackend(url);
   }
 
   // Layer 1 (primaer): portalunabhaengiges JobPosting-JSON-LD aus dem rohen
