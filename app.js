@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.27.2";
+const APP_VERSION = "1.27.3";
 
 const CHANGELOG = [
+  {
+    version: "1.27.3",
+    date: "29.06.2026",
+    items: [
+      "Qualitätsstufe direkt beim Test erstellen wählbar: Standard, Günstig oder – wenn verfügbar – Beste (Opus) lassen sich jetzt pro Test in der Erstell-Maske einstellen, mit Kurzbeschreibung und Kostenhinweis. Voreingestellt ist deine globale Wahl aus den Einstellungen; die Änderung gilt nur für diesen einen Test.",
+    ],
+  },
   {
     version: "1.27.2",
     date: "29.06.2026",
@@ -880,11 +887,31 @@ const $ = (id) => document.getElementById(id);
 const views = ["view-login", "view-onboarding", "view-settings", "view-home", "view-input", "view-job", "view-quiz", "view-result", "view-history", "view-sr"];
 
 function showView(id) {
+  // Eingabe-Bildschirm verlassen → den TRANSIENTEN Pro-Test-Tier-Override verwerfen, damit er
+  // nicht in andere Kontexte (Folge-Calls, Historie, Analytics) leckt. Vor dem Sync unten, damit
+  // ein Wiedereintritt sauber den globalen settings.tier als Default zeigt.
+  if (id !== "view-input") formTierOverride = null;
   views.forEach((v) => $(v).classList.toggle("hidden", v !== id));
-  // Eingabe-Bildschirm: Fragen-Stepper an die aktuelle Stufe anpassen (guenstig deckelt
-  // niedriger). Ein evtl. unter "standard" gesetzter hoeherer Wert wird heruntergeklemmt.
-  if (id === "view-input") { const ni = $("num-questions"); if (ni && ni.refreshMax) ni.refreshMax(); }
+  // Eingabe-Bildschirm: Pro-Test-Tier-Selektor auf die aktuelle Absicht setzen und den
+  // Fragen-Stepper an die Stufe anpassen (guenstig deckelt niedriger). Ein evtl. unter "standard"
+  // gesetzter hoeherer Wert wird heruntergeklemmt.
+  if (id === "view-input") {
+    syncCreateTierSelect();
+    const ni = $("num-questions"); if (ni && ni.refreshMax) ni.refreshMax();
+  }
   syncHistory(id);
+}
+
+// Den Pro-Test-Tier-Selektor (#create-tier) mit der aktuellen Absicht (Override oder globaler
+// settings.tier) bestuecken und Opus-Option/Hinweise frisch zeichnen. Idempotent; tut nichts,
+// solange der Selektor (noch) nicht im DOM ist.
+function syncCreateTierSelect() {
+  const g = TIER_CONTROLS.create;
+  const sel = $(g.sel);
+  if (!sel) return;
+  sel.value = selectedTier();
+  updateTierOptions(g);   // setzt ggf. beste sichtbar/gesperrt und korrigiert den Wert
+  updateFreeTierHint(g);
 }
 
 function currentView() {
@@ -2395,6 +2422,20 @@ function canAffordBeste() {
     && creditsState.credits >= requiredOpusCredits();
 }
 
+// Pro-Test-Override der Qualitaetsstufe aus der Erstell-Maske. TRANSIENT (nie persistiert):
+// null => es gilt der globale settings.tier (Default). Wird nur im Eingabe-Bildschirm gesetzt
+// und beim Verlassen wieder geleert (showView), damit er nicht in andere Kontexte (Folge-Calls,
+// Historie, Analytics) leckt. settings.tier (CLAUDE.md-Storage-Key) bleibt unveraendert.
+let formTierOverride = null;
+
+// Aktuell gewaehlte Qualitaetsstufe (Nutzer-ABSICHT, vor dem Opus-Affordability-Clamp): der
+// Pro-Test-Override, sonst der globale settings.tier. EINZIGE Quelle der Wahrheit fuer numMax
+// (Guenstig-Cap), das Opus-Gate, effectiveTier, Analytics und die /api/jobs-Payload — so laeuft
+// eine Pro-Test-Wahl durch GENAU DIESELBEN Checks wie die globale, nicht daran vorbei.
+function selectedTier() {
+  return formTierOverride || settings.tier || "standard";
+}
+
 // Tatsaechlich verwendbare Qualitaetsstufe. "beste" (Opus) wird auf "standard" heruntergestuft,
 // solange der Client nicht bestaetigt berechtigt ist. So sendet ein importiertes oder veraltetes
 // settings.tier="beste" NIE einen gesperrten Premium-Request — unabhaengig davon, ob das
@@ -2402,7 +2443,7 @@ function canAffordBeste() {
 // fail-closed VOR dem Dispatch (Guard in generateQuiz), damit eine bewusst bezahlte Auswahl nie
 // still als standard durchrutscht; effectiveTier ist die defensive Untergrenze.
 function effectiveTier() {
-  const t = settings.tier || "standard";
+  const t = selectedTier();
   if (t !== "beste") return t;
   return canAffordBeste() ? "beste" : "standard";
 }
@@ -2426,30 +2467,57 @@ function tierForHostedCall(payload) {
 // Schaltet die Opus-Stufe ("beste") im Qualitaets-Select frei: nur wenn das Server-Flag an
 // ist. Ohne Guthaben bleibt die Option sichtbar, aber gesperrt (mit Aufladen-Hinweis) — so
 // ist sie auffindbar und stupst zum Aufladen, ohne einen leeren Kauf auszuloesen.
-function updateTierOptions() {
-  const sel = $("tier");
-  if (!sel) return;
+// Tier-Kontrollgruppen, die sich DIESELBE Auffrisch-Logik teilen (Opus sichtbar/gesperrt,
+// Hinweise) — damit der globale Settings-Selektor und der Pro-Test-Selektor in der Erstell-Maske
+// garantiert durch identische Checks laufen (kein Bypass des Opus-Gates). read() liest die
+// jeweilige Absicht, write(t) normalisiert die jeweilige Quelle der Wahrheit: das globale
+// settings.tier (persistiert) bzw. den transienten Pro-Test-Override.
+const TIER_CONTROLS = {
+  settings: {
+    sel: "tier", besteHint: "tier-beste-hint", freeHint: "tier-free-hint",
+    read: () => settings.tier || "standard",
+    write: (t) => { if (settings.tier !== t) { settings = { ...settings, tier: t }; saveSettings(settings); } },
+  },
+  create: {
+    sel: "create-tier", besteHint: "create-tier-beste-hint", freeHint: "create-tier-free-hint",
+    read: () => selectedTier(),
+    write: (t) => { formTierOverride = t; },
+  },
+};
+
+// Beide Selektoren aus dem aktuellen creditsState neu zeichnen (Opus-Option, Hinweise).
+function renderTierControls() {
+  updateTierOptions(TIER_CONTROLS.settings);
+  updateFreeTierHint(TIER_CONTROLS.settings);
+  updateTierOptions(TIER_CONTROLS.create);
+  updateFreeTierHint(TIER_CONTROLS.create);
+}
+
+function updateTierOptions(group) {
+  const sel = $(group.sel);
+  if (!sel) return; // Selektor (noch) nicht im DOM (z. B. create-tier vor Erst-Render)
   const beste = sel.querySelector('option[value="beste"]');
   if (!beste) return;
+  const intent = group.read();
   // Entitlement noch unbekannt (kein bestaetigter Server-Stand): NICHTS erzwingen, sonst
   // fiele eine gespeicherte beste-Auswahl beim Oeffnen der Einstellungen still auf standard.
   // Bei gespeichertem Wunsch "beste" die Option sichtbar lassen, damit das Select sie weiter
   // anzeigt; die endgueltige Entscheidung faellt, sobald /auth/me bzw. /api/balance da ist.
   if (!creditsState.loaded) {
-    if (settings.tier === "beste") { beste.hidden = false; beste.disabled = false; }
-    updateTierHint();
+    if (intent === "beste") { beste.hidden = false; beste.disabled = false; }
+    updateTierHint(group);
     return;
   }
   if (!creditsState.creditsEnabled) {
     // Flag bestaetigt aus → Opus ist gar kein verfuegbares Feature. Option verbergen UND eine
-    // gespeicherte (importierte/veraltete) beste-Absicht auf standard NORMALISIEREN, damit
-    // Anzeige und gespeicherte Einstellung uebereinstimmen und die Generierung nicht an einem
-    // unsichtbaren beste-Wert haengenbleibt (Quelle der Wahrheit konsistent halten).
+    // (importierte/veraltete bzw. pro-Test gewaehlte) beste-Absicht auf standard NORMALISIEREN,
+    // damit Anzeige und Quelle der Wahrheit uebereinstimmen und die Generierung nicht an einem
+    // unsichtbaren beste-Wert haengenbleibt.
     beste.hidden = true;
     beste.disabled = true;
-    if (settings.tier === "beste") { settings = { ...settings, tier: "standard" }; saveSettings(settings); }
+    if (intent === "beste") group.write("standard");
     if (sel.value === "beste") sel.value = "standard";
-    updateTierHint();
+    updateTierHint(group);
     return;
   }
   // Flag an: Option zeigen. Waehlbar nur, wenn das Guthaben mindestens einen Opus-Test deckt
@@ -2457,18 +2525,17 @@ function updateTierOptions() {
   beste.hidden = false;
   beste.disabled = !canAffordBeste();
   // Bei zu wenig Guthaben die beste-ABSICHT bewusst NICHT verwerfen (anders als beim Flag-aus):
-  // die Option bleibt sichtbar und, falls gespeichert, ausgewaehlt (disabled, mit Aufladen-
-  // Hinweis). Die Generierung weist dann klar aufs Aufladen hin, statt still auf standard zu
-  // generieren — Anzeige und settings.tier bleiben konsistent (beide "beste").
-  if (settings.tier === "beste" && sel.value !== "beste") sel.value = "beste";
-  updateTierHint();
+  // die Option bleibt sichtbar und, falls gewaehlt, ausgewaehlt (disabled, mit Aufladen-Hinweis).
+  // Die Generierung weist dann klar aufs Aufladen hin, statt still auf standard zu generieren.
+  if (group.read() === "beste" && sel.value !== "beste") sel.value = "beste";
+  updateTierHint(group);
 }
 
 // Hinweistext unter dem Qualitaets-Select: Kostenhinweis bei aktiver Opus-Auswahl bzw.
 // Aufladen-Aufforderung, wenn die Option mangels Guthaben gesperrt ist.
-function updateTierHint() {
-  const sel = $("tier");
-  const hint = $("tier-beste-hint");
+function updateTierHint(group) {
+  const sel = $(group.sel);
+  const hint = $(group.besteHint);
   if (!sel || !hint) return;
   const beste = sel.querySelector('option[value="beste"]');
   if (!beste || beste.hidden) { hint.classList.add("hidden"); hint.textContent = ""; return; }
@@ -2481,10 +2548,12 @@ function updateTierHint() {
       : `Beste Qualität (Opus) kostet etwa <strong>${formatGuthabenEuro(c)} pro Test</strong>.`;
     hint.classList.remove("hidden");
   } else if (beste.disabled) {
-    // Gesperrt (ausgewaehlt oder nur sichtbar) → Guthaben fehlt; Aufladen anbieten.
-    hint.innerHTML = 'Beste Qualität (Opus) braucht mehr Guthaben. <a href="#" id="link-aufladen">Aufladen</a>';
+    // Gesperrt (ausgewaehlt oder nur sichtbar) → Guthaben fehlt; Aufladen anbieten. Den Link
+    // INNERHALB des Hint-Elements ansprechen (nicht per globaler id), damit beide Selektoren
+    // ihren eigenen Aufladen-Link bekommen, ohne doppelte ids im DOM.
+    hint.innerHTML = 'Beste Qualität (Opus) braucht mehr Guthaben. <a href="#">Aufladen</a>';
     hint.classList.remove("hidden");
-    const link = $("link-aufladen");
+    const link = hint.querySelector("a");
     if (link) link.onclick = (e) => { e.preventDefault(); openTopupDialog(); };
   } else {
     hint.classList.add("hidden");
@@ -2495,11 +2564,11 @@ function updateTierHint() {
 // Hinweis fuer die Gratis-Stufen (standard/guenstig): wie viele kostenlose Tests heute noch
 // uebrig sind bzw. — wenn aufgebraucht — dass weitere Tests Guthaben kosten (Overflow). Nur
 // bei aktivem Flag und bekanntem freeRemaining; fuer "beste" zeigt updateTierHint den Opus-Preis.
-function updateFreeTierHint() {
-  const sel = $("tier");
-  const hint = $("tier-free-hint");
+function updateFreeTierHint(group) {
+  const sel = $(group.sel);
+  const hint = $(group.freeHint);
   if (!hint) return;
-  const tier = sel ? sel.value : (settings.tier || "standard");
+  const tier = sel ? sel.value : group.read();
   const remaining = creditsState.freeRemaining;
   if (!creditsState.creditsEnabled || tier === "beste" || !Number.isFinite(remaining)) {
     hint.classList.add("hidden"); hint.textContent = ""; return;
@@ -2521,8 +2590,7 @@ function updateFreeTierHint() {
 // Balance-Zeile + Tier-Optionen + Aufladen-Bereich aus dem aktuellen creditsState zeichnen.
 function renderCreditsUI() {
   renderBalanceLine();
-  updateTierOptions();
-  updateFreeTierHint();
+  renderTierControls();
   // Aufladen nur, wenn Credits live sind (Flag an). Sichtbarkeit haengt zusaetzlich am
   // Login-Zustand (Block liegt in #account-loggedin).
   const topup = $("topup");
@@ -4281,7 +4349,7 @@ async function generateQuiz(opts = {}) {
   // Nur pruefen, wenn ueberhaupt ein Token da ist: ohne Anmeldung uebernimmt
   // startHostedGeneration den Login-Prompt — der Opus-Gate darf den NICHT mit einem
   // Guthaben-/Offline-Fehler verdecken.
-  if (isHosted && settings.tier === "beste" && settings.authToken) {
+  if (isHosted && selectedTier() === "beste" && settings.authToken) {
     // Frisch nachladen, wenn unbekannt ODER moeglicherweise veraltet (nach einer Abbuchung) —
     // sonst koennte ein zweiter Opus-Test auf stale Guthaben gestartet werden.
     if (!creditsState.loaded || creditsState.dirty) await refreshBalance();
@@ -4289,7 +4357,7 @@ async function generateQuiz(opts = {}) {
     // haben (Flag bestaetigt aus) oder (b) bei 401 das Token verworfen haben. In beiden Faellen
     // hier NICHT blockieren: dann greift entweder normale standard-Generierung oder der
     // Login-Pfad in startHostedGeneration.
-    if (settings.authToken && settings.tier === "beste") {
+    if (settings.authToken && selectedTier() === "beste") {
       if (!creditsState.loaded) {
         // Entitlement liess sich nicht bestaetigen (Balance-Abruf fehlgeschlagen/offline).
         showError("Die beste Qualität (Opus) konnte gerade nicht bestätigt werden. Bitte Verbindung prüfen und erneut versuchen, oder in den Einstellungen eine andere Qualitätsstufe wählen.");
@@ -4481,9 +4549,9 @@ async function generateQuiz(opts = {}) {
       genCost, genTokens, isLocal, localAborted, total,
       provider: settings.provider || "hosted",
       // Dieser Pfad ist immer NICHT-hosted (hosted kehrt vorher ueber startHostedGeneration
-      // zurueck) — die Stufe ist hier ein reines BYOK/lokal-Provenienzfeld; wie bisher
-      // unveraendert uebernehmen (kein Opus-Clamp, der nur den Hosted-Pfad betrifft).
-      tier: settings.tier || null,
+      // zurueck) — die Stufe ist hier ein reines BYOK/lokal-Provenienzfeld; die pro-Test-Wahl
+      // (selectedTier) konsistent uebernehmen (kein Opus-Clamp, der nur den Hosted-Pfad betrifft).
+      tier: selectedTier() || null,
       model: settings.model || null,
     });
   } catch (e) {
@@ -8185,7 +8253,10 @@ const NUM_MIN = 4, NUM_MAX = 20, NUM_MAX_GUENSTIG = 15;
 // (oder ohne settings) greift die hoehere Standardgrenze.
 function numMax() {
   const hosted = settings && (settings.provider || "hosted") === "hosted";
-  return hosted && settings.tier === "guenstig" ? NUM_MAX_GUENSTIG : NUM_MAX;
+  // selectedTier(): beruecksichtigt den transienten Pro-Test-Override aus der Erstell-Maske, sonst
+  // den globalen settings.tier — so wird der Guenstig-Cap fuer eine Pro-Test-Wahl bereits VOR dem
+  // Submit neu berechnet (Stepper deckelt auf NUM_MAX_GUENSTIG), nicht erst serverseitig.
+  return hosted && selectedTier() === "guenstig" ? NUM_MAX_GUENSTIG : NUM_MAX;
 }
 
 // Test-Einstellungen defensiv lesen: aeltere Stellen haben kein lastTestConfig,
@@ -9301,7 +9372,22 @@ $("model").addEventListener("change", updateModelDesc);
 
 // Kostenhinweis der Qualitaetsstufe bei Auswahl aktualisieren (z. B. „≈ 0,60 € pro Test“)
 // sowie den Gratis-Kontingent-/Overflow-Hinweis fuer die Gratis-Stufen.
-$("tier").addEventListener("change", () => { updateTierHint(); updateFreeTierHint(); });
+$("tier").addEventListener("change", () => {
+  updateTierHint(TIER_CONTROLS.settings);
+  updateFreeTierHint(TIER_CONTROLS.settings);
+});
+
+// Pro-Test-Qualitaetsstufe in der Erstell-Maske: die Wahl als TRANSIENTEN Override merken (nie
+// persistiert) und sofort die abhaengige UI nachziehen — Opus-Option/Hinweise sowie den
+// Fragen-Stepper (Guenstig deckelt auf NUM_MAX_GUENSTIG, daher VOR dem Submit neu klemmen).
+$("create-tier").addEventListener("change", () => {
+  const g = TIER_CONTROLS.create;
+  const sel = $(g.sel);
+  if (sel) formTierOverride = sel.value;
+  updateTierOptions(g);
+  updateFreeTierHint(g);
+  const ni = $("num-questions"); if (ni && ni.refreshMax) ni.refreshMax();
+});
 
 // Aufladen-Buttons (3/5/10 €) → Paddle-Checkout.
 document.querySelectorAll(".btn-topup").forEach((b) => {
