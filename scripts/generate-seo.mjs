@@ -308,7 +308,7 @@ ${HEADER}
     <p class="lead">${esc(p.intro)}</p>
 
     <a class="cta" href="${esc(ctaUrl)}">Jetzt kostenlos üben →</a>
-    <p class="cta-note">Aus echter Stellenanzeige · KI-Feedback · ohne Anmeldung, ohne Installation</p>
+    <p class="cta-note">Aus echter Stellenanzeige · KI-Feedback · ohne Installation. Allgemeine Übungsmodule sofort ohne Anmeldung – der komplette, stellenbezogene Test braucht eine kostenlose Anmeldung.</p>
 
     <section class="block">
       <h2>Diese Testarten übst du hier</h2>

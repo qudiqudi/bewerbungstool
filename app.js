@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.27.3";
+const APP_VERSION = "1.27.4";
 
 const CHANGELOG = [
+  {
+    version: "1.27.4",
+    date: "29.06.2026",
+    items: [
+      "Üben ohne Anmeldung – direkt vom Anmeldefenster: Wer noch kein Konto hat, kann die allgemeinen Eignungsmodule (Zahlenreihen, Konzentration, Figuren) jetzt sofort und ohne Anmeldung ausprobieren. Ein stellenbezogener Test aus einer Anzeige braucht weiterhin die kostenlose Anmeldung.",
+    ],
+  },
   {
     version: "1.27.3",
     date: "29.06.2026",
@@ -9291,6 +9298,12 @@ $("login-magic-form").addEventListener("submit", async (e) => {
     btn.disabled = false;
   }
 });
+
+// No-Login-Praxis direkt aus dem Login-Gate: oeffnet den generischen Uebungs-Hub. Rein
+// lokal erzeugt/ausgewertet (startPractice() -> generateUebungByType()), kein Konto und
+// kein Anbieter noetig. WICHTIG: nur die generische Praxis ist no-login – die gehostete,
+// stellenbezogene Testerstellung bleibt hinter der Anmeldung (hostedNeedsLogin()).
+$("btn-login-practice").addEventListener("click", () => openPracticePicker());
 
 $("btn-login-google").addEventListener("click", async () => {
   const btn = $("btn-login-google");
