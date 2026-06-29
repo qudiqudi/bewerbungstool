@@ -3814,13 +3814,17 @@ async function fetchJobFromUrl(url) {
     throw new Error(LINKEDIN_BLOCKED_MSG);
   }
 
-  // Sauber nach Betriebsart verzweigen:
-  // - Gehostet + angemeldet → serverseitiger Import ueber api.jobreif.de
-  //   (ersetzt den Drittanbieter r.jina.ai; die URL verlaesst nur unseren Server).
-  // - BYOK/lokal (oder gehostet OHNE Anmeldung, der den auth-gegateten Endpoint
-  //   nicht erreichen kann) → UNVERAENDERTER Client-Reader unten: r.jina.ai laeuft
-  //   im EIGENEN Browser des Nutzers. Bewusst KEINE Regression dieses Pfads.
-  if ((settings.provider || "hosted") === "hosted" && settings.authToken) {
+  // Sauber nach Betriebsart verzweigen (NUR nach provider, NICHT nach Token):
+  // - Gehostet → IMMER serverseitiger Import ueber api.jobreif.de (ersetzt den
+  //   Drittanbieter r.jina.ai; die URL verlaesst nur unseren Server). Fehlt die
+  //   Anmeldung, fuehrt fetchJobViaBackend ueber requireHostedLoginOrThrow zur
+  //   Anmeldung statt still auf Jina zurueckzufallen — sonst wuerde die im Hosted-
+  //   Modus zugesagte serverseitige Verarbeitung (Datenschutzhinweis) unterlaufen,
+  //   indem die URL doch an einen Drittanbieter ginge. Ein stellenbezogener Import
+  //   verlangt im Hosted-Modus ohnehin die (kostenlose) Anmeldung.
+  // - BYOK/lokal → UNVERAENDERTER Client-Reader unten: r.jina.ai laeuft im EIGENEN
+  //   Browser des Nutzers. Bewusst KEINE Regression dieses Pfads.
+  if ((settings.provider || "hosted") === "hosted") {
     return await fetchJobViaBackend(url);
   }
 
