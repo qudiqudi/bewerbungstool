@@ -8225,8 +8225,11 @@ function renderSrSummary(wrap) {
   }
   const btn = document.createElement("button");
   btn.className = practice ? "option" : "primary"; btn.type = "button";
-  btn.textContent = "Zurück zu Meine Stellen";
-  btn.addEventListener("click", () => goHome());
+  // Ausgeloggte Hosted-Nutzer (No-Login-Praxis) kehren ehrlich ans Login-Gate zurueck,
+  // statt in die App-Shell zu fallen; alle anderen zu "Meine Stellen".
+  const backToLogin = practice && hostedNeedsLogin();
+  btn.textContent = backToLogin ? "Zurück zur Anmeldung" : "Zurück zu Meine Stellen";
+  btn.addEventListener("click", () => leavePractice());
   wrap.appendChild(btn);
 }
 
@@ -8853,6 +8856,16 @@ function openJob(job) {
 function goHome() {
   renderHome();
   showView("view-home");
+}
+
+// Austritt aus dem Ueben dorthin, wo der Nutzer hergekommen ist: ein eingerichteter
+// Nutzer (angemeldet bzw. BYOK/lokal) landet auf "Meine Stellen"; ein ausgeloggter
+// Hosted-Nutzer kehrt ans Login-Gate zurueck. So fuehrt die No-Login-Praxis nicht in
+// die volle App-Shell mit scheinbarem "Neue Stelle"-Pfad, der erst spaeter am Login
+// scheitert (gehostete Testerstellung bleibt anmeldepflichtig, hostedNeedsLogin()).
+function leavePractice() {
+  if (hostedNeedsLogin()) promptHostedLogin();
+  else goHome();
 }
 
 // Einen Test fuer eine bestehende Stelle starten (One-Tap-Repeat): die Eingabe-
