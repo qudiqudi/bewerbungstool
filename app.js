@@ -3486,10 +3486,12 @@ const LINKEDIN_BLOCKED_MSG =
 // Erkennt linkedin.com und seine Subdomains (z. B. de.linkedin.com), ohne auf
 // getarnte Hosts hereinzufallen: "evil-linkedin.com.attacker" oder
 // "notlinkedin.com" matchen nicht, weil der Suffix-Check den fuehrenden Punkt
-// verlangt. Bei ungueltiger URL: false (keine Sonderbehandlung).
+// verlangt. Ein etwaiger absoluter FQDN-Punkt am Ende (z. B. "linkedin.com.")
+// wird zuvor entfernt, sonst wuerde so eine gueltige Variante durchrutschen.
+// Bei ungueltiger URL: false (keine Sonderbehandlung).
 function isLinkedInUrl(url) {
   try {
-    const host = new URL(url).hostname.toLowerCase();
+    const host = new URL(url).hostname.toLowerCase().replace(/\.+$/, "");
     return host === "linkedin.com" || host.endsWith(".linkedin.com");
   } catch {
     return false;
