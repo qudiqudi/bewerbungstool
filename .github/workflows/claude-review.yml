@@ -1,28 +1,27 @@
-name: Claude PR Review
+name: Claude Review (PR + Issue)
 
-# On-Demand-Review: läuft NUR, wenn jemand auf einem Pull Request einen Kommentar
-# mit "@claude" schreibt — nicht automatisch beim Öffnen eines PRs.
+# On-Demand: läuft, wenn jemand "@claude" in einen Kommentar schreibt — entweder auf
+# einem Pull Request (Code-Review, Job `review`) ODER auf einem reinen Issue
+# (Assistent, Job `issue`). Nicht automatisch beim Öffnen.
 #
 # issue_comment läuft im Kontext des BASIS-Repos und hat daher Zugriff auf die
-# Secrets (CLAUDE_CODE_OAUTH_TOKEN), auch wenn der PR aus einem Fork kommt.
+# Secrets (CLAUDE_CODE_OAUTH_TOKEN), auch wenn ein PR aus einem Fork kommt.
 #
-# SICHERHEIT:
+# SICHERHEIT (gilt für BEIDE Jobs):
 #   - Nur Kommentare von OWNER/MEMBER/COLLABORATOR lösen einen Lauf aus, damit nicht
-#     beliebige Dritte über @claude Reviews (und damit Token-/Kosten-Verbrauch)
+#     beliebige Dritte über @claude Läufe (und damit Token-/Kosten-Verbrauch)
 #     auslösen können. Soll der PR-Autor (Fork) sich selbst auslösen dürfen, unten
 #     "CONTRIBUTOR" zur Liste hinzufügen.
-#   - Es wird KEIN ungeprüfter Fork-Code ausgecheckt oder ausgeführt; der Review
-#     arbeitet über `gh pr diff` (read-only API). Claudes Tools sind auf Lesen +
-#     die zum Posten nötigen gh-Befehle beschränkt.
+#   - Es wird KEIN ungeprüfter Fork-Code ausgecheckt oder ausgeführt; gearbeitet wird
+#     read-only über die API (`gh pr diff` bzw. `gh issue view`). Claudes Tools sind
+#     auf Lesen + die zum Posten nötigen gh-Befehle beschränkt (Allowlist je Job).
 
 on:
   issue_comment:
     types: [created]
 
-permissions:
-  contents: read
-  pull-requests: write
-  id-token: write # Fallback für die OIDC-App-Token-Exchange-Variante
+# Permissions werden je Job least-privilege gesetzt (review: PRs, issue: Issues),
+# damit kein Job mehr Schreibrechte hat als er braucht.
 
 concurrency:
   group: claude-review-${{ github.event.issue.number }}
@@ -37,6 +36,10 @@ jobs:
       contains(github.event.comment.body, '@claude') &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # PR-Kommentar posten
+      id-token: write # Fallback für die OIDC-App-Token-Exchange-Variante
     steps:
       # Basis-Repo (für CLAUDE.md / Kontext). Der PR-Stand wird NICHT ausgecheckt;
       # Claude liest das Diff über die API (gh pr diff).
@@ -85,6 +88,68 @@ jobs:
                   "Bash(gh pr diff:*)",
                   "Bash(gh pr view:*)",
                   "Bash(gh pr comment:*)"
+                ]
+              }
+            }
+          claude_args: --model claude-opus-4-8 --max-turns 25
+
+  issue:
+    # Spiegelbild zum review-Job, aber für REINE Issues (kein PR): Kommentare mit
+    # "@claude" von vertrauenswürdigen Absendern. github.event.issue.pull_request ist
+    # bei einem reinen Issue leer → nur dann läuft dieser Job (und review läuft nicht).
+    if: >-
+      !github.event.issue.pull_request &&
+      contains(github.event.comment.body, '@claude') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # Issue-Kommentar posten
+      id-token: write # Fallback für die OIDC-App-Token-Exchange-Variante
+    steps:
+      # Basis-Repo für CLAUDE.md / Code-Kontext (vertrauenswürdiger Stand, kein Fork-Code).
+      - name: Checkout base
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Claude issue assistant
+        uses: anthropics/claude-code-action@a92e7c70a4da9793dc164451d829089dc057a464 # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Nur die numerische Issue-Nummer wird interpoliert (nicht injizierbar). Freitext
+          # (comment.body/title) wird NICHT in den Prompt/Run gezogen — Claude liest den
+          # Issue-Inhalt selbst read-only via `gh issue view`.
+          prompt: |
+            Du bist ein Assistent für Issue #${{ github.event.issue.number }}
+            in ${{ github.repository }}. Ausgelöst per @claude-Kommentar.
+
+            Vorgehen:
+            - Lies das Issue inkl. Verlauf mit
+              `gh issue view ${{ github.event.issue.number }} --comments`.
+            - Beantworte die konkrete Frage/Aufgabe aus dem auslösenden @claude-Kommentar.
+            - Du darfst den Repo-Code READ-ONLY lesen (Read/Grep/Glob), um fundiert zu
+              antworten (z. B. ein Ticket gegen den echten Code prüfen/verfeinern). Halte
+              dich an die Regeln in `CLAUDE.md` (im Root).
+
+            WICHTIG (Sicherheit): NUR lesen. Führe KEINEN Projektcode aus, baue/installiere
+            nichts, ändere/committe keine Dateien. Die EINZIGE erlaubte Schreibaktion ist
+            das Posten eines Issue-Kommentars.
+
+            Sei knapp und hochsignalig. Poste das Ergebnis als EINEN Kommentar via
+            `gh issue comment ${{ github.event.issue.number }} --body "..."`.
+          # Eng gefasste Allowlist: Lesen + genau die benötigten gh-Issue-Befehle.
+          # KEIN Bash(gh:*) (das erlaubte gh api + alle Schreib-Subkommandos).
+          settings: |
+            {
+              "permissions": {
+                "allow": [
+                  "Read",
+                  "Grep",
+                  "Glob",
+                  "Bash(gh issue view:*)",
+                  "Bash(gh issue comment:*)"
                 ]
               }
             }
