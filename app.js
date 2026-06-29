@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.27.4";
+const APP_VERSION = "1.27.5";
 
 const CHANGELOG = [
+  {
+    version: "1.27.5",
+    date: "29.06.2026",
+    items: [
+      "Klarerer Hinweis bei LinkedIn-Anzeigen: LinkedIn lässt sein automatisches Auslesen nicht mehr zu. Statt eines technischen Fehlers nach langer Wartezeit erscheint jetzt sofort eine kurze Erklärung mit der Bitte, den Anzeigentext über „Text einfügen“ einzufügen.",
+    ],
+  },
   {
     version: "1.27.4",
     date: "29.06.2026",
@@ -3468,6 +3475,27 @@ function looksLikeRealContent(text) {
   return text.length > 1200 && !looksBlocked(text) && !/contains (iframe|shadow DOM)/i.test(text);
 }
 
+// LinkedIn sperrt das automatische Auslesen seiner Stellenanzeigen extern: der
+// r.jina.ai-Reader bekommt HTTP 451 (Unavailable For Legal Reasons), LinkedIn
+// direkt 999 (Bot-Schutz). Ein Abruf ist also aussichtslos - statt eines
+// generischen Fehlers nach langer Wartezeit weisen wir den Nutzer direkt auf den
+// einzigen verlaesslichen Weg hin: den Text manuell unter „Text einfügen“ einfügen.
+const LINKEDIN_BLOCKED_MSG =
+  "LinkedIn sperrt das automatische Auslesen seiner Stellenanzeigen. Bitte öffne die Anzeige, kopiere den Beschreibungstext und füge ihn unter „Text einfügen“ ein.";
+
+// Erkennt linkedin.com und seine Subdomains (z. B. de.linkedin.com), ohne auf
+// getarnte Hosts hereinzufallen: "evil-linkedin.com.attacker" oder
+// "notlinkedin.com" matchen nicht, weil der Suffix-Check den fuehrenden Punkt
+// verlangt. Bei ungueltiger URL: false (keine Sonderbehandlung).
+function isLinkedInUrl(url) {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host === "linkedin.com" || host.endsWith(".linkedin.com");
+  } catch {
+    return false;
+  }
+}
+
 // LinkedIn-Anzeigen kommen mit enormem Rauschen (wiederholte Sign-in-Blöcke,
 // "Similar jobs", "People also viewed", Footer, Sprachliste). Diese Funktion
 // schneidet auf den eigentlichen Anzeigentext zu. Wird nur für linkedin.com
@@ -3668,6 +3696,14 @@ async function fetchJobPostingJsonLd(u) {
 }
 
 async function fetchJobFromUrl(url) {
+  // Proaktiver Kurzschluss fuer LinkedIn: beide Pfade (JSON-LD aus dem rohen
+  // HTML wie auch der r.jina.ai-Reader) sind durch LinkedIns externe Sperre
+  // (451/999) aussichtslos und enden nach ~25s im generischen Fehler. Wir
+  // sparen die doomed Wartezeit und sagen dem Nutzer direkt, was zu tun ist.
+  if (isLinkedInUrl(url)) {
+    throw new Error(LINKEDIN_BLOCKED_MSG);
+  }
+
   // Layer 1 (primaer): portalunabhaengiges JobPosting-JSON-LD aus dem rohen
   // HTML. Best-effort - bei jedem Fehlschlag still weiter zum Markdown-Pfad.
   try {
@@ -3682,13 +3718,7 @@ async function fetchJobFromUrl(url) {
 
   // Layer 2 (Fallback, unveraendert):
   // r.jina.ai liefert beliebige Webseiten als Markdown-Text mit offenen CORS-Headern
-  let isLinkedIn = false;
-  try {
-    const host = new URL(url).hostname;
-    isLinkedIn = host === "linkedin.com" || host.endsWith(".linkedin.com");
-  } catch {
-    // ungültige URL: keine Sonderbehandlung
-  }
+  const isLinkedIn = isLinkedInUrl(url);
   let best = "";
   let lastStatus = 0;
   let blocked = false;
@@ -3708,6 +3738,11 @@ async function fetchJobFromUrl(url) {
     if (text.length > best.length) best = text;
   }
   if (!best) {
+    // Defense in depth: sollte der Kurzschluss oben je umgangen werden, erklaert
+    // sich ein LinkedIn-Fehlschlag hier selbst statt generisches "HTTP 451".
+    if (isLinkedIn) {
+      throw new Error(LINKEDIN_BLOCKED_MSG);
+    }
     if (blocked) {
       throw new Error("Die Seite ist durch einen Bot-Schutz gesichert und lässt sich nicht automatisch auslesen (häufig bei Indeed). Bitte die Stellenbeschreibung manuell einfügen.");
     }
