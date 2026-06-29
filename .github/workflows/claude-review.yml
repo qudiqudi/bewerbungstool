@@ -20,11 +20,8 @@ on:
   issue_comment:
     types: [created]
 
-permissions:
-  contents: read
-  pull-requests: write
-  issues: write # für den Issue-Assistenten (gh issue comment)
-  id-token: write # Fallback für die OIDC-App-Token-Exchange-Variante
+# Permissions werden je Job least-privilege gesetzt (review: PRs, issue: Issues),
+# damit kein Job mehr Schreibrechte hat als er braucht.
 
 concurrency:
   group: claude-review-${{ github.event.issue.number }}
@@ -39,6 +36,10 @@ jobs:
       contains(github.event.comment.body, '@claude') &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # PR-Kommentar posten
+      id-token: write # Fallback für die OIDC-App-Token-Exchange-Variante
     steps:
       # Basis-Repo (für CLAUDE.md / Kontext). Der PR-Stand wird NICHT ausgecheckt;
       # Claude liest das Diff über die API (gh pr diff).
@@ -101,15 +102,19 @@ jobs:
       contains(github.event.comment.body, '@claude') &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # Issue-Kommentar posten
+      id-token: write # Fallback für die OIDC-App-Token-Exchange-Variante
     steps:
       # Basis-Repo für CLAUDE.md / Code-Kontext (vertrauenswürdiger Stand, kein Fork-Code).
       - name: Checkout base
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
       - name: Claude issue assistant
-        uses: anthropics/claude-code-action@80b31826338489861333dc17217865dfe8085cdc # v1
+        uses: anthropics/claude-code-action@a92e7c70a4da9793dc164451d829089dc057a464 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
