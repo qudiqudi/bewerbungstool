@@ -383,8 +383,19 @@
       </div>
 
       <div id="source-text" class="hidden">
+        <div id="import-clipboard" class="import-clipboard hidden">
+          <p class="hint">Aus LinkedIn importiert? Füge den kopierten Anzeigentext mit einem Klick ein.</p>
+          <button id="btn-paste-clipboard" type="button">📋 Aus Zwischenablage einfügen</button>
+          <p class="hint">Klappt das nicht, füge den Text einfach mit Strg/Cmd+V direkt unten ein.</p>
+        </div>
         <label for="job-text">Stellenbeschreibung</label>
         <textarea id="job-text" rows="12" placeholder="Stellenbeschreibung hier einfügen..."></textarea>
+        <details id="linkedin-help" class="linkedin-help">
+          <summary>LinkedIn-Anzeige importieren</summary>
+          <p class="hint">LinkedIn lässt sich nicht automatisch laden. Mit dem jobreif-Import-Lesezeichen holst du den Anzeigentext mit einem Klick aus deinem eingeloggten LinkedIn-Tab – es wird nichts an LinkedIn übertragen, alles passiert in deinem Browser.</p>
+          <p class="hint">So geht's: Ziehe diesen Link in deine Lesezeichenleiste: <a id="bookmarklet-link" class="bookmarklet-link" href="#" draggable="true">📋 jobreif-Import</a>. Öffne dann eine LinkedIn-Stellenanzeige („…/jobs/view/…“), klicke das Lesezeichen – der Text wird kopiert und jobreif öffnet sich. Tippe hier oben auf „Aus Zwischenablage einfügen“.</p>
+          <p class="hint">Kein Lesezeichenleiste (z. B. am Handy)? <button id="btn-copy-bookmarklet" type="button" class="ghost">Lesezeichen-Code kopieren</button> und manuell als Lesezeichen-Adresse speichern.</p>
+        </details>
       </div>
 
       <label id="label-mode">Modus</label>

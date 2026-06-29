@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.27.5";
+const APP_VERSION = "1.27.6";
 
 const CHANGELOG = [
+  {
+    version: "1.27.6",
+    date: "29.06.2026",
+    items: [
+      "LinkedIn-Import per Lesezeichen: LinkedIn lässt sich nicht automatisch laden. Unter „Text einfügen“ findest du jetzt ein kleines Lesezeichen („jobreif-Import“), das du einmal in deine Lesezeichenleiste ziehst. Öffnest du dann eine LinkedIn-Stellenanzeige und klickst das Lesezeichen, wird der Anzeigentext aus deinem eingeloggten Tab kopiert und jobreif öffnet sich – ein Klick auf „Aus Zwischenablage einfügen“ trägt ihn ein. Nichts wird an LinkedIn übertragen, alles passiert in deinem Browser.",
+    ],
+  },
   {
     version: "1.27.5",
     date: "29.06.2026",
@@ -3517,6 +3524,22 @@ function cleanLinkedIn(text) {
   if (cut > 0) t = t.slice(0, cut);
   return t;
 }
+
+// LinkedIn-Import-Lesezeichen ("Bookmarklet"). Da LinkedIn sein automatisches
+// Auslesen extern sperrt (451/999), ist der einzige Ort, an dem die gerenderte,
+// eingeloggte Stellenanzeige legal/kostenlos/auf einer Privat-IP vorliegt, der
+// eigene Browser des Nutzers. Dieses javascript:-Lesezeichen liest die
+// Beschreibung direkt aus dem DOM der LinkedIn-Seite (Mehrfach-Selektor, sonst
+// innerText-Fallback), legt sie in die Zwischenablage und oeffnet jobreif mit
+// ?import=linkedin. Bewusst nur reine DOM-Lesezugriffe + Clipboard + window.open
+// (kein eval, kein injiziertes <script>), damit es unter LinkedINs CSP laeuft.
+// Selektoren von Limbo uebernommen (lim/jobs.py): #job-details etc.
+// Als Template-Literal gespeichert (enthaelt einfache UND doppelte Quotes); kein
+// \n im String (stattdessen String.fromCharCode), damit der Bytestrom unveraendert
+// bleibt. Wird per JS als href gesetzt (nicht statisch in index.html), so umgeht es
+// sowohl jobreifs eigene CSP als auch den Integritaets-Asset-Check.
+const LINKEDIN_BOOKMARKLET =
+  `javascript:(function(){try{var S=['#job-details','.jobs-description__content','.jobs-box__html-content','[class*="jobs-description__content"]'],e=null,i;for(i=0;i<S.length;i++){e=document.querySelector(S[i]);if(e)break;}var d=e?(e.innerText||'').trim():'';if(d.length<80){var m=document.querySelector('main')||document.body,f=(m.innerText||'').trim();if(f.length>d.length)d=f;}var T=document.querySelector('.job-details-jobs-unified-top-card__job-title,.jobs-unified-top-card__job-title,h1'),t=T?(T.innerText||'').trim():'';if(!d||d.length<80){alert('jobreif: Kein Anzeigentext gefunden. Bitte oeffne eine LinkedIn-Stellenanzeige und versuche es erneut.');return;}var o=(t?t+String.fromCharCode(10,10):'')+d,g=function(){var w=window.open('https://jobreif.de/?import=linkedin','_blank');if(!w){alert('jobreif: Text kopiert! Bitte oeffne jobreif.de und tippe auf "Aus Zwischenablage einfuegen".');}};if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(o).then(g,function(){window.prompt('jobreif: Bitte kopieren (Strg/Cmd+C) und in jobreif einfuegen:',o);g();});}else{window.prompt('jobreif: Bitte kopieren (Strg/Cmd+C) und in jobreif einfuegen:',o);g();}}catch(x){alert('jobreif-Import fehlgeschlagen: '+(x&&x.message?x.message:x));}})();`;
 
 /* ---------- Layer 1: schema.org JobPosting (JSON-LD) ---------- */
 
@@ -9981,6 +10004,65 @@ $("job-url").addEventListener("keydown", (e) => {
   }
 });
 
+// „Aus Zwischenablage einfügen“ (LinkedIn-Import). navigator.clipboard.readText
+// braucht eine Nutzergeste UND ggf. eine Berechtigung - daher hier hinter dem
+// Klick. Schlaegt das Lesen fehl (verweigert/nicht unterstuetzt), faellt es
+// sauber auf manuelles Strg/Cmd+V ins Textfeld zurueck. cleanLinkedIn schneidet
+// etwaiges Rauschen (Footer/Empfehlungen) weg, identisch zum URL-Pfad.
+const btnPaste = $("btn-paste-clipboard");
+if (btnPaste) btnPaste.addEventListener("click", async () => {
+  setSourceTab("text");
+  const ta = $("job-text");
+  try {
+    if (!navigator.clipboard || !navigator.clipboard.readText) throw new Error("Clipboard-API nicht verfügbar");
+    const raw = await navigator.clipboard.readText();
+    const text = cleanLinkedIn((raw || "").trim());
+    if (!text) {
+      ta.focus();
+      showError("Die Zwischenablage ist leer. Klicke in der LinkedIn-Anzeige zuerst das „jobreif-Import“-Lesezeichen – oder füge den Text mit Strg/Cmd+V direkt ein.");
+      return;
+    }
+    ta.value = text;
+    lastFetch = { url: "", text: text.trim() };
+    saveDraft();
+    ta.focus();
+    trackEvent("import-linkedin-paste");
+    if (!looksLikeRealContent(text)) {
+      showError("Der eingefügte Text wirkt sehr kurz – bitte prüfe, ob die ganze Stellenbeschreibung enthalten ist, oder füge sie ergänzend ein.");
+    }
+  } catch {
+    // Lesen verweigert/nicht moeglich: auf manuelles Einfuegen zurueckfallen.
+    ta.focus();
+    showError("Die Zwischenablage konnte nicht automatisch gelesen werden. Bitte füge den Text mit Strg/Cmd+V direkt in das Feld unten ein.");
+  }
+});
+
+// Das LinkedIn-Import-Lesezeichen bereitstellen: href als javascript:-Bookmarklet
+// setzen (zum Ziehen in die Lesezeichenleiste). Ein versehentlicher Klick auf der
+// jobreif-Seite soll es NICHT ausfuehren (es gehoert auf LinkedIn), daher
+// preventDefault + kurzer Hinweis. Zusaetzlich ein Button, der den Code in die
+// Zwischenablage legt (Fallback fuer Touch-Geraete ohne Lesezeichenleiste).
+const bmLink = $("bookmarklet-link");
+if (bmLink) {
+  bmLink.setAttribute("href", LINKEDIN_BOOKMARKLET);
+  bmLink.addEventListener("click", (e) => {
+    e.preventDefault();
+    showError("Ziehe diesen Link in deine Lesezeichenleiste (nicht anklicken). Öffne dann eine LinkedIn-Stellenanzeige und klicke dort das Lesezeichen.");
+  });
+}
+const btnCopyBm = $("btn-copy-bookmarklet");
+if (btnCopyBm) btnCopyBm.addEventListener("click", async () => {
+  try {
+    if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error("Clipboard-API nicht verfügbar");
+    await navigator.clipboard.writeText(LINKEDIN_BOOKMARKLET);
+    const old = btnCopyBm.textContent;
+    btnCopyBm.textContent = "Code kopiert ✓";
+    setTimeout(() => { btnCopyBm.textContent = old; }, 2000);
+  } catch {
+    window.prompt("Lesezeichen-Code – kopieren und als URL eines neuen Lesezeichens speichern:", LINKEDIN_BOOKMARKLET);
+  }
+});
+
 $("btn-generate").addEventListener("click", generateQuiz);
 $("btn-next").addEventListener("click", nextQuestion);
 $("btn-prev").addEventListener("click", prevQuestion);
@@ -10040,6 +10122,8 @@ $("btn-new-job").addEventListener("click", () => {
   $("job-text").value = "";
   lastFetch = { url: "", text: "" };
   try { localStorage.removeItem(DRAFT_KEY); } catch { /* Entwurf ist nur Komfort */ }
+  const help = $("import-clipboard");
+  if (help) help.classList.add("hidden"); // Import-Hilfe nur im Import-Flow zeigen
   showView("view-input");
 });
 $("active-job-start").addEventListener("click", startReadyJob);
@@ -10580,13 +10664,58 @@ function consumeUebenDeepLink() {
   return true;
 }
 
+// Import-Deep-Link aus dem LinkedIn-Lesezeichen: ?import=linkedin signalisiert, dass
+// der Nutzer den Anzeigentext im Browser kopiert hat und ihn nun einfuegen will. Der
+// Param wird sofort aus der URL entfernt (sauber + kein erneutes Ausloesen beim Reload)
+// und die Absicht in sessionStorage gemerkt - so ueberlebt sie den Login-Redirect im
+// gehosteten Modus (gleiche Tab-Origin). Liefert die gemerkte Absicht ("linkedin") oder
+// null zurueck. Bewusst tolerant: jeder Wert von ?import wird als generischer Import gewertet.
+const IMPORT_INTENT_KEY = "bewerbungstool.importIntent";
+function consumeImportDeepLink() {
+  let fromUrl = null;
+  try { fromUrl = new URLSearchParams(location.search).get("import"); } catch { /* egal */ }
+  if (fromUrl !== null) {
+    try {
+      const u = new URL(location.href);
+      u.searchParams.delete("import");
+      history.replaceState(history.state, "", u.pathname + (u.search ? u.search : "") + u.hash);
+    } catch { /* History-API nicht verfuegbar: egal */ }
+    try { sessionStorage.setItem(IMPORT_INTENT_KEY, "linkedin"); } catch { /* kein sessionStorage: egal */ }
+  }
+  let stored = null;
+  try { stored = sessionStorage.getItem(IMPORT_INTENT_KEY); } catch { /* egal */ }
+  return stored;
+}
+
+// Oeffnet die Eingabe auf dem Tab „Text einfügen“ und blendet die Zwischenablage-Hilfe
+// ein. Wie „Neue Stelle“ ein bewusster Frischstart (Felder + Entwurf leeren), weil der
+// Import-Klick eine neue Anzeige bedeutet. Die gemerkte Absicht wird hier verbraucht.
+function startImportFlow() {
+  try { sessionStorage.removeItem(IMPORT_INTENT_KEY); } catch { /* egal */ }
+  clearTimeout(draftSaveTimer);
+  draftSaveTimer = 0;
+  $("job-url").value = "";
+  $("job-text").value = "";
+  lastFetch = { url: "", text: "" };
+  try { localStorage.removeItem(DRAFT_KEY); } catch { /* Entwurf ist nur Komfort */ }
+  showView("view-input");
+  setSourceTab("text");
+  const help = $("import-clipboard");
+  if (help) help.classList.remove("hidden");
+  trackEvent("import-linkedin-open");
+}
+
 function routeInitialView() {
   if (consumeUebenDeepLink()) return; // Uebungs-Deep-Link hat Vorrang (lokal, ohne Gate)
+  // Import-Absicht VOR dem Gate aufnehmen (Param aus der URL putzen, in sessionStorage
+  // sichern). So ueberlebt sie auch den Login-Redirect; ausgefuehrt wird sie erst, wenn
+  // der Nutzer die Eingabe sehen darf (eingeloggt/konfiguriert).
+  const importIntent = consumeImportDeepLink();
   const provider0 = settings.provider || "hosted";
   if (provider0 === "hosted" && !settings.authToken) {
     promptHostedLogin(_authRedirectMsg || ""); // _authRedirectMsg: evtl. Fehler aus dem Redirect
     _authRedirectMsg = "";
-    return;
+    return; // Import-Absicht bleibt in sessionStorage und greift nach dem Login
   }
   _authRedirectMsg = "";
   const isConfigured = provider0 === "local" ? !!settings.model
@@ -10595,6 +10724,8 @@ function routeInitialView() {
   if (!isConfigured) {
     renderOnboardingSteps($("ob-provider").value);
     showView("view-onboarding");
+  } else if (importIntent) {
+    startImportFlow();
   } else {
     goHome();
   }
