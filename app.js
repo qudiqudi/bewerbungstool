@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.27.1";
+const APP_VERSION = "1.27.2";
 
 const CHANGELOG = [
+  {
+    version: "1.27.2",
+    date: "29.06.2026",
+    items: [
+      "Klarere Anzeige beim Test-Start: Die kurze Sicherheitsprüfung läuft jetzt als eigener, beschrifteter Schritt („Sicherheitsprüfung läuft…“) vor der eigentlichen Erstellung – statt unsichtbar parallel zum Lade-Spinner. Falls in seltenen Fällen eine kurze Bestätigung nötig ist, wird das jetzt klar angezeigt.",
+    ],
+  },
   {
     version: "1.27.1",
     date: "28.06.2026",
@@ -1038,6 +1045,14 @@ function setLoadingProgress(done, total, label) {
   $("loading-progress").classList.remove("hidden");
   $("loading-fill").style.width = Math.min(100, Math.round((done / total) * 100)) + "%";
   if (label) $("loading-text").textContent = label;
+}
+
+// Wechselt nur den Lade-Text einer LAUFENDEN Anzeige (z. B. Phasenwechsel
+// Sicherheitspruefung → Generierung), OHNE showLoading() — das wuerde den
+// Elapsed-Timer zuruecksetzen (started neu) und den Sekundenzaehler springen
+// lassen. Analog zu setLoadingProgress, das ebenfalls nur den Text ersetzt.
+function setLoadingText(text) {
+  $("loading-text").textContent = text;
 }
 
 function hideLoading() {
@@ -2836,6 +2851,9 @@ function turnstileSitekey() {
 
 let _tsWidgetId = null;
 let _tsPending = null;
+// Gesicherter Lade-Text waehrend einer SICHTBAREN (interaktiven) Challenge, um ihn
+// danach wiederherzustellen. null = gerade keine Challenge aktiv.
+let _tsPrevLoadingText = null;
 
 // Das Widget nur WÄHREND des Lösens einblenden; danach ausblenden, damit der kurze
 // Challenge-/Erfolgs-Status keine App-Meldung (z. B. die Fehlerkarte) verdeckt.
@@ -2880,10 +2898,20 @@ function ensureTurnstileWidget() {
       "before-interactive-callback": () => {
         const el = document.getElementById("turnstile-container");
         if (el) el.classList.add("challenge");
+        // Kein Feedback-Loch: Wird der (sonst stille) Solve interaktiv, den
+        // laufenden Lade-Text sichern und klar sagen, dass jetzt eine kurze
+        // Bestaetigung noetig ist — der Spinner wirkt sonst "haengend".
+        const lt = document.getElementById("loading-text");
+        if (lt) { _tsPrevLoadingText = lt.textContent; lt.textContent = "Kurze Sicherheitsabfrage - bitte bestätigen..."; }
       },
       "after-interactive-callback": () => {
         const el = document.getElementById("turnstile-container");
         if (el) el.classList.remove("challenge");
+        // Vorigen Phasen-Text wiederherstellen (generisch — funktioniert fuer
+        // Generierung, Auswertung etc.; der Aufrufer setzt danach ggf. weiter).
+        const lt = document.getElementById("loading-text");
+        if (lt && _tsPrevLoadingText !== null) { lt.textContent = _tsPrevLoadingText; }
+        _tsPrevLoadingText = null;
       },
     });
     return _tsWidgetId != null;
@@ -4599,7 +4627,13 @@ function postGenerationJob(ctx, tierSent, payWithCredits) {
     ...(payWithCredits ? { payWithCredits: true } : {}),
   });
   return (async () => {
+    // Den Turnstile-Solve als eigene, beschriftete Phase VOR den Generierungs-Spinner
+    // sequenzieren (Issue #154): kein gleichzeitiges "Test wird gestartet..." + (selten)
+    // sichtbare Challenge. Modus/Gate/Timeout/a11y bleiben unveraendert. setLoadingText
+    // statt showLoading, damit der Elapsed-Timer nicht zurueckgesetzt wird.
+    setLoadingText("Sicherheitsprüfung läuft...");
     const token = await getTurnstileToken("generate-quiz", await sha256hex(jobBody));
+    setLoadingText("Test wird gestartet...");
     const headers = { "Content-Type": "application/json", ...authHeaders() };
     if (token) headers["CF-Turnstile-Token"] = token;
     return fetch(hostedBase() + "/api/jobs", { method: "POST", headers, body: jobBody });
