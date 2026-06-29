@@ -60,7 +60,7 @@
       ],
       "faq": [
         { "q": "Was wird im Einstellungstest für Fachinformatiker Systemintegration geprüft?", "a": "Meist eine Mischung aus IT-Fachwissen (Netzwerke, Betriebssysteme, Hardware), logischem Denken (Zahlenreihen, Matrizen) und Sprachverständnis. jobreif bildet beides ab: stellenspezifische Fachfragen plus standardisierte Eignungstest-Module." },
-        { "q": "Kostet das Üben etwas?", "a": "Nein. Du kannst kostenlos und ohne Anmeldung einen Test aus einer Stellenanzeige erstellen und direkt üben." },
+        { "q": "Kostet das Üben etwas?", "a": "Die allgemeinen Eignungsmodule (Zahlenreihen, Konzentration, Figuren) übst du kostenlos und ohne Anmeldung. Für einen kompletten, stellenbezogenen Test aus einer Anzeige mit KI-Feedback genügt eine kostenlose Anmeldung." },
         { "q": "Brauche ich eine konkrete Stellenanzeige?", "a": "Es funktioniert am besten mit einer echten Anzeige (Text oder Link), weil die Fachfragen daraus abgeleitet werden. Du kannst aber auch eine allgemeine Beschreibung einfügen." }
       ],
       "lastmod": "2026-06-27"
@@ -134,7 +134,7 @@
       "slug": "bankkaufmann",
       "beruf": "Bankkaufmann",
       "title": "Einstellungstest Bankkaufmann üben",
-      "description": "Einstellungstest Bankkaufmann/-frau kostenlos üben: Wirtschaftswissen, Zahlenreihen, Sprachlogik und Fachfragen aus echten Stellenanzeigen – mit KI-Feedback und ohne Anmeldung.",
+      "description": "Einstellungstest Bankkaufmann/-frau kostenlos üben: Wirtschaftswissen, Zahlenreihen, Sprachlogik und Fachfragen aus echten Stellenanzeigen – mit KI-Feedback.",
       "intro": "Übe den Einstellungstest für Bankkaufleute mit realistischen Aufgaben zu Wirtschaft, Logik und Sprache. jobreif macht aus einer Stellenanzeige einen passenden Test und ergänzt die gängigen Eignungstest-Module.",
       "testTypes": ["fachwissen", "sprachlogik", "zahlenreihe", "figural"],
       "samples": [
@@ -159,7 +159,7 @@
       "faq": [
         { "q": "Welche Themen hat der Einstellungstest für Bankkaufleute?", "a": "Oft Allgemein- und Wirtschaftswissen, logisches Denken (Zahlenreihen, Matrizen), Sprachverständnis und Konzentration. jobreif deckt diese Module ab und ergänzt Fachfragen aus deiner Anzeige." },
         { "q": "Kann ich gezielt für eine bestimmte Bank üben?", "a": "Ja – füge die konkrete Stellenanzeige ein, dann leitet jobreif die Fachfragen genau daraus ab." },
-        { "q": "Ist das kostenlos?", "a": "Das Üben ist kostenlos und ohne Anmeldung möglich. Optional gibt es höhere Qualitätsstufen." }
+        { "q": "Ist das kostenlos?", "a": "Die allgemeinen Eignungsmodule übst du kostenlos und ohne Anmeldung; für den kompletten, stellenbezogenen Test mit KI-Feedback genügt eine kostenlose Anmeldung. Optional gibt es höhere Qualitätsstufen." }
       ],
       "lastmod": "2026-06-27"
     },
@@ -224,7 +224,7 @@
       "faq": [
         { "q": "Was wird im Einstellungstest für Mechatroniker geprüft?", "a": "Meist technisches Verständnis (Mechanik, Elektrotechnik, Steuerungstechnik), logisches Denken (Zahlenreihen, figurale Aufgaben) und Grundrechnen. jobreif bildet diese Module ab und ergänzt Fachfragen aus deiner Anzeige." },
         { "q": "Wie kann ich gezielt üben?", "a": "Füge eine echte Stellenanzeige ein – dann leitet jobreif die Fachfragen genau daraus ab. Die Eignungsmodule übst du zusätzlich im Üben-Bereich." },
-        { "q": "Brauche ich eine Anmeldung?", "a": "Nein, das Üben ist kostenlos und ohne Anmeldung direkt im Browser möglich." }
+        { "q": "Brauche ich eine Anmeldung?", "a": "Für die allgemeinen Eignungsmodule (Zahlenreihen, Konzentration, Figuren) nicht – die übst du sofort ohne Anmeldung. Für den kompletten, stellenbezogenen Test mit KI-Feedback genügt eine kostenlose Anmeldung." }
       ],
       "lastmod": "2026-06-27"
     },
@@ -289,7 +289,7 @@
       "faq": [
         { "q": "Was wird im Einstellungstest für Industriekaufleute geprüft?", "a": "Häufig kaufmännisches Rechnen, Wirtschafts- und Allgemeinwissen, Sprachverständnis und Konzentration. jobreif bildet diese Module ab und ergänzt Fachfragen aus deiner Anzeige." },
         { "q": "Hilft das auch fürs Vorstellungsgespräch?", "a": "Ja – du bekommst offene Fragen und KI-Feedback zu deinen Antworten, ein gutes Training für das Gespräch." },
-        { "q": "Ist das kostenlos?", "a": "Das Üben ist kostenlos und ohne Anmeldung direkt im Browser möglich." }
+        { "q": "Ist das kostenlos?", "a": "Die allgemeinen Eignungsmodule übst du kostenlos und ohne Anmeldung direkt im Browser; für den kompletten, stellenbezogenen Test mit KI-Feedback genügt eine kostenlose Anmeldung." }
       ],
       "lastmod": "2026-06-27"
     },
@@ -322,7 +322,7 @@
       "faq": [
         { "q": "Was wird im Einstellungstest für Verwaltungsfachangestellte geprüft?", "a": "Häufig Allgemeinwissen, Sprachverständnis und Rechtschreibung, logisches Denken (Zahlenreihen) und Konzentration. jobreif bildet diese Module ab und ergänzt Fachfragen aus deiner Anzeige." },
         { "q": "Kann ich für eine bestimmte Behörde üben?", "a": "Ja – füge die konkrete Stellenanzeige ein, dann leitet jobreif die Fachfragen genau daraus ab." },
-        { "q": "Brauche ich eine Anmeldung?", "a": "Nein, das Üben ist kostenlos und ohne Anmeldung direkt im Browser möglich." }
+        { "q": "Brauche ich eine Anmeldung?", "a": "Für die allgemeinen Eignungsmodule (Zahlenreihen, Konzentration, Figuren) nicht – die übst du sofort ohne Anmeldung. Für den kompletten, stellenbezogenen Test mit KI-Feedback genügt eine kostenlose Anmeldung." }
       ],
       "lastmod": "2026-06-27"
     },
