@@ -18,7 +18,7 @@ const CHANGELOG = [
     version: "1.27.7",
     date: "29.06.2026",
     items: [
-      "Schnellerer und privaterer URL-Import: Im gehosteten Modus wird die Stellenanzeige jetzt direkt über jobreif geladen, statt über einen Drittanbieter-Reader. Schlägt das Laden fehl, bekommst du eine klarere Erklärung (z. B. Seite nicht gefunden, Zeitüberschreitung oder durch Bot-Schutz blockiert) statt einer technischen Fehlermeldung. Mit eigenem Schlüssel oder lokalem Modell bleibt der bisherige Weg über deinen eigenen Browser unverändert.",
+      "Schnellerer und privaterer URL-Import: Im gehosteten Modus wird die Stellenanzeige jetzt direkt über jobreif geladen, statt über einen Drittanbieter. Schlägt das Laden fehl, bekommst du eine klarere Erklärung (z. B. Seite nicht gefunden, Zeitüberschreitung oder durch Bot-Schutz blockiert) statt einer technischen Fehlermeldung.",
     ],
   },
   {
