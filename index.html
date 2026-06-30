@@ -383,19 +383,9 @@
       </div>
 
       <div id="source-text" class="hidden">
-        <div id="import-clipboard" class="import-clipboard hidden">
-          <p class="hint">Aus LinkedIn importiert? Füge den kopierten Anzeigentext mit einem Klick ein.</p>
-          <button id="btn-paste-clipboard" type="button">📋 Aus Zwischenablage einfügen</button>
-          <p class="hint">Klappt das nicht, füge den Text einfach mit Strg/Cmd+V direkt unten ein.</p>
-        </div>
         <label for="job-text">Stellenbeschreibung</label>
         <textarea id="job-text" rows="12" placeholder="Stellenbeschreibung hier einfügen..."></textarea>
-        <details id="linkedin-help" class="linkedin-help">
-          <summary>LinkedIn-Anzeige importieren</summary>
-          <p class="hint">LinkedIn lässt sich nicht automatisch laden. Mit dem jobreif-Import-Lesezeichen holst du den Anzeigentext mit einem Klick aus deinem eingeloggten LinkedIn-Tab – es wird nichts an LinkedIn übertragen, alles passiert in deinem Browser.</p>
-          <p class="hint">So geht's: Ziehe diesen Link in deine Lesezeichenleiste: <a id="bookmarklet-link" class="bookmarklet-link" href="#" draggable="true">📋 jobreif-Import</a>. Öffne dann eine LinkedIn-Stellenanzeige („…/jobs/view/…“), klicke das Lesezeichen – der Text wird kopiert und jobreif öffnet sich. Tippe hier oben auf „Aus Zwischenablage einfügen“.</p>
-          <p class="hint">Kein Lesezeichenleiste (z. B. am Handy)? <button id="btn-copy-bookmarklet" type="button" class="ghost">Lesezeichen-Code kopieren</button> und manuell als Lesezeichen-Adresse speichern.</p>
-        </details>
+        <p class="hint">Bei LinkedIn-Anzeigen: Öffne die Stellenanzeige, kopiere den Beschreibungstext und füge ihn hier ein.</p>
       </div>
 
       <label id="label-mode">Modus</label>
@@ -662,7 +652,7 @@
         <p>Bitte beachte: Stellenanzeigen und besonders deine Antworten können personenbezogene oder sensible Angaben enthalten. Gib im gehosteten Modus nichts ein, das nicht über fremde Dienste laufen soll – wenn du das vermeiden willst, nutze einen eigenen Schlüssel oder ein lokales Modell.</p>
 
         <h3>Stellenanzeige per URL laden</h3>
-        <p>„Per URL laden“ wird nur im gehosteten Modus angeboten. Wenn du dort eine Stellenanzeige über „Per URL laden“ importierst, wird die eingegebene Adresse – ggf. in normalisierten Varianten, etwa bei Indeed, StepStone, Onlyfy oder der Arbeitsagentur – an unseren Server (<code>api.jobreif.de</code>) gesendet; dieser ruft die Seite selbst ab und liefert den lesbaren Anzeigentext zurück. Die Adresse geht also an uns, nicht an einen Drittanbieter. Mit eigenem Schlüssel oder lokalem Modell steht „Per URL laden“ nicht zur Verfügung – dort fügst du den Anzeigentext über „Text einfügen“ direkt ein, ohne dass eine Adresse übertragen wird. LinkedIn-Anzeigen lassen sich nicht automatisch laden – dafür gibt es unter „Text einfügen“ das Lesezeichen „jobreif-Import“.</p>
+        <p>„Per URL laden“ wird nur im gehosteten Modus angeboten. Wenn du dort eine Stellenanzeige über „Per URL laden“ importierst, wird die eingegebene Adresse – ggf. in normalisierten Varianten, etwa bei Indeed, StepStone, Onlyfy oder der Arbeitsagentur – an unseren Server (<code>api.jobreif.de</code>) gesendet; dieser ruft die Seite selbst ab und liefert den lesbaren Anzeigentext zurück. Die Adresse geht also an uns, nicht an einen Drittanbieter. Mit eigenem Schlüssel oder lokalem Modell steht „Per URL laden“ nicht zur Verfügung – dort fügst du den Anzeigentext über „Text einfügen“ direkt ein, ohne dass eine Adresse übertragen wird. LinkedIn-Anzeigen lassen sich nicht automatisch laden – öffne die Anzeige, kopiere den Beschreibungstext und füge ihn über „Text einfügen“ ein.</p>
 
         <h3>Wer die Daten verarbeitet (Empfänger)</h3>
         <ul>

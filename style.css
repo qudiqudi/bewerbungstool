@@ -2433,38 +2433,3 @@ button.danger:hover { background: var(--red-soft); border-color: var(--red); }
 
 /* Offener-Lerntest-Karte (Punkt 3): Aktionen rechts gruppiert */
 .resume-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-
-/* LinkedIn-Import: Zwischenablage-Hilfe + Lesezeichen (Bookmarklet) */
-.import-clipboard {
-  margin: 0 0 0.75rem;
-  padding: 0.75rem;
-  background: var(--card-2);
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-}
-.import-clipboard .hint { margin: 0.25rem 0; }
-.import-clipboard #btn-paste-clipboard { margin: 0.25rem 0; }
-.linkedin-help {
-  margin-top: 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  background: var(--card-2);
-  padding: 0.25rem 0.75rem;
-}
-.linkedin-help summary {
-  cursor: pointer;
-  padding: 0.5rem 0;
-  font-weight: 600;
-}
-.linkedin-help .hint { margin: 0.5rem 0; }
-.bookmarklet-link {
-  display: inline-block;
-  padding: 0.25rem 0.6rem;
-  border: 1px solid var(--border-strong);
-  border-radius: 0.4rem;
-  background: var(--card);
-  color: var(--accent-text);
-  font-weight: 600;
-  text-decoration: none;
-  cursor: grab;
-}
