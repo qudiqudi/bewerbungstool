@@ -306,6 +306,9 @@ input:focus, select:focus, textarea:focus {
    Ersetzt die frueheren inline style="font-weight:normal" (F7: style-src ohne 'unsafe-inline').
    Fuer Hints ausserhalb fetter Eltern ein No-op (erben ohnehin normal). */
 .hint { font-size: 0.78rem; color: var(--muted); margin: 0.3rem 0 0; font-weight: normal; }
+/* Inline-Code in Hinweisen (z. B. api.jobreif.de) nicht mitten im Wort umbrechen
+   (sonst "api.jobreif.d e" auf schmalen Screens). */
+.hint code { white-space: nowrap; }
 
 /* Guthaben-Zeile: Euro prominent, Credits als ruhige Klammer (muted). */
 #account-balance { font-size: 0.95rem; margin: 0.3rem 0 0; }
@@ -488,6 +491,11 @@ button.ghost {
   font-weight: 700;
   box-shadow: var(--shadow-sm);
 }
+
+/* Inline-Importstatus direkt unter den Quelle-Tabs (Laden/Hinweis/Fehler),
+   nahe am URL-Feld statt in der unten fixierten .error-Box. */
+.import-status { margin: 0.5rem 0 0; }
+.import-status-error { color: var(--red); font-weight: 600; }
 
 /* Modusauswahl */
 .mode-row {

@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.27.9";
+const APP_VERSION = "1.27.10";
 
 const CHANGELOG = [
+  {
+    version: "1.27.10",
+    date: "30.06.2026",
+    items: [
+      "Reibungsloserer Import per URL: Offensichtlich ungültige Adressen erkennen wir jetzt sofort (statt erst nach einer Server-Anfrage), Lade-Hinweise und Fehlermeldungen erscheinen direkt am URL-Feld, und falls das Laden per URL nicht klappt (z. B. weil das Tageslimit erreicht ist), wechselt das Tool automatisch zu „Text einfügen“ – so kannst du den Anzeigentext einfach manuell einfügen und sofort weitermachen.",
+    ],
+  },
   {
     version: "1.27.9",
     date: "30.06.2026",
@@ -1171,6 +1178,24 @@ function showError(msg) {
   if (msg === LOGIN_REDIRECT) return;
   $("error-text").textContent = msg;
   $("error-box").classList.remove("hidden");
+}
+
+// Inline-Statuszeile direkt unter den Quelle-Tabs (URL/Text), also genau dort,
+// wo der Nutzer beim Laden per URL hinschaut — anders als die global unten
+// fixierte .error-Box. Wird fuer Import-Hinweise/-Fehler genutzt, damit Wait-
+// und Fehlerfeedback nicht weit unter dem Formular verloren geht. variant
+// "error" faerbt rot; sonst neutraler Hinweis. Leerer Text blendet aus.
+function showImportStatus(msg, variant) {
+  const el = $("import-status");
+  if (!el) return;
+  if (!msg) { el.classList.add("hidden"); el.textContent = ""; return; }
+  el.textContent = msg;
+  el.classList.toggle("import-status-error", variant === "error");
+  el.classList.remove("hidden");
+}
+function clearImportStatus() {
+  const el = $("import-status");
+  if (el) { el.classList.add("hidden"); el.textContent = ""; el.classList.remove("import-status-error"); }
 }
 
 // Hosted-Call ohne Anmeldung: zum Login fuehren und den Aufruf sauber abbrechen.
@@ -3465,6 +3490,23 @@ function isLinkedInUrl(url) {
   }
 }
 
+// Billiger Client-Vorabcheck, BEVOR ein Import einen Turnstile-Solve und eine
+// Quota-Buchung verbrennt: Muss eine absolute http(s)-Adresse mit plausiblem
+// Host (mindestens ein Punkt, z. B. "beispiel.de") sein. Bewusst tolerant —
+// die endgueltige Validierung macht der Server; hier nur offensichtlichen Muell
+// (Freitext, fehlendes Schema, "localhost") sofort abfangen.
+function isPlausibleHttpUrl(value) {
+  let u;
+  try {
+    u = new URL(value);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+  const host = u.hostname.replace(/\.+$/, "");
+  return host.includes(".") && host.length >= 3;
+}
+
 // Hosted-Import: uebersetzt die TYPISIERTEN Fehlercodes von
 // POST /api/import in stabile, hilfreiche du-Form-
 // Meldungen. BEWUSST eine EIGENE Tabelle, NICHT hostedErrorMessage: dort mappt
@@ -3487,7 +3529,11 @@ function importErrorMessage(code, status) {
     case "no-content":
       return "Aus der Seite konnte kein Anzeigentext ausgelesen werden (vermutlich eine JavaScript-Anwendung). Bitte die Stellenbeschreibung über „Text einfügen“ manuell einfügen.";
     case "rate-limited":
-      return "Du hast gerade zu viele Importe gestartet. Bitte kurz warten und erneut versuchen.";
+      // Tages-Cap (kein kurzer Throttle, kein Retry-After) — und der per-IP-Cap kann
+      // bei geteilten Adressen (Mobilfunk/Firmen-NAT) auch ohne eigene Importe greifen.
+      // Darum ehrliche Copy + klarer Hinweis aufs manuelle Einfuegen (der Aufrufer
+      // schaltet zusaetzlich auf den Text-Tab, damit niemand feststeckt).
+      return "Das Tageslimit für das Laden per URL ist erreicht. Bitte füge die Stellenbeschreibung über „Text einfügen“ manuell ein – das geht jederzeit.";
     case "turnstile":
       return "Sicherheitsprüfung fehlgeschlagen. Bitte die Seite neu laden und erneut versuchen.";
     case "bad-url":
@@ -3524,7 +3570,7 @@ async function fetchJobViaBackend(url) {
   try {
     res = await fetch(hostedBase() + "/api/import", { method: "POST", headers, body });
   } catch {
-    throw new Error("Keine Verbindung zum Dienst. Bitte Internetverbindung prüfen und erneut versuchen.");
+    throw new Error("Keine Verbindung zum Dienst. Bitte Internetverbindung prüfen und erneut versuchen – oder die Stellenbeschreibung über „Text einfügen“ manuell einfügen.");
   }
 
   // 401 (auth-required / abgelaufene Sitzung) wie bei den anderen Hosted-Calls:
@@ -4265,7 +4311,7 @@ async function generateQuiz(opts = {}) {
     // Reihenfolge-Aufgaben werden nur im NICHT-lokalen Pfad angeregt: kleine
     // lokale Modelle liefern Permutationen oft inkonsistent (der Normalizer
     // faengt das zwar ab, aber dann waeren es nutzlose Fragen). Im Hosted-
-    // Default baut ohnehin der Worker den Prompt (siehe worker/src/prompts.js).
+    // Default baut ohnehin der Server den Prompt.
     const reihenfolgeHinweis = isLocal
       ? ""
       : "Wenn sich ein Thema natuerlich als Abfolge, Ablauf, Verfahren, Prozesskette, " +
@@ -4828,10 +4874,23 @@ function renderActiveJobCard(state) {
   const startBtn = $("active-job-start");
   const ready = state === "ready";
   if (textEl) {
+    // Im Ready-Zustand den Job-Titel mitnennen, damit sich zwei fertige Karten
+    // unterscheiden lassen (defensiv: alte/teil-gespeicherte Jobs ohne Titel
+    // fallen auf die generische Meldung zurueck).
+    let readyMsg = "Dein Test ist fertig.";
+    if (ready) {
+      let titel = "";
+      try {
+        const aj = loadActiveJob();
+        const t = aj && aj.quiz && typeof aj.quiz.titel === "string" ? aj.quiz.titel.trim() : "";
+        if (t) titel = t;
+      } catch { /* defensiv: kein Titel verfuegbar */ }
+      if (titel) readyMsg = "Dein Test ist fertig: " + titel;
+    }
     textEl.textContent = state === "error"
       ? "Die Erstellung ist fehlgeschlagen. Bitte erneut starten."
       : ready
-      ? "Dein Test ist fertig."
+      ? readyMsg
       : "Dein Test wird erstellt … du kannst die Seite verlassen und später zurückkehren.";
   }
   if (spin) spin.classList.toggle("hidden", state !== "pending");
@@ -9715,13 +9774,18 @@ $("import-file").addEventListener("change", async (e) => {
 
 // Quelle der Stellenbeschreibung: entweder URL oder manuell eingefuegter Text
 function setSourceTab(which) {
-  $("tab-url").classList.toggle("active", which === "url");
-  $("tab-text").classList.toggle("active", which === "text");
-  // Aktiven Tab auch fuer Screenreader kennzeichnen
-  $("tab-url").setAttribute("aria-pressed", which === "url" ? "true" : "false");
-  $("tab-text").setAttribute("aria-pressed", which === "text" ? "true" : "false");
-  $("source-url").classList.toggle("hidden", which !== "url");
-  $("source-text").classList.toggle("hidden", which !== "text");
+  const urlActive = which === "url";
+  $("tab-url").classList.toggle("active", urlActive);
+  $("tab-text").classList.toggle("active", !urlActive);
+  // role="tab"-Semantik: aktiver Tab via aria-selected, und nur er ist per Tab-
+  // Taste fokussierbar (roving tabindex); der inaktive Tab ist per Pfeiltaste
+  // erreichbar (siehe Keydown-Handler).
+  $("tab-url").setAttribute("aria-selected", urlActive ? "true" : "false");
+  $("tab-text").setAttribute("aria-selected", urlActive ? "false" : "true");
+  $("tab-url").setAttribute("tabindex", urlActive ? "0" : "-1");
+  $("tab-text").setAttribute("tabindex", urlActive ? "-1" : "0");
+  $("source-url").classList.toggle("hidden", !urlActive);
+  $("source-text").classList.toggle("hidden", urlActive);
 }
 
 // Das Laden per URL wird NUR im gehosteten Modus angeboten (dort laeuft es
@@ -9743,10 +9807,33 @@ function applySourceUiForProvider() {
   }
   // Ohne Hosted-Modus nie auf dem (jetzt ausgeblendeten) URL-Tab stehen bleiben.
   if (!isHosted) setSourceTab("text");
+  // Beim (Wieder-)Betreten des Eingabe-Bildschirms keinen veralteten Import-Status
+  // aus einem frueheren Versuch zeigen (laeuft nur bei Entry, nicht waehrend des Imports).
+  clearImportStatus();
 }
 
 $("tab-url").addEventListener("click", () => { setSourceTab("url"); saveDraft(); });
 $("tab-text").addEventListener("click", () => { setSourceTab("text"); saveDraft(); });
+
+// Tastatur-Navigation der Quelle-Tabs (WAI-ARIA Tabs-Pattern): Pfeiltasten/Pos1/Ende
+// wechseln zwischen URL- und Text-Tab. Im Nicht-Hosted-Modus ist der URL-Tab
+// ausgeblendet -> dann kein Wechsel (nur der Text-Tab existiert sichtbar).
+function handleSourceTabKeydown(e) {
+  const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
+  if (!keys.includes(e.key)) return;
+  if ($("tab-url").classList.contains("hidden")) return; // nur ein sichtbarer Tab
+  e.preventDefault();
+  const onUrl = $("tab-url").getAttribute("aria-selected") === "true";
+  let target;
+  if (e.key === "Home") target = "url";
+  else if (e.key === "End") target = "text";
+  else target = onUrl ? "text" : "url"; // ArrowLeft/Right toggelt bei 2 Tabs
+  setSourceTab(target);
+  saveDraft();
+  $(target === "url" ? "tab-url" : "tab-text").focus();
+}
+$("tab-url").addEventListener("keydown", handleSourceTabKeydown);
+$("tab-text").addEventListener("keydown", handleSourceTabKeydown);
 
 // Fragen-Stepper: loest das fruehere <select id="num-questions"> ab. Gleiche id
 // und gleiche .value-Schnittstelle (Zahl als String), nur +/- statt Dropdown.
@@ -9788,14 +9875,45 @@ initNumStepper();
 
 // Eingaben in URL- und Textfeld in den Entwurf uebernehmen, damit sie ein
 // Reload/Update ueberleben (verzoegert, nicht bei jedem Tastendruck)
-$("job-url").addEventListener("input", scheduleDraftSave);
+// Beim Tippen einer neuen URL den alten Import-Status (z. B. Fehler) ausblenden.
+$("job-url").addEventListener("input", () => { clearImportStatus(); scheduleDraftSave(); });
 $("job-text").addEventListener("input", scheduleDraftSave);
+
+// Wechselt zum Text-Tab, damit das Einfuege-Feld sichtbar ist - die Eskalation,
+// wenn das Laden per URL nicht klappt (Fehler/Tageslimit/LinkedIn). Die bereits
+// eingegebene URL bleibt erhalten, der Nutzer kann jederzeit zum URL-Tab zurueck.
+function fallbackToPaste() {
+  setSourceTab("text");
+  saveDraft();
+}
 
 $("btn-fetch-url").addEventListener("click", async () => {
   if (actionRunning) return;
   const url = $("job-url").value.trim();
-  if (!url) return;
+  // Leerer Klick: nicht mehr stiller No-op, sondern klarer Hinweis am Feld.
+  if (!url) {
+    showImportStatus("Bitte zuerst die Internetadresse der Stellenanzeige eingeben.", "error");
+    $("job-url").focus();
+    return;
+  }
+  // Ausgeloggt im Hosted-Modus: statt eines Anmelde-Sackgassen-Redirects ein
+  // erklaerender Inline-Hinweis (Anmelden ODER manuell einfuegen) + Login-Dialog.
+  if ((settings.provider || "hosted") === "hosted" && hostedNeedsLogin()) {
+    showImportStatus("Zum Laden per URL bitte anmelden – oder die Stellenbeschreibung über „Text einfügen“ manuell einfügen.", "error");
+    promptHostedLogin();
+    return;
+  }
+  // Client-Vorabvalidierung: offensichtlichen Muell sofort abfangen, BEVOR ein
+  // Turnstile-Solve und eine Import-Quota verbrannt werden. LinkedIn ist eine
+  // gueltige URL und wird bewusst nicht hier, sondern in fetchJobFromUrl mit der
+  // passenden Anleitung kurzgeschlossen.
+  if (!isLinkedInUrl(url) && !isPlausibleHttpUrl(url)) {
+    showImportStatus("Das sieht nicht wie eine gültige Internetadresse aus. Bitte eine vollständige Adresse einfügen (z. B. https://beispiel.de/stelle) – oder den Text über „Text einfügen“ manuell einfügen.", "error");
+    return;
+  }
   actionRunning = true;
+  clearImportStatus();
+  showImportStatus("Stellenanzeige wird geladen …");
   showLoading("Stellenanzeige wird geladen...");
   try {
     const text = cleanPageText(await fetchJobFromUrl(url));
@@ -9804,10 +9922,18 @@ $("btn-fetch-url").addEventListener("click", async () => {
     setSourceTab("text");
     saveDraft();
     if (!looksLikeRealContent(text)) {
-      showError("Die Seite konnte nur unvollständig ausgelesen werden (vermutlich eine JavaScript-Anwendung). Bitte prüfen und die Stellenbeschreibung ggf. manuell einfügen.");
+      showImportStatus("Die Seite konnte nur unvollständig ausgelesen werden (vermutlich eine JavaScript-Anwendung). Bitte prüfen und ggf. die Stellenbeschreibung manuell einfügen.", "error");
+    } else {
+      showImportStatus("Geladen – bitte den Text unten zur Kontrolle prüfen.");
     }
   } catch (e) {
-    showError(e.message);
+    // Anmelde-Redirect (Sitzung mitten im Call abgelaufen): Dialog laeuft bereits,
+    // keine Fehlermeldung und kein Tab-Wechsel.
+    if (e.message === LOGIN_REDIRECT) return;
+    // Jeder andere Import-Fehler: ehrliche Meldung direkt am Feld UND auf den
+    // Text-Tab wechseln, damit der Nutzer sofort manuell einfuegen kann (nie festfahren).
+    showImportStatus(e.message, "error");
+    fallbackToPaste();
   } finally {
     actionRunning = false;
     hideLoading();

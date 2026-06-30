@@ -368,24 +368,28 @@
       <h2>Stellenbeschreibung</h2>
       <p id="source-intro-hint" class="hint">Entweder die Anzeige per URL laden oder den Text direkt einfügen.</p>
 
-      <div class="tabs">
-        <button id="tab-url" class="tab active" aria-pressed="true">Per URL laden</button>
-        <button id="tab-text" class="tab" aria-pressed="false">Text einfügen</button>
+      <div class="tabs" role="tablist" aria-label="Quelle der Stellenbeschreibung">
+        <button id="tab-url" class="tab active" type="button" role="tab" aria-selected="true" aria-controls="source-url" tabindex="0">Per URL laden</button>
+        <button id="tab-text" class="tab" type="button" role="tab" aria-selected="false" aria-controls="source-text" tabindex="-1">Text einfügen</button>
       </div>
 
-      <div id="source-url">
+      <!-- Inline-Status fuer den URL-Import (Laden/Fehler/Hinweis), direkt am Feld
+           statt in der unten fixierten Fehlerbox. role=status -> Screenreader-Ansage. -->
+      <p id="import-status" class="hint import-status hidden" role="status" aria-live="polite"></p>
+
+      <div id="source-url" role="tabpanel" aria-labelledby="tab-url">
         <label for="job-url">URL der Stellenanzeige</label>
         <div class="row">
           <input type="url" id="job-url" placeholder="https://beispiel.de/stellenanzeige">
-          <button id="btn-fetch-url">Laden</button>
+          <button id="btn-fetch-url" type="button">Laden</button>
         </div>
         <p class="hint">Die Adresse wird serverseitig von jobreif (<code>api.jobreif.de</code>) als Text geladen – sie geht an uns, nicht an einen Drittanbieter. Der Text wird danach unter &bdquo;Text einfügen&ldquo; zur Kontrolle angezeigt. Falls das Laden fehlschlägt, dort den Text manuell einfügen.</p>
       </div>
 
-      <div id="source-text" class="hidden">
+      <div id="source-text" class="hidden" role="tabpanel" aria-labelledby="tab-text">
         <label for="job-text">Stellenbeschreibung</label>
         <textarea id="job-text" rows="12" placeholder="Stellenbeschreibung hier einfügen..."></textarea>
-        <p class="hint">Bei LinkedIn-Anzeigen: Öffne die Stellenanzeige, kopiere den Beschreibungstext und füge ihn hier ein.</p>
+        <p class="hint">Den Beschreibungstext der Stellenanzeige hier einfügen. Bei LinkedIn-Anzeigen: Anzeige öffnen, den Beschreibungstext markieren, kopieren und hier einfügen.</p>
       </div>
 
       <label id="label-mode">Modus</label>
@@ -762,13 +766,15 @@
       </div>
     </div>
 
-    <!-- Lade-Overlay -->
-    <div id="loading" class="overlay hidden">
+    <!-- Lade-Overlay. aria-live nur auf den Phasentext (nicht den Sekundenzaehler,
+         der sonst jede Sekunde vorgelesen wuerde): so kuendigt der Screenreader das
+         Warten an ("Stellenanzeige wird geladen…" / "Fragenkatalog wird erstellt…"). -->
+    <div id="loading" class="overlay hidden" aria-busy="true">
       <div class="loading-panel">
         <div class="spinner"></div>
-        <p id="loading-text">Wird geladen...</p>
+        <p id="loading-text" role="status" aria-live="polite">Wird geladen...</p>
         <div id="loading-progress" class="loading-bar hidden"><div id="loading-fill"></div></div>
-        <p id="loading-elapsed" class="loading-elapsed"></p>
+        <p id="loading-elapsed" class="loading-elapsed" aria-hidden="true"></p>
         <button id="loading-abort" class="loading-abort hidden" type="button">Stoppen &amp; verwenden</button>
       </div>
     </div>
