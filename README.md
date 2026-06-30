@@ -10,7 +10,7 @@ Sign in with email or Google and start right away – a limited quota is free. P
 
 ## How it works
 
-1. Paste a job description or load it by URL (via the Jina reader `r.jina.ai`)
+1. Paste a job description, or – in hosted mode – load it by URL (fetched server-side by jobreif at `api.jobreif.de`)
 2. The tool uses an LLM to generate a set of questions – multiple-choice and open-ended
 3. You answer the questions interactively – in learning or exam mode
 4. Evaluation with points per question, feedback, model answers and an overall assessment

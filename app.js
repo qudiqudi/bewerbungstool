@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.27.7";
+const APP_VERSION = "1.27.8";
 
 const CHANGELOG = [
+  {
+    version: "1.27.8",
+    date: "30.06.2026",
+    items: [
+      "URL-Import nur noch im gehosteten Modus: Eine Stellenanzeige per Internetadresse zu laden, läuft jetzt ausschließlich serverseitig über jobreif – die Adresse geht an uns, nicht an einen Drittanbieter. Mit eigenem Schlüssel oder lokalem Modell gibt es kein automatisches Laden per URL mehr; dort fügst du den Anzeigentext einfach über „Text einfügen“ ein (der LinkedIn-Import per Lesezeichen funktioniert weiterhin).",
+    ],
+  },
   {
     version: "1.27.7",
     date: "29.06.2026",
@@ -53,7 +60,7 @@ const CHANGELOG = [
     version: "1.27.1",
     date: "28.06.2026",
     items: [
-      "Mehr Transparenz beim Import per Link: Beim Einlesen einer Stellenanzeige über ihre Internetadresse ist jetzt klar ausgewiesen, dass die Seite über einen Drittanbieter-Dienst (Jina AI) geladen wird. „Text einfügen“ bleibt wie bisher komplett lokal im Browser.",
+      "Mehr Transparenz beim Import per Link: Beim Einlesen einer Stellenanzeige über ihre Internetadresse ist jetzt klar ausgewiesen, woher die Seite geladen wird. „Text einfügen“ bleibt wie bisher komplett lokal im Browser.",
       "Datensicherung mit Warnung: Enthält deine Backup-Datei einen gespeicherten API-Schlüssel, weist die App vor dem Speichern darauf hin – damit die Datei bewusst sicher aufbewahrt wird.",
       "Offline-Verbesserung: Auch tiefe Seiten (z. B. die Einstellungstest-Berufsseiten) laden jetzt offline zuverlässig die App statt einer Fehlerseite.",
     ],
@@ -203,7 +210,7 @@ const CHANGELOG = [
     version: "1.8.12",
     date: "22.06.2026",
     items: [
-      "Datenschutzhinweis ergänzt: Der Import einer Stellenanzeige per URL (über Jina AI) und der Bot-Schutz beim Anmelden sind jetzt ausdrücklich beschrieben; dazu Hinweise zu deinen Datenschutzrechten.",
+      "Datenschutzhinweis ergänzt: Der Import einer Stellenanzeige per URL und der Bot-Schutz beim Anmelden sind jetzt ausdrücklich beschrieben; dazu Hinweise zu deinen Datenschutzrechten.",
     ],
   },
   {
@@ -925,6 +932,7 @@ function showView(id) {
   // gesetzter hoeherer Wert wird heruntergeklemmt.
   if (id === "view-input") {
     syncCreateTierSelect();
+    applySourceUiForProvider();   // URL-Tab nur im Hosted-Modus anbieten
     const ni = $("num-questions"); if (ni && ni.refreshMax) ni.refreshMax();
   }
   syncHistory(id);
@@ -3414,54 +3422,6 @@ function arbeitsagenturRef(u) {
   return id && /^[\w-]+$/.test(id) ? id : null;
 }
 
-// Manche Jobportale sind reine JavaScript-Apps, deren Inhalt der Reader nicht
-// sieht. Für bekannte Portale gibt es serverseitig gerenderte Alternativ-URLs,
-// die zuerst versucht werden.
-function candidateUrls(url) {
-  const list = [url];
-  try {
-    const u = new URL(url);
-    // Onlyfy (Prescreen): Print-Version enthält die volle Anzeige
-    const m = u.pathname.match(/\/job\/([a-z0-9]+)/i);
-    if (/(^|\.)onlyfy\.jobs$/i.test(u.hostname) && m) {
-      list.unshift(u.origin + "/candidate/job/print/" + m[1] + "?mode=print");
-    }
-    // LinkedIn: Gast-Endpunkt mit der reinen Beschreibung zuerst versuchen
-    if (/(^|\.)linkedin\.com$/i.test(u.hostname)) {
-      const id = linkedinJobId(u);
-      if (id) {
-        list.unshift("https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/" + id);
-      }
-    }
-    // Indeed: auf die kanonische viewjob-URL ohne Tracking-Parameter normalisieren
-    if (/(^|\.)indeed\.com$/i.test(u.hostname)) {
-      const jk = indeedJobKey(u);
-      if (jk) {
-        list.unshift(u.origin + "/viewjob?jk=" + jk);
-      }
-    }
-    // StepStone: die normale Anzeige lädt den Beschreibungstext per JavaScript
-    // nach; die -inline-Variante ist serverseitig gerendert und vollständig.
-    if (/(^|\.)stepstone\.de$/i.test(u.hostname)) {
-      const m = u.pathname.match(/--(\d+)\.html$/);
-      if (m) {
-        list.unshift(u.origin + u.pathname.replace(/--(\d+)\.html$/, "--$1-inline.html"));
-      }
-    }
-    // Arbeitsagentur: statt der Trefferliste die Detailseite zur Referenznummer laden
-    if (/(^|\.)arbeitsagentur\.de$/i.test(u.hostname)) {
-      const ref = arbeitsagenturRef(u);
-      const detail = "https://www.arbeitsagentur.de/jobsuche/jobdetail/" + ref;
-      if (ref && detail !== url) {
-        list.unshift(detail);
-      }
-    }
-  } catch {
-    // ungültige URL: unverändert versuchen, Fehler kommt dann vom fetch
-  }
-  return list;
-}
-
 // Entfernt offensichtliches Webseiten-Rauschen aus dem extrahierten Markdown
 // (Bilder, Link-Syntax, Trennlinien) - Jobportale wie Stepstone liefern sonst
 // viel Navigation und Logos mit
@@ -3481,7 +3441,8 @@ function looksBlocked(text) {
   return /Just a moment\.\.\.|Attention Required|Enable JavaScript and cookies to continue|cf-browser-verification|challenge-platform|Warning: Target URL returned error (4|5)\d\d/i.test(text);
 }
 
-// Heuristik: App-Hüllen sind kurz oder tragen Jina-Warnungen zu iframes/Shadow DOM
+// Heuristik: zu kurze oder als unvollständig markierte Inhalte (Hinweise auf
+// iframe/Shadow DOM) gelten nicht als echter Anzeigentext.
 function looksLikeRealContent(text) {
   // Fehlgeschlagene Zielabrufe ("Warning: Target URL returned error <code>")
   // und Bot-Schutz-Seiten fängt looksBlocked ab - sonst rutscht eine plausibel
@@ -3490,8 +3451,8 @@ function looksLikeRealContent(text) {
 }
 
 // LinkedIn sperrt das automatische Auslesen seiner Stellenanzeigen extern: der
-// r.jina.ai-Reader bekommt HTTP 451 (Unavailable For Legal Reasons), LinkedIn
-// direkt 999 (Bot-Schutz). Ein Abruf ist also aussichtslos - statt eines
+// serverseitige Import bekommt HTTP 451 (Unavailable For Legal Reasons),
+// LinkedIn direkt 999 (Bot-Schutz). Ein Abruf ist also aussichtslos - statt eines
 // generischen Fehlers nach langer Wartezeit weisen wir den Nutzer direkt auf den
 // einzigen verlaesslichen Weg hin: den Text manuell unter „Text einfügen“ einfügen.
 const LINKEDIN_BLOCKED_MSG =
@@ -3548,185 +3509,6 @@ function cleanLinkedIn(text) {
 const LINKEDIN_BOOKMARKLET =
   `javascript:(function(){try{var S=['#job-details','.jobs-description__content','.jobs-box__html-content','[class*="jobs-description__content"]'],e=null,i;for(i=0;i<S.length;i++){e=document.querySelector(S[i]);if(e)break;}var d=e?(e.innerText||'').trim():'';if(d.length<80){var m=document.querySelector('main')||document.body,f=(m.innerText||'').trim();if(f.length>d.length)d=f;}var T=document.querySelector('.job-details-jobs-unified-top-card__job-title,.jobs-unified-top-card__job-title,h1'),t=T?(T.innerText||'').trim():'';if(!d||d.length<80){alert('jobreif: Kein Anzeigentext gefunden. Bitte oeffne eine LinkedIn-Stellenanzeige und versuche es erneut.');return;}var o=(t?t+String.fromCharCode(10,10):'')+d,g=function(){var w=window.open('https://jobreif.de/?import=linkedin','_blank');if(!w){alert('jobreif: Text kopiert! Bitte oeffne jobreif.de und tippe auf "Aus Zwischenablage einfuegen".');}};if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(o).then(g,function(){window.prompt('jobreif: Bitte kopieren (Strg/Cmd+C) und in jobreif einfuegen:',o);g();});}else{window.prompt('jobreif: Bitte kopieren (Strg/Cmd+C) und in jobreif einfuegen:',o);g();}}catch(x){alert('jobreif-Import fehlgeschlagen: '+(x&&x.message?x.message:x));}})();`;
 
-/* ---------- Layer 1: schema.org JobPosting (JSON-LD) ---------- */
-
-// Fast jedes Jobportal bettet einen schema.org-JobPosting-Block als JSON-LD ein
-// (Google Jobs verlangt ihn). Jinas Markdown-Modus verwirft ihn; im HTML-Modus
-// (Header X-Return-Format: html, gleicher Endpoint, gleiches CORS - per OPTIONS
-// gegen jobreif.de verifiziert) bleibt er erhalten. Aus diesem Block laesst sich
-// portalunabhaengig sauberer Text bauen, ohne Navigations-Rauschen. Alles
-// best-effort: schlaegt irgendetwas fehl, faellt fetchJobFromUrl still auf den
-// bisherigen Markdown-Pfad zurueck.
-
-// Sucht in einem geparsten JSON-LD-Wert (Objekt, Array, @graph, beliebig tief
-// verschachtelt) alle Objekte, deren @type "JobPosting" ist oder enthaelt.
-// Tiefe begrenzt, damit zirkulaere/uebergrosse Strukturen nicht haengenbleiben.
-function collectJobPostings(node, out, depth) {
-  if (!node || typeof node !== "object" || depth > 6) return out;
-  if (Array.isArray(node)) {
-    for (const item of node) collectJobPostings(item, out, depth + 1);
-    return out;
-  }
-  const t = node["@type"];
-  const types = Array.isArray(t) ? t : [t];
-  if (types.some((x) => typeof x === "string" && x.toLowerCase() === "jobposting")) {
-    out.push(node);
-  }
-  // @graph und andere verschachtelte Container ebenfalls durchsuchen
-  for (const key of Object.keys(node)) {
-    const v = node[key];
-    if (v && typeof v === "object") collectJobPostings(v, out, depth + 1);
-  }
-  return out;
-}
-
-// Liest einen Namen defensiv: hiringOrganization kann String, Objekt mit name,
-// oder ein Array davon sein.
-function jsonLdName(v) {
-  if (typeof v === "string") return v.trim();
-  if (Array.isArray(v)) return v.map(jsonLdName).filter(Boolean).join(", ");
-  if (v && typeof v === "object" && typeof v.name === "string") return v.name.trim();
-  return "";
-}
-
-// Baut aus jobLocation einen lesbaren Ortsstring (Objekt oder Array von
-// PostalAddress/Place). HTML-Strip via stripFn, damit auch hier keine Tags
-// durchrutschen.
-function jsonLdLocation(v, stripFn) {
-  if (!v) return "";
-  if (Array.isArray(v)) {
-    return v.map((x) => jsonLdLocation(x, stripFn)).filter(Boolean).join(" / ");
-  }
-  if (typeof v === "string") return stripFn(v);
-  if (typeof v !== "object") return "";
-  const addr = v.address && typeof v.address === "object" ? v.address : v;
-  const parts = [addr.addressLocality, addr.addressRegion, addr.postalCode, addr.addressCountry]
-    .map((p) => (typeof p === "string" ? stripFn(p) : (jsonLdName(p) || "")))
-    .filter(Boolean);
-  // Place ohne Adressfelder, aber mit Name (z. B. nur "Berlin"): Name nutzen.
-  if (!parts.length) return jsonLdName(v);
-  return parts.join(", ");
-}
-
-// baseSalary defensiv: value kann MonetaryAmount mit value/minValue/maxValue sein.
-function jsonLdSalary(v, stripFn) {
-  if (!v || typeof v !== "object") return typeof v === "string" ? stripFn(v) : "";
-  const cur = typeof v.currency === "string" ? v.currency : "";
-  const val = v.value && typeof v.value === "object" ? v.value : v;
-  const amount =
-    val.value != null
-      ? String(val.value)
-      : [val.minValue, val.maxValue].filter((x) => x != null).join("-");
-  if (!amount) return "";
-  const unit = typeof val.unitText === "string" ? val.unitText : "";
-  return [cur, amount, unit].filter(Boolean).join(" ").trim();
-}
-
-// Setzt aus einem JobPosting-Objekt sauberen Text zusammen. stripFn entfernt
-// HTML (im Browser via DOMParser, im Test injizierbar). Gibt "" zurueck, wenn
-// keine brauchbare Beschreibung vorhanden ist - dann greift der Fallback.
-function jobPostingToText(job, stripFn) {
-  if (!job || typeof job !== "object") return "";
-  const description = stripFn(typeof job.description === "string" ? job.description : "");
-  // Ohne substanzielle Beschreibung lieber den Markdown-Fallback nutzen, der
-  // unter Umstaenden mehr Fliesstext findet.
-  if (description.replace(/\s+/g, " ").trim().length < 200) return "";
-
-  const empType = Array.isArray(job.employmentType)
-    ? job.employmentType.filter((x) => typeof x === "string").join(", ")
-    : (typeof job.employmentType === "string" ? job.employmentType : "");
-
-  const lines = [];
-  if (typeof job.title === "string" && job.title.trim()) lines.push(job.title.trim());
-  const org = jsonLdName(job.hiringOrganization);
-  if (org) lines.push("Arbeitgeber: " + org);
-  const loc = jsonLdLocation(job.jobLocation, stripFn);
-  if (loc) lines.push("Standort: " + loc);
-  if (empType) lines.push("Beschäftigungsart: " + stripFn(empType));
-  const sal = jsonLdSalary(job.baseSalary, stripFn);
-  if (sal) lines.push("Gehalt: " + sal);
-  lines.push("");
-  lines.push(description.trim());
-  return lines.join("\n").trim();
-}
-
-// Wandelt einen HTML-Fragmentstring in reinen Text (Entities aufgeloest,
-// Whitespace normalisiert). Nutzt DOMParser -> totes Dokument, keine
-// Skriptausfuehrung, kein XSS/CSP-Problem.
-function stripHtmlToText(html) {
-  if (!html) return "";
-  if (typeof DOMParser === "undefined") {
-    // Sehr defensiver Fallback (z. B. exotische Umgebung): grobes Tag-Entfernen
-    return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-  }
-  const doc = new DOMParser().parseFromString(String(html), "text/html");
-  return (doc.body ? doc.body.textContent : "").replace(/ /g, " ").replace(/[ \t]+/g, " ").trim();
-}
-
-// Holt das rohe HTML einer URL ueber Jina (HTML-Modus), parst alle
-// JSON-LD-Bloecke tolerant und liefert bei Fund eines brauchbaren JobPosting
-// den zusammengesetzten Text - sonst "".
-// Obergrenze fuer das geparste HTML: schuetzt den DOMParser vor uebergrossen
-// oder boesartigen Antworten, bevor der bewaehrte Markdown-Pfad greift.
-const JSONLD_HTML_MAX = 4 * 1024 * 1024; // 4 MB
-const JSONLD_FETCH_TIMEOUT_MS = 15000;
-
-async function fetchJobPostingJsonLd(u) {
-  if (typeof DOMParser === "undefined") return "";
-  let html;
-  // Timeout, damit ein haengender HTML-Abruf den Import nicht blockiert -
-  // bei Abbruch faellt fetchJobFromUrl auf den Markdown-Pfad zurueck.
-  const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
-  const timer = ctrl ? setTimeout(() => ctrl.abort(), JSONLD_FETCH_TIMEOUT_MS) : 0;
-  try {
-    const res = await fetch("https://r.jina.ai/" + u, {
-      headers: { "X-Return-Format": "html" },
-      signal: ctrl ? ctrl.signal : undefined,
-    });
-    if (!res.ok) return "";
-    html = await res.text();
-  } catch {
-    return "";
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-  if (!html) return "";
-  // Uebergrosses HTML gar nicht erst parsen - lieber der Markdown-Pfad.
-  if (html.length > JSONLD_HTML_MAX) return "";
-  let doc;
-  try {
-    doc = new DOMParser().parseFromString(html, "text/html");
-  } catch {
-    return "";
-  }
-  const blocks = doc.querySelectorAll('script[type="application/ld+json"]');
-  const jobs = [];
-  blocks.forEach((el) => {
-    let parsed;
-    try {
-      // JSON-LD ist gelegentlich kaputt (z. B. nackte Zeilenumbrueche in
-      // Strings). Ein fehlerhafter Block darf die anderen nicht killen.
-      parsed = JSON.parse(el.textContent);
-    } catch {
-      return;
-    }
-    collectJobPostings(parsed, jobs, 0);
-  });
-  if (!jobs.length) return "";
-  // Mehrere JobPostings (z. B. die Detailanzeige plus verwandte Stellen):
-  // collectJobPostings liefert sie in Dokumentreihenfolge - die primaere
-  // Anzeige (oft im ersten/mainEntity-Block) steht typischerweise vorn. Den
-  // ERSTEN Block mit brauchbarer Beschreibung nehmen statt blind den laengsten
-  // (eine ausfuehrliche "verwandte Stelle" wuerde sonst die eigentliche Anzeige
-  // verdraengen). jobPostingToText gibt "" zurueck, wenn die Beschreibung zu
-  // duenn ist, also ueberspringen wir solche Bloecke automatisch.
-  for (const job of jobs) {
-    const text = jobPostingToText(job, stripHtmlToText);
-    if (text) return text;
-  }
-  return "";
-}
-
 // Hosted-Import (Phase 1b): uebersetzt die TYPISIERTEN Fehlercodes von
 // POST /api/import (siehe Backend-import.js) in stabile, hilfreiche du-Form-
 // Meldungen. BEWUSST eine EIGENE Tabelle, NICHT hostedErrorMessage: dort mappt
@@ -3767,9 +3549,9 @@ function importErrorMessage(code, status) {
   }
 }
 
-// Hosted-Pfad des URL-Imports: laedt die Anzeige SERVERSEITIG ueber
-// POST https://api.jobreif.de/api/import (statt des Drittanbieter-Readers
-// r.jina.ai). Gleiche Schreib-Posture wie die anderen Hosted-Endpoints
+// URL-Import: laedt die Anzeige SERVERSEITIG ueber
+// POST https://api.jobreif.de/api/import (kein Drittanbieter-Reader).
+// Gleiche Schreib-Posture wie die anderen Hosted-Endpoints
 // (Bearer-Anmeldung + Turnstile, Aktion "import", an den Body gebunden;
 // Testkonten sind serverseitig ausgenommen). Antwort bei Erfolg
 // { text, tier, sourceUrl } → wir nutzen text. Fehler kommen TYPISIERT als
@@ -3806,73 +3588,24 @@ async function fetchJobViaBackend(url) {
 }
 
 async function fetchJobFromUrl(url) {
-  // Proaktiver Kurzschluss fuer LinkedIn: beide Pfade (serverseitiger Import wie
-  // auch der r.jina.ai-Reader) sind durch LinkedIns externe Sperre (451/999)
-  // aussichtslos und enden sonst im generischen Fehler. Wir sparen die doomed
-  // Wartezeit und sagen dem Nutzer direkt, was zu tun ist. Gilt fuer ALLE Modi.
+  // Proaktiver Kurzschluss fuer LinkedIn: der serverseitige Import ist durch
+  // LinkedIns externe Sperre (451/999) aussichtslos und endet sonst im
+  // generischen Fehler. Wir sparen die doomed Wartezeit und sagen dem Nutzer
+  // direkt, was zu tun ist.
   if (isLinkedInUrl(url)) {
     throw new Error(LINKEDIN_BLOCKED_MSG);
   }
 
-  // Sauber nach Betriebsart verzweigen (NUR nach provider, NICHT nach Token):
-  // - Gehostet → IMMER serverseitiger Import ueber api.jobreif.de (ersetzt den
-  //   Drittanbieter r.jina.ai; die URL verlaesst nur unseren Server). Fehlt die
-  //   Anmeldung, fuehrt fetchJobViaBackend ueber requireHostedLoginOrThrow zur
-  //   Anmeldung statt still auf Jina zurueckzufallen — sonst wuerde die im Hosted-
-  //   Modus zugesagte serverseitige Verarbeitung (Datenschutzhinweis) unterlaufen,
-  //   indem die URL doch an einen Drittanbieter ginge. Ein stellenbezogener Import
-  //   verlangt im Hosted-Modus ohnehin die (kostenlose) Anmeldung.
-  // - BYOK/lokal → UNVERAENDERTER Client-Reader unten: r.jina.ai laeuft im EIGENEN
-  //   Browser des Nutzers. Bewusst KEINE Regression dieses Pfads.
-  if ((settings.provider || "hosted") === "hosted") {
-    return await fetchJobViaBackend(url);
+  // Das Laden per URL wird NUR im gehosteten Modus angeboten (die Client-UI
+  // blendet den URL-Tab fuer BYOK/lokal aus) und laeuft IMMER serverseitig
+  // ueber api.jobreif.de — die Adresse verlaesst nur unseren Server, es gibt
+  // keinen Drittanbieter-Reader mehr. Defensiver Backstop, falls diese Funktion
+  // doch ausserhalb des Hosted-Modus erreicht wird: klarer Hinweis aufs
+  // manuelle Einfuegen statt eines verwirrenden Anmelde-Redirects.
+  if ((settings.provider || "hosted") !== "hosted") {
+    throw new Error("Das Laden per URL ist nur im gehosteten Modus verfügbar. Bitte füge den Stellentext über „Text einfügen“ direkt ein.");
   }
-
-  // Layer 1 (primaer): portalunabhaengiges JobPosting-JSON-LD aus dem rohen
-  // HTML. Best-effort - bei jedem Fehlschlag still weiter zum Markdown-Pfad.
-  try {
-    const jsonLd = await fetchJobPostingJsonLd(url);
-    // Dieselbe Schwelle wie der Aufrufer (looksLikeRealContent): so faellt ein
-    // duenner JSON-LD-Treffer auf den Markdown-Pfad zurueck, statt ihn als
-    // unvollstaendigen Text zu uebernehmen (Konsistenz der Fallback-Kette).
-    if (jsonLd && looksLikeRealContent(jsonLd)) return jsonLd;
-  } catch {
-    // egal was schiefgeht: unten der bewaehrte Markdown-Pfad
-  }
-
-  // Layer 2 (Fallback, unveraendert):
-  // r.jina.ai liefert beliebige Webseiten als Markdown-Text mit offenen CORS-Headern
-  const isLinkedIn = isLinkedInUrl(url);
-  let best = "";
-  let lastStatus = 0;
-  let blocked = false;
-  for (const u of candidateUrls(url)) {
-    const res = await fetch("https://r.jina.ai/" + u);
-    if (!res.ok) {
-      lastStatus = res.status;
-      continue;
-    }
-    let text = await res.text();
-    if (isLinkedIn) text = cleanLinkedIn(text);
-    if (looksLikeRealContent(text)) return text;
-    if (looksBlocked(text)) {
-      blocked = true;
-      continue; // Challenge-/Fehlerseite nie als "best" merken
-    }
-    if (text.length > best.length) best = text;
-  }
-  if (!best) {
-    // Defense in depth: sollte der Kurzschluss oben je umgangen werden, erklaert
-    // sich ein LinkedIn-Fehlschlag hier selbst statt generisches "HTTP 451".
-    if (isLinkedIn) {
-      throw new Error(LINKEDIN_BLOCKED_MSG);
-    }
-    if (blocked) {
-      throw new Error("Die Seite ist durch einen Bot-Schutz gesichert und lässt sich nicht automatisch auslesen (häufig bei Indeed). Bitte die Stellenbeschreibung manuell einfügen.");
-    }
-    throw new Error("Die Seite konnte nicht geladen werden (HTTP " + lastStatus + "). Bitte Text manuell einfügen.");
-  }
-  return best;
+  return await fetchJobViaBackend(url);
 }
 
 /* ---------- Fragen generieren ---------- */
@@ -3949,6 +3682,9 @@ function restoreDraft() {
   } else if ($("job-text").value.trim()) {
     setSourceTab("text");
   }
+  // Anbieter-Gate zuletzt: ausserhalb des Hosted-Modus gibt es keinen URL-Tab,
+  // dann immer auf „Text einfügen“ stehen (auch wenn der Entwurf "url" war).
+  applySourceUiForProvider();
 }
 
 // Lokale Modelle bekommen einen kuerzeren Jobtext (kleinerer Kontext).
@@ -10023,6 +9759,27 @@ function setSourceTab(which) {
   $("tab-text").setAttribute("aria-pressed", which === "text" ? "true" : "false");
   $("source-url").classList.toggle("hidden", which !== "url");
   $("source-text").classList.toggle("hidden", which !== "text");
+}
+
+// Das Laden per URL wird NUR im gehosteten Modus angeboten (dort laeuft es
+// serverseitig ueber api.jobreif.de). Mit eigenem Schluessel oder lokalem Modell
+// gibt es keinen URL-Abruf mehr — diese Nutzer fuegen den Stellentext direkt
+// unter „Text einfügen“ ein. Diese Funktion blendet den URL-Tab je nach Anbieter
+// ein/aus und schaltet im Nicht-Hosted-Modus auf den Text-Tab. Idempotent;
+// wird beim Anzeigen des Eingabe-Bildschirms (showView) und nach dem Wiederher-
+// stellen eines Entwurfs aufgerufen, damit ein Anbieterwechsel sofort greift.
+function applySourceUiForProvider() {
+  const isHosted = (settings.provider || "hosted") === "hosted";
+  const tabUrl = $("tab-url");
+  if (tabUrl) tabUrl.classList.toggle("hidden", !isHosted);
+  const intro = $("source-intro-hint");
+  if (intro) {
+    intro.textContent = isHosted
+      ? "Entweder die Anzeige per URL laden oder den Text direkt einfügen."
+      : "Füge den Text der Stellenbeschreibung direkt ein.";
+  }
+  // Ohne Hosted-Modus nie auf dem (jetzt ausgeblendeten) URL-Tab stehen bleiben.
+  if (!isHosted) setSourceTab("text");
 }
 
 $("tab-url").addEventListener("click", () => { setSourceTab("url"); saveDraft(); });

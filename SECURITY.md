@@ -15,8 +15,9 @@ gesendet. Im standardmäßigen gehosteten Modus laufen die Generierungs-Anfragen
 Nutzer-API-Key benötigt. Besonders relevant sind daher Meldungen zu XSS,
 unsicherem Umgang mit API-Keys oder Problemen im Service Worker.
 
-Eine Ausnahme vom „bleibt im Browser“-Grundsatz: Wenn du eine Stellenanzeige
-**per URL** importierst, wird die eingegebene Adresse an den Drittanbieter-Reader
-Jina AI (`r.jina.ai`) gesendet, der die Seite abruft und den lesbaren Text
-zurückliefert. Das Einfügen als Text (`Text einfügen`) bleibt dagegen
-vollständig lokal.
+Der Import einer Stellenanzeige **per URL** wird ausschließlich im gehosteten
+Modus angeboten: Die eingegebene Adresse wird dann an unseren eigenen
+Cloudflare-Worker (`api.jobreif.de`) gesendet, der die Seite serverseitig abruft
+und den lesbaren Text zurückliefert – kein Drittanbieter-Reader. Im
+BYOK-/lokalen Modus gibt es keinen URL-Import; das Einfügen als Text
+(`Text einfügen`) bleibt vollständig lokal.
