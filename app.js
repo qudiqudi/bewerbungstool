@@ -3392,10 +3392,7 @@ function apiErrorMessage(status, detail) {
 
 /* ---------- Stellenanzeige per URL laden ---------- */
 
-// LinkedIn-Jobseiten (/jobs/view/<id>, ?currentJobId=<id>) sind hinter einer
-// Login-/Verwandte-Jobs-Hülle versteckt - der Reader liefert dort viel
-// Navigations-Rauschen. Die Job-ID erlaubt den Zugriff auf den serverseitig
-// gerenderten Gast-Endpunkt, der nur die reine Stellenbeschreibung enthält.
+// Extrahiert die LinkedIn-Job-ID aus der URL (/jobs/view/<id> oder ?currentJobId=<id>).
 function linkedinJobId(u) {
   const q = u.searchParams.get("currentJobId");
   if (q && /^\d+$/.test(q)) return q;
@@ -3410,11 +3407,8 @@ function indeedJobKey(u) {
   return jk && /^[0-9a-f]+$/i.test(jk) ? jk : null;
 }
 
-// Arbeitsagentur-Jobsuche: Aus der Trefferliste kopierte Links zeigen auf
-// /jobsuche/suche?...&id=<Referenznummer> - der Reader liefert dort die ganze
-// Liste mit hunderten Treffern als Rauschen statt der gewählten Anzeige. Die
-// Referenznummer (id-Parameter oder /jobsuche/jobdetail/<refnr>) identifiziert
-// die einzelne, serverseitig gerenderte Detailseite mit nur diesem Inserat.
+// Extrahiert die Arbeitsagentur-Referenznummer aus der URL
+// (id-Parameter oder /jobsuche/jobdetail/<refnr>).
 function arbeitsagenturRef(u) {
   const m = u.pathname.match(/\/jobsuche\/jobdetail\/([\w-]+)/i);
   if (m) return m[1];
@@ -3422,9 +3416,8 @@ function arbeitsagenturRef(u) {
   return id && /^[\w-]+$/.test(id) ? id : null;
 }
 
-// Entfernt offensichtliches Webseiten-Rauschen aus dem extrahierten Markdown
-// (Bilder, Link-Syntax, Trennlinien) - Jobportale wie Stepstone liefern sonst
-// viel Navigation und Logos mit
+// Entfernt offensichtliches Webseiten-Rauschen (Bilder, Link-Syntax, Trennlinien)
+// aus extrahiertem Text.
 function cleanPageText(text) {
   return text
     .replace(/!\[[^\]]*\]\([^)]*\)/g, "")      // Bilder
@@ -3434,9 +3427,8 @@ function cleanPageText(text) {
     .trim();
 }
 
-// Bot-Schutz (z. B. Cloudflare bei Indeed) liefert eine Challenge- oder
-// Fehlerseite, die der Reader als kurzen Text durchreicht. Solche Seiten dürfen
-// nie als Stellenbeschreibung durchgehen - sonst entstehen Fragen aus Müll.
+// Erkennt Challenge-/Fehlerseiten (Bot-Schutz), damit solche nie als
+// Stellenbeschreibung durchgehen - sonst entstehen Fragen aus Müll.
 function looksBlocked(text) {
   return /Just a moment\.\.\.|Attention Required|Enable JavaScript and cookies to continue|cf-browser-verification|challenge-platform|Warning: Target URL returned error (4|5)\d\d/i.test(text);
 }
@@ -3509,8 +3501,8 @@ function cleanLinkedIn(text) {
 const LINKEDIN_BOOKMARKLET =
   `javascript:(function(){try{var S=['#job-details','.jobs-description__content','.jobs-box__html-content','[class*="jobs-description__content"]'],e=null,i;for(i=0;i<S.length;i++){e=document.querySelector(S[i]);if(e)break;}var d=e?(e.innerText||'').trim():'';if(d.length<80){var m=document.querySelector('main')||document.body,f=(m.innerText||'').trim();if(f.length>d.length)d=f;}var T=document.querySelector('.job-details-jobs-unified-top-card__job-title,.jobs-unified-top-card__job-title,h1'),t=T?(T.innerText||'').trim():'';if(!d||d.length<80){alert('jobreif: Kein Anzeigentext gefunden. Bitte oeffne eine LinkedIn-Stellenanzeige und versuche es erneut.');return;}var o=(t?t+String.fromCharCode(10,10):'')+d,g=function(){var w=window.open('https://jobreif.de/?import=linkedin','_blank');if(!w){alert('jobreif: Text kopiert! Bitte oeffne jobreif.de und tippe auf "Aus Zwischenablage einfuegen".');}};if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(o).then(g,function(){window.prompt('jobreif: Bitte kopieren (Strg/Cmd+C) und in jobreif einfuegen:',o);g();});}else{window.prompt('jobreif: Bitte kopieren (Strg/Cmd+C) und in jobreif einfuegen:',o);g();}}catch(x){alert('jobreif-Import fehlgeschlagen: '+(x&&x.message?x.message:x));}})();`;
 
-// Hosted-Import (Phase 1b): uebersetzt die TYPISIERTEN Fehlercodes von
-// POST /api/import (siehe Backend-import.js) in stabile, hilfreiche du-Form-
+// Hosted-Import: uebersetzt die TYPISIERTEN Fehlercodes von
+// POST /api/import in stabile, hilfreiche du-Form-
 // Meldungen. BEWUSST eine EIGENE Tabelle, NICHT hostedErrorMessage: dort mappt
 // Status 503 auf "LLM-Tageskontingent erschoepft" — der Import-Endpoint liefert
 // aber NIE 503, und eine versehentliche Quota-Meldung beim URL-Laden waere
@@ -3553,9 +3545,9 @@ function importErrorMessage(code, status) {
 // POST https://api.jobreif.de/api/import (kein Drittanbieter-Reader).
 // Gleiche Schreib-Posture wie die anderen Hosted-Endpoints
 // (Bearer-Anmeldung + Turnstile, Aktion "import", an den Body gebunden;
-// Testkonten sind serverseitig ausgenommen). Antwort bei Erfolg
-// { text, tier, sourceUrl } → wir nutzen text. Fehler kommen TYPISIERT als
-// { error } und werden via importErrorMessage in du-Form uebersetzt.
+// Testkonten sind serverseitig ausgenommen). Antwort bei Erfolg { text }.
+// Fehler kommen TYPISIERT als { error } und werden via importErrorMessage
+// in du-Form uebersetzt.
 async function fetchJobViaBackend(url) {
   requireHostedLoginOrThrow(); // Backstop: ohne Anmeldung kein Hosted-Import
   const body = JSON.stringify({ url });
