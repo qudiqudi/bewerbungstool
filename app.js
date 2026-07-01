@@ -2768,12 +2768,21 @@ function loadPaddle() {
   return _paddleReady;
 }
 
+// Once-Flag fuer die checkout-complete-Telemetrie: wird beim tatsaechlichen Oeffnen des
+// Paddle-Overlays gesetzt und beim ERSTEN checkout.completed konsumiert (Entprellung
+// gegen wiederholte Paddle-Callbacks). Betrifft NUR die Telemetrie, nicht die Gutschrift.
+let _checkoutCompletePending = false;
+
 // Paddle-Events. Nach erfolgreichem Checkout das Guthaben nachziehen (die Gutschrift macht der
 // Webhook serverseitig + asynchron → kurz pollen, bis der Stand steigt).
 function onPaddleEvent(ev) {
   if (ev && ev.name === "checkout.completed") {
     // Funnel: erfolgreicher Checkout (nur der Flow-Name, keine Betrags-/Kaufdaten).
-    trackEvent("checkout-complete");
+    // Idempotent pro geoeffnetem Checkout: Paddle kann checkout.completed theoretisch
+    // mehrfach liefern (Callback-Wiederholung); der Once-Flag verhindert Ueberzaehlung.
+    // Der Geld-/Gutschrift-Pfad bleibt davon unberuehrt (pollBalanceAfterPurchase laeuft
+    // weiter bei jedem completed — nur die Telemetrie wird entprellt).
+    if (_checkoutCompletePending) { _checkoutCompletePending = false; trackEvent("checkout-complete"); }
     setTopupMsg("Zahlung erhalten. Dein Guthaben wird aktualisiert …");
     pollBalanceAfterPurchase();
   }
@@ -2839,6 +2848,9 @@ async function startTopup(euros) {
     catch { setTopupMsg("Aufladen ist gerade nicht verfügbar. Bitte später erneut versuchen."); return; }
 
     setTopupMsg("");
+    // Ab hier wird das Overlay wirklich geoeffnet → checkout-complete darf genau EINMAL
+    // fuer diesen Checkout gezaehlt werden (onPaddleEvent konsumiert das Flag).
+    _checkoutCompletePending = true;
     Paddle.Checkout.open({
       items: [{ priceId, quantity: 1 }],
       customData: { ud }, // signierter Intent — der Webhook entnimmt die uid daraus
