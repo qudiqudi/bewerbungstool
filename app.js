@@ -10781,16 +10781,18 @@ function routeInitialView() {
     return;
   }
   _authRedirectMsg = "";
+  // Frisch angemeldet mit gesicherter Stellen-Eingabe (Investment-first): VOR jeder
+  // weiteren Weiche (auch vor dem Onboarding-Gate) die vorbefuellte Eingabe-Ansicht
+  // zeigen — der Nutzer bestaetigt mit EINEM Klick auf "Test erstellen". Bewusst KEIN
+  // automatischer Start (keine unbeabsichtigten API-Kosten). Nur im gehosteten Modus mit
+  // Token relevant; savePendingJobInput schreibt ausschliesslich auf diesem Pfad.
+  if (provider0 === "hosted" && settings.authToken && consumePendingJobInputIntoForm()) return;
   const isConfigured = provider0 === "local" ? !!settings.model
     : provider0 === "hosted" ? true
     : !!settings.apiKey;
   if (!isConfigured) {
     renderOnboardingSteps($("ob-provider").value);
     showView("view-onboarding");
-  } else if (provider0 === "hosted" && consumePendingJobInputIntoForm()) {
-    // Frisch angemeldet mit gesicherter Stellen-Eingabe (Investment-first): direkt zur
-    // vorbefuellten Eingabe-Ansicht — der Nutzer bestaetigt mit EINEM Klick auf "Test
-    // erstellen". Bewusst KEIN automatischer Start (keine unbeabsichtigten API-Kosten).
   } else {
     goHome();
   }
