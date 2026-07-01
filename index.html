@@ -123,8 +123,13 @@
   <main>
     <!-- Anmeldung (gehosteter Modus erfordert ein Konto) -->
     <section id="view-login" class="card hidden">
-      <h2>Kostenlos nutzen – einmal anmelden</h2>
-      <p>jobreif.de macht aus jeder Stellenanzeige einen Übungs-Einstellungstest und gibt dir danach Feedback zu deinen Antworten. Für den kostenlosen gehosteten Modus melde dich einmal an – mit Google oder über einen Anmeldelink an deine E-Mail.</p>
+      <!-- Zwei Framings, per JS umgeschaltet (promptHostedLogin): der generische Titel fuer
+           den direkten Weg zum Konto, das "Test ist gleich fertig"-Framing, wenn der Besucher
+           schon eine Stellenanzeige eingegeben hat (Investment-first, Eingabe ist gesichert). -->
+      <h2 id="login-title-default">Kostenlos nutzen – einmal anmelden</h2>
+      <h2 id="login-title-pending" class="hidden">Dein Test ist gleich fertig</h2>
+      <p id="login-intro-default">jobreif.de macht aus jeder Stellenanzeige einen Übungs-Einstellungstest und gibt dir danach Feedback zu deinen Antworten. Für den kostenlosen gehosteten Modus melde dich einmal an – mit Google oder über einen Anmeldelink an deine E-Mail.</p>
+      <p id="login-intro-pending" class="hidden">Melde dich einmal kostenlos an, damit wir deinen Test dir zuordnen können – mit Google oder über einen Anmeldelink an deine E-Mail. Deine Eingabe bleibt gespeichert und ist nach der Anmeldung wieder da.</p>
       <div class="row">
         <button id="btn-login-google" type="button" class="primary">Mit Google anmelden</button>
       </div>
@@ -365,6 +370,12 @@
 
     <section id="view-input" class="card hidden">
       <button id="btn-input-back" class="ghost back-link" type="button">‹ Meine Stellen</button>
+      <!-- Investment-first-Einstieg: Wertversprechen nur fuer ausgeloggte Besucher im
+           gehosteten Modus (updateGuestInputUi); eingeloggte/BYOK-Nutzer sehen es nie. -->
+      <p id="guest-value-prop" class="hidden"><strong>Dein persönlicher Einstellungstest für genau diese Stelle – kostenlos.</strong> Füge unten die Stellenanzeige ein und stelle den Test so ein, wie du ihn brauchst. Anmelden musst du dich erst kurz bevor dein Test erstellt wird.</p>
+      <!-- Nach dem Login-Ruecksprung: bestaetigt die wiederhergestellte Eingabe (Text via JS,
+           damit Screenreader die Statusmeldung ansagen). -->
+      <p id="pending-restored-hint" class="hint hidden" role="status"></p>
       <h2>Stellenbeschreibung</h2>
       <p id="source-intro-hint" class="hint">Entweder die Anzeige per URL laden oder den Text direkt einfügen.</p>
 
@@ -448,6 +459,17 @@
           <input type="hidden" id="num-questions" value="10">
         </div>
         <button id="btn-generate" class="primary">Test erstellen</button>
+      </div>
+
+      <!-- Investment-first-Einstieg: dieselben No-Login-Wege wie am Anmelde-Gate, direkt
+           sichtbar fuer ausgeloggte Besucher (updateGuestInputUi blendet den Block sonst aus). -->
+      <div id="guest-escape" class="hidden">
+        <hr class="settings-divider">
+        <p class="hint">Lieber erst ausprobieren? Übe die allgemeinen Eignungsmodule (Zahlenreihen, Konzentration, Figuren) sofort und ohne Anmeldung.</p>
+        <div class="row">
+          <button id="btn-guest-practice" type="button" class="ghost">Ohne Anmeldung Module üben</button>
+        </div>
+        <p class="hint">Ganz ohne Konto arbeiten? Mit einem eigenen API-Schlüssel oder einem lokalen Modell läuft alles ohne Anmeldung. <a href="#" id="link-guest-settings">Zu den Einstellungen</a></p>
       </div>
     </section>
 
