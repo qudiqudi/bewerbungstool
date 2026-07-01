@@ -2398,6 +2398,32 @@ function trackEvent(flow) {
   } catch { /* egal */ }
 }
 
+// Funnel-Marker "first-test": die allererste erfolgreich abgeschlossene Test-
+// Generierung DIESES Browsers — anonym, es geht nur der Flow-Name raus (kein
+// Identifier, gleicher Kanal wie trackEvent). Einmal-Marker in localStorage;
+// Bestandsnutzer (History enthaelt schon Stellen) werden beim Laden still
+// markiert, damit ihre naechste Generierung nicht faelschlich als
+// Erstaktivierung zaehlt. Komplett defensiv: Storage-Fehler → kein Event
+// (lieber unterzaehlen als doppelt zaehlen), nie ein Wurf nach aussen.
+const FIRST_TEST_TRACKED_KEY = "bewerbungstool.firstTestTracked";
+function seedFirstTestMarker() {
+  try {
+    if (localStorage.getItem(FIRST_TEST_TRACKED_KEY)) return;
+    const jobs = loadHistory().jobs;
+    if (Array.isArray(jobs) && jobs.length > 0) localStorage.setItem(FIRST_TEST_TRACKED_KEY, "1");
+  } catch { /* egal */ }
+}
+seedFirstTestMarker();
+function trackFirstTest() {
+  try {
+    if (localStorage.getItem(FIRST_TEST_TRACKED_KEY)) return;
+    // Erst den Marker setzen, dann senden: schlaegt setItem fehl, wird NICHT
+    // gesendet — so kann derselbe Browser nie mehrfach als "erster Test" zaehlen.
+    localStorage.setItem(FIRST_TEST_TRACKED_KEY, "1");
+    trackEvent("first-test");
+  } catch { /* egal */ }
+}
+
 // --- Konto / Auth (Phase B, Schritt 1) -----------------------------------
 // Rein additiv: ohne Anmeldung laeuft alles wie bisher (anonymer Hosted-Modus). Das
 // Session-Token liegt additiv in settings.authToken; es wird, wenn vorhanden, als Bearer
@@ -2746,6 +2772,8 @@ function loadPaddle() {
 // Webhook serverseitig + asynchron → kurz pollen, bis der Stand steigt).
 function onPaddleEvent(ev) {
   if (ev && ev.name === "checkout.completed") {
+    // Funnel: erfolgreicher Checkout (nur der Flow-Name, keine Betrags-/Kaufdaten).
+    trackEvent("checkout-complete");
     setTopupMsg("Zahlung erhalten. Dein Guthaben wird aktualisiert …");
     pollBalanceAfterPurchase();
   }
@@ -2787,6 +2815,9 @@ async function startTopup(euros) {
   if (!creditsState.creditsEnabled) return;
   if (!settings.authToken) { promptHostedLogin(); return; }
   _topupBusy = true;
+  // Funnel: Aufladen wurde tatsaechlich eingeleitet (nach allen Guards; Doppelklicks
+  // fängt _topupBusy ab). Ob der Checkout durchlaeuft, zaehlt checkout-complete.
+  trackEvent("topup-start");
   try {
     setTopupMsg("Aufladen wird vorbereitet …");
     let ud;
@@ -2952,7 +2983,7 @@ async function consumeAuthRedirect() {
       // Erfolg nur bei tatsaechlich vorhandenem Token-String — ein 2xx ohne
       // Token ist kein gueltiges Login.
       const d = r.ok ? await r.json().catch(() => null) : null;
-      if (d && typeof d.token === "string" && d.token) { setAuthToken(d.token); _authRedirectMsg = "Erfolgreich angemeldet."; }
+      if (d && typeof d.token === "string" && d.token) { setAuthToken(d.token); trackEvent("login-success"); _authRedirectMsg = "Erfolgreich angemeldet."; }
       else _authRedirectMsg = "Die Anmeldung ist fehlgeschlagen oder abgelaufen. Bitte erneut versuchen.";
     } catch { _authRedirectMsg = "Anmeldung fehlgeschlagen. Bitte erneut versuchen."; }
     return true;
@@ -2965,7 +2996,7 @@ async function consumeAuthRedirect() {
     });
     // Erfolg nur bei tatsaechlich vorhandenem Token-String (2xx ohne Token zaehlt nicht).
     const d = r.ok ? await r.json().catch(() => null) : null;
-    if (d && typeof d.token === "string" && d.token) { setAuthToken(d.token); _authRedirectMsg = "Erfolgreich angemeldet."; }
+    if (d && typeof d.token === "string" && d.token) { setAuthToken(d.token); trackEvent("login-success"); _authRedirectMsg = "Erfolgreich angemeldet."; }
     else _authRedirectMsg = "Der Anmeldelink ist ungültig oder abgelaufen.";
   } catch { _authRedirectMsg = "Anmeldung fehlgeschlagen. Bitte erneut versuchen."; }
   return true;
@@ -4814,6 +4845,9 @@ async function pollActiveJob() {
       }
     } catch { /* reines Komfort-Update: Fehler ignorieren, saveAttempt schreibt spaeter */ }
     renderActiveJobCard("ready");
+    // Funnel: allererste erfolgreich abgeschlossene Generierung dieses Browsers
+    // (Einmal-Marker in trackFirstTest — wiederholte done-Polls zaehlen nicht).
+    trackFirstTest();
     // Bezahlter Opus-Job fertig → Guthaben-Cache nachziehen (Anzeige + naechste Opus-Pruefung).
     refreshCreditsAfterJob(job.ctx);
   } else if (data.status === "done") {
@@ -9282,6 +9316,10 @@ async function renderAccountSection() {
 
 // Fuehrt zum Anmelde-Screen und zeigt optional eine Meldung (z. B. "erneut anmelden").
 function promptHostedLogin(msg) {
+  // Funnel: einmal pro tatsaechlicher ANZEIGE zaehlen — nur wenn der Login-Screen
+  // gerade nicht sichtbar ist (wiederholte Aufrufe/Meldungs-Updates zaehlen nicht).
+  // Feuert vor dem Login, trackEvent braucht dafuer kein Token (fire-and-forget).
+  try { if ($("view-login").classList.contains("hidden")) trackEvent("login-shown"); } catch { /* egal */ }
   $("login-email").value = "";
   $("login-msg").textContent = msg || "";
   showView("view-login");
@@ -10215,6 +10253,8 @@ function openOverflowConfirm({ tier, priceCredits, lead }) {
   // ohne die "Tageskontingent aufgebraucht"-Einleitung (und mit passendem Titel). Sonst der
   // Gratis-Overflow-Fall (Default). Titel je Aufruf setzen, da das Modal geteilt wird.
   const opus = lead === "opus";
+  // Funnel: Overflow-/Bezahl-Rueckfrage wurde tatsaechlich angezeigt (pro Oeffnung).
+  trackEvent("overflow-shown");
   const titleEl = $("overflow-title");
   if (titleEl) titleEl.textContent = opus ? "Beste Qualität (Opus) – kostenpflichtig" : "Kostenloses Tageskontingent aufgebraucht";
   const intro = opus ? "" : "Dein kostenloses Tageskontingent für heute ist aufgebraucht. ";
