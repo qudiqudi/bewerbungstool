@@ -1376,6 +1376,23 @@ button.danger:hover { background: var(--red-soft); border-color: var(--red); }
 }
 .home-head h2 { margin: 0; }
 
+/* Gratis-Kontingent-Badge (P5): kompakter Pill auf Startseite und Erstell-Maske.
+   Farben ueber die Identitaets-Tokens -> funktioniert in Hell und Dunkel. Als
+   inline-block-Pill bricht langer Text (aufgebraucht-Zustand) auf Mobile im Pill um. */
+.free-badge {
+  display: inline-block;
+  margin: 0 0 0.7rem;
+  padding: 0.3rem 0.8rem;
+  border-radius: var(--radius-pill);
+  background: var(--primary-soft);
+  border: 1px solid var(--primary-soft-border);
+  color: var(--accent-text);
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.free-badge a { color: inherit; text-decoration: underline; }
+
 /* Stellen-Karte in der Startliste */
 .home-card {
   display: flex;

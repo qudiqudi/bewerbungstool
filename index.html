@@ -330,6 +330,10 @@
         <h2>Meine Stellen</h2>
         <button id="btn-new-job" class="primary">+ Neue Stelle</button>
       </div>
+      <!-- Gratis-Kontingent-Badge (P5): zeigt das taegliche Gratis-Kontingent von Anfang an
+           als positives Feature. Befuellt von renderFreeQuotaBadges(); bleibt hidden, solange
+           das Credits-Flag aus ist oder der Server kein Kontingent meldet (dormant). -->
+      <p id="home-free-badge" class="free-badge hidden" role="status"></p>
       <p class="hint hidden" id="home-empty">Noch keine Stelle. Lege mit &bdquo;Neue Stelle&ldquo; eine Stellenanzeige an und erstelle deinen ersten Test &ndash; danach erscheint die Stelle hier mit deinem Fortschritt.</p>
       <!-- Hintergrund-Generierung (Punkt 1): laeuft serverseitig weiter, auch wenn man die Seite verlaesst. -->
       <div id="active-job-card" class="active-job-card hidden">
@@ -366,6 +370,8 @@
     <section id="view-input" class="card hidden">
       <button id="btn-input-back" class="ghost back-link" type="button">‹ Meine Stellen</button>
       <h2>Stellenbeschreibung</h2>
+      <!-- Gratis-Kontingent-Badge (P5), Pendant zum Badge der Startseite (siehe dort). -->
+      <p id="create-free-badge" class="free-badge hidden" role="status"></p>
       <p id="source-intro-hint" class="hint">Entweder die Anzeige per URL laden oder den Text direkt einfügen.</p>
 
       <div class="tabs" role="tablist" aria-label="Quelle der Stellenbeschreibung">
