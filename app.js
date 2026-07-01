@@ -962,6 +962,7 @@ function syncCreateTierSelect() {
   sel.value = selectedTier();
   updateTierOptions(g);   // setzt ggf. beste sichtbar/gesperrt und korrigiert den Wert
   updateFreeTierHint(g);
+  renderFreeQuotaBadges(); // Create-Badge folgt selectedTier() → beim Betreten frisch zeichnen
 }
 
 function currentView() {
@@ -2682,7 +2683,16 @@ function renderFreeQuotaBadges() {
   const isHosted = (settings.provider || "hosted") === "hosted";
   const remaining = creditsState.freeRemaining;
   const show = isHosted && freeQuotaVisible();
-  for (const id of ["home-free-badge", "create-free-badge"]) {
+  // Jedes Badge nimmt den Overflow-Preis aus SEINER eigenen Stufen-Quelle: das Erstell-Masken-
+  // Badge folgt der aktiven Auswahl im Formular (selectedTier(), inkl. transientem Override),
+  // das Startseiten-Badge der persistierten globalen Stufe (settings.tier). Sonst leckte eine
+  // Pro-Test-Wahl (z. B. Günstig) ihren guenstigeren Preis ins Home-Badge und bliebe dort nach
+  // dem Verlassen der Maske stehen, obwohl der transiente Override laengst geleert ist.
+  const badges = [
+    { id: "home-free-badge", tier: settings.tier || "standard" },
+    { id: "create-free-badge", tier: selectedTier() },
+  ];
+  for (const { id, tier } of badges) {
     const el = $(id);
     if (!el) continue;
     if (!show) { el.classList.add("hidden"); el.textContent = ""; continue; }
@@ -2692,9 +2702,9 @@ function renderFreeQuotaBadges() {
         : `Heute noch ${remaining} kostenlose Tests`;
     } else {
       // Aufgebraucht: kein Dead-End — weiter testen geht per Guthaben. euro aus einer Zahl
-      // formatiert (kein XSS); Preis der aktuell gewaehlten Gratis-Stufe, derselbe Helper
-      // wie im Tier-Hinweis.
-      const euro = freeTierOverflowEuro(selectedTier());
+      // formatiert (kein XSS); Preis der stufenspezifischen Quelle, derselbe Helper wie im
+      // Tier-Hinweis.
+      const euro = freeTierOverflowEuro(tier);
       el.innerHTML = `Alle kostenlosen Tests für heute genutzt 💪 – weitere kosten <strong>${euro}</strong>. <a href="#">Guthaben aufladen</a>`;
       const link = el.querySelector("a");
       if (link) link.onclick = (e) => { e.preventDefault(); openTopupDialog(); };
