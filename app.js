@@ -4,9 +4,16 @@
 
 // Muss mit der VERSION-Datei im Repo übereinstimmen (der CI-Check erzwingt
 // das). Bei jedem Release: VERSION hochzählen und hier einen Eintrag ergänzen.
-const APP_VERSION = "1.27.10";
+const APP_VERSION = "1.27.11";
 
 const CHANGELOG = [
+  {
+    version: "1.27.11",
+    date: "30.06.2026",
+    items: [
+      "Bessere Tastatur- und Screenreader-Bedienung im Quiz: Bei Fragen mit genau einer richtigen Antwort lassen sich die Antwortoptionen jetzt als zusammengehörige Auswahlgruppe per Pfeiltasten durchgehen und mit Leertaste/Enter auswählen. Bedienung per Maus/Touch und die Auswertung bleiben unverändert.",
+    ],
+  },
   {
     version: "1.27.10",
     date: "30.06.2026",
@@ -5067,6 +5074,73 @@ function updateTimerDisplay() {
 
 /* ---------- Quiz-Anzeige ---------- */
 
+// Verkabelt einen Container aus Single-Choice-Optionsbuttons als echte
+// WAI-ARIA radiogroup. Voraussetzung: die Optionen tragen bereits role="radio"
+// und aria-checked (true fuer die gewaehlte, sonst false) und sind die einzigen
+// role="radio"-Kinder des Containers. Der Helfer setzt role/aria-labelledby am
+// Container, vergibt den Roving-Tabindex (gewaehlte Option = 0, sonst -1; ohne
+// Auswahl ist die erste Option fokussierbar) und haengt die Tastatursteuerung an:
+// Pfeil hoch/links -> vorige, Pfeil runter/rechts -> naechste (mit Umlauf),
+// Pos1/Ende -> erste/letzte, und Leertaste/Enter waehlt. Wie in den ARIA-APG
+// waehlt die Pfeilnavigation die fokussierte Option direkt aus. Auswahl laeuft
+// ausschliesslich ueber onSelect(idx) — dieselbe Logik wie der Klick-Handler —,
+// daher bleiben Auswahlzustand, Speicherung und Bewertung unveraendert; nur die
+// ARIA-/Tastatur-Ebene kommt hinzu. Im gesperrten Zustand (aufgeloest/Review,
+// Buttons disabled) wird keine Tastatursteuerung verkabelt.
+function setupRadioGroup(container, opts) {
+  opts = opts || {};
+  container.setAttribute("role", "radiogroup");
+  container.setAttribute("aria-labelledby", opts.labelledBy || "question-text");
+  const radios = Array.from(container.querySelectorAll('[role="radio"]'));
+  if (!radios.length) return;
+  // Roving-Tabindex: nur ein Element der Gruppe ist per Tab erreichbar.
+  const selected = radios.findIndex((r) => r.getAttribute("aria-checked") === "true");
+  const tabbable = selected === -1 ? 0 : selected;
+  radios.forEach((r, i) => r.setAttribute("tabindex", i === tabbable ? "0" : "-1"));
+  if (opts.locked) return; // gesperrt: keine Tastaturnavigation (Buttons disabled)
+
+  const select = (i) => {
+    const n = radios.length;
+    const idx = ((i % n) + n) % n;
+    // onSelect zeichnet die Frage neu (ersetzt die Buttons) und setzt den Fokus
+    // auf die gewaehlte Option — der Roving-Tabindex wird beim Neuaufbau erneut
+    // ueber setupRadioGroup gesetzt.
+    if (opts.onSelect) opts.onSelect(idx);
+  };
+  radios.forEach((r, i) => {
+    r.addEventListener("keydown", (e) => {
+      switch (e.key) {
+        case "ArrowDown":
+        case "ArrowRight":
+          e.preventDefault();
+          select(i + 1);
+          break;
+        case "ArrowUp":
+        case "ArrowLeft":
+          e.preventDefault();
+          select(i - 1);
+          break;
+        case "Home":
+          e.preventDefault();
+          select(0);
+          break;
+        case "End":
+          e.preventDefault();
+          select(radios.length - 1);
+          break;
+        case " ":
+        case "Spacebar":
+        case "Enter":
+          e.preventDefault();
+          select(i);
+          break;
+        default:
+          break;
+      }
+    });
+  });
+}
+
 function renderQuestion() {
   const q = quiz.fragen[current];
   const total = quiz.fragen.length;
@@ -5148,8 +5222,27 @@ function renderQuestion() {
     });
     area.appendChild(optWrap);
   } else if (mcLike(q.typ)) {
+    // Einfach-MC: echte WAI-ARIA radiogroup. Die Optionen liegen jetzt in einem
+    // eigenen Container (.sc-options), damit role=radiogroup sauber nur die
+    // Optionen umschliesst; die nth-child-Animationsstaffelung bleibt erhalten,
+    // weil der Container ausschliesslich die Options-Buttons enthaelt.
+    const optWrap = document.createElement("div");
+    optWrap.className = "sc-options";
+    // Auswahl-Logik exakt wie zuvor beim Klick: Antwort merken, speichern, neu
+    // zeichnen und den Fokus auf die gewaehlte Option zuruecksetzen (sonst
+    // landet er bei Tastaturbedienung auf <body>). Die Optionen liegen jetzt im
+    // Container, daher dort indexieren.
+    const selectSingle = (idx) => {
+      answers[current] = q.optionen[idx];
+      saveLearnSession();
+      renderQuestion();
+      const wrap = $("answer-area").querySelector(".sc-options");
+      const fresh = wrap && wrap.children[idx];
+      if (fresh) fresh.focus();
+    };
     q.optionen.forEach((opt, idx) => {
       const btn = document.createElement("button");
+      btn.type = "button";
       let cls = "option";
       if (answers[current] === opt) cls += " selected";
       if (isRevealed) {
@@ -5160,23 +5253,19 @@ function renderQuestion() {
       }
       btn.className = cls;
       btn.textContent = opt;
-      // Auswahlzustand auch fuer Screenreader, nicht nur als CSS-Klasse
-      btn.setAttribute("aria-pressed", answers[current] === opt ? "true" : "false");
+      // Radio-Semantik fuer Screenreader (gewaehlt = aria-checked true)
+      btn.setAttribute("role", "radio");
+      btn.setAttribute("aria-checked", answers[current] === opt ? "true" : "false");
       if (!locked) {
-        btn.addEventListener("click", () => {
-          answers[current] = opt;
-          saveLearnSession();
-          renderQuestion();
-          // Das Neuzeichnen ersetzt alle Buttons - den Fokus auf die gewaehlte
-          // Option zurueckgeben, sonst landet er auf <body> (Tastaturbedienung)
-          const fresh = $("answer-area").children[idx];
-          if (fresh) fresh.focus();
-        });
+        btn.addEventListener("click", () => selectSingle(idx));
       } else {
         btn.disabled = true;
       }
-      area.appendChild(btn);
+      optWrap.appendChild(btn);
     });
+    area.appendChild(optWrap);
+    // radiogroup verkabeln: Roving-Tabindex + Pfeil/Pos1/Ende/Leertaste/Enter.
+    setupRadioGroup(optWrap, { locked, onSelect: selectSingle });
   } else if (q.typ === "reihenfolge" && Array.isArray(q.elemente) && q.elemente.length >= 2) {
     renderReihenfolge(q, area, locked, isRevealed);
   } else if (istFiguralFrage(q)) {
@@ -5271,6 +5360,14 @@ function renderFigural(q, area, locked, isRevealed) {
   const optWrap = document.createElement("div");
   optWrap.className = "fig-options";
   const correctTxt = (q.korrekte_antwort || "").trim();
+  // Auswahl-Logik exakt wie zuvor beim Klick (Figural ist Single-Choice).
+  const selectFig = (idx) => {
+    answers[current] = q.optionen[idx];
+    saveLearnSession();
+    renderQuestion();
+    const fresh = $("answer-area").querySelectorAll(".fig-option")[idx];
+    if (fresh) fresh.focus();
+  };
   (q.optionen || []).forEach((opt, idx) => {
     const btn = document.createElement("button");
     let cls = "option fig-option";
@@ -5283,21 +5380,19 @@ function renderFigural(q, area, locked, isRevealed) {
     btn.type = "button";
     btn.textContent = opt;
     btn.setAttribute("aria-label", "Figur " + (idx + 1));
-    btn.setAttribute("aria-pressed", answers[current] === opt ? "true" : "false");
+    // Radio-Semantik fuer Screenreader (gewaehlt = aria-checked true)
+    btn.setAttribute("role", "radio");
+    btn.setAttribute("aria-checked", answers[current] === opt ? "true" : "false");
     if (!locked) {
-      btn.addEventListener("click", () => {
-        answers[current] = opt;
-        saveLearnSession();
-        renderQuestion();
-        const fresh = $("answer-area").querySelectorAll(".fig-option")[idx];
-        if (fresh) fresh.focus();
-      });
+      btn.addEventListener("click", () => selectFig(idx));
     } else {
       btn.disabled = true;
     }
     optWrap.appendChild(btn);
   });
   area.appendChild(optWrap);
+  // radiogroup verkabeln: Roving-Tabindex + Pfeil/Pos1/Ende/Leertaste/Enter.
+  setupRadioGroup(optWrap, { locked, onSelect: selectFig });
 }
 
 // Rendert eine Reihenfolge-Aufgabe in #answer-area: eine sortierbare Liste mit

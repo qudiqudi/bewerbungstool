@@ -792,6 +792,10 @@ button.ghost {
 
 .option:disabled { cursor: default; opacity: 1; }
 
+/* Sichtbarer Fokusring fuer die Tastaturbedienung der Single-Choice-radiogroup
+   (Pfeiltasten-Navigation). Folgt dem App-Muster (Primaerfarbe, dezenter Offset). */
+.option:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
 .option.correct {
   border-color: var(--green);
   background: var(--green-soft);
