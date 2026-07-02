@@ -2885,6 +2885,11 @@ async function refreshBalance() {
 // im Konto-Bereich angezeigt wird.
 let _authRedirectMsg = "";
 
+// Frisch (in diesem Seitenaufruf) erfolgreich angemeldet? Steuert den einmaligen
+// Welcome-Schritt nach dem ersten Login (maybeShowWelcome). Bewusst NUR bei einem
+// tatsaechlich uebernommenen Token gesetzt, nie bei Fehler/Abbruch.
+let _freshLogin = false;
+
 // Entfernt ALLE Auth-Parameter aus der URL (kein Token/Code im Verlauf/teilbar).
 // code = Google-Handoff (neu), session = Alt-Worker-Bearer (Kompatibilitaetsfenster),
 // auth = Magic-Token, auth_error = Abbruch.
@@ -2952,7 +2957,7 @@ async function consumeAuthRedirect() {
       // Erfolg nur bei tatsaechlich vorhandenem Token-String — ein 2xx ohne
       // Token ist kein gueltiges Login.
       const d = r.ok ? await r.json().catch(() => null) : null;
-      if (d && typeof d.token === "string" && d.token) { setAuthToken(d.token); _authRedirectMsg = "Erfolgreich angemeldet."; }
+      if (d && typeof d.token === "string" && d.token) { setAuthToken(d.token); _freshLogin = true; _authRedirectMsg = "Erfolgreich angemeldet."; }
       else _authRedirectMsg = "Die Anmeldung ist fehlgeschlagen oder abgelaufen. Bitte erneut versuchen.";
     } catch { _authRedirectMsg = "Anmeldung fehlgeschlagen. Bitte erneut versuchen."; }
     return true;
@@ -2965,7 +2970,7 @@ async function consumeAuthRedirect() {
     });
     // Erfolg nur bei tatsaechlich vorhandenem Token-String (2xx ohne Token zaehlt nicht).
     const d = r.ok ? await r.json().catch(() => null) : null;
-    if (d && typeof d.token === "string" && d.token) { setAuthToken(d.token); _authRedirectMsg = "Erfolgreich angemeldet."; }
+    if (d && typeof d.token === "string" && d.token) { setAuthToken(d.token); _freshLogin = true; _authRedirectMsg = "Erfolgreich angemeldet."; }
     else _authRedirectMsg = "Der Anmeldelink ist ungültig oder abgelaufen.";
   } catch { _authRedirectMsg = "Anmeldung fehlgeschlagen. Bitte erneut versuchen."; }
   return true;
@@ -10614,6 +10619,7 @@ const ESCAPE_CLOSERS = [
   ["report-modal", closeReportModal],
   ["jobtext-modal", closeJobTextModal],
   ["levelup-overlay", closeLevelUp],
+  ["welcome-modal", closeWelcome], // Escape = Ueberspringen (Flag ist beim Anzeigen gesetzt)
 ];
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
@@ -10645,6 +10651,64 @@ function consumeUebenDeepLink() {
   return true;
 }
 
+/* ---------- Welcome-Schritt nach dem ersten Login (Plan 2026, Onboarding P3) ----------
+   Ein einmaliges, ueberspringbares Overlay ueber der Startliste: fragt die Trajectory
+   (bestehendes Profil-Feld, geschlossenes Enum) plus optional das Erfahrungslevel ab und
+   schreibt beides ueber saveProfile in den BESTEHENDEN Profil-Key - gleicher Write-Pfad
+   wie die Einstellungen, kein API-Call. Rein additiv: BYOK/local sehen es nie (Login gibt
+   es nur im Hosted-Modus), Bestandsnutzer mit Profil nie (dann nur Flag setzen). */
+const WELCOME_SEEN_KEY = "bewerbungstool.welcomeSeen";
+function welcomeSeen() {
+  // localStorage blockiert/kaputt → als "gesehen" behandeln: dann liesse sich auch kein
+  // Profil speichern, das Overlay wuerde sonst bei jedem Start erneut aufpoppen.
+  try { return localStorage.getItem(WELCOME_SEEN_KEY) === "1"; } catch { return true; }
+}
+function markWelcomeSeen() {
+  try { localStorage.setItem(WELCOME_SEEN_KEY, "1"); } catch { /* optional, kein harter Fehler */ }
+}
+
+// Nach einem FRISCHEN Login (nie bei blossem Reload mit bestehender Session) einmalig
+// zeigen - nur wenn noch kein Profil existiert und das Flag fehlt. Das Flag wird schon
+// beim Anzeigen gesetzt (nicht erst beim Schliessen), damit auch Reload/Abbruch mitten
+// im Overlay als "gesehen" zaehlt und der Schritt nie wieder erscheint.
+function maybeShowWelcome() {
+  if (!_freshLogin) return;
+  _freshLogin = false;
+  if ((settings.provider || "hosted") !== "hosted" || !settings.authToken) return;
+  if (welcomeSeen()) return;
+  markWelcomeSeen();
+  // Bestandsnutzer mit vorhandenem Profil: nie zeigen, nur das Flag ist jetzt gesetzt.
+  if (Object.keys(loadProfile()).length) return;
+  const sel = $("welcome-erfahrung");
+  if (sel) sel.value = "";
+  $("welcome-modal").classList.remove("hidden");
+  const first = document.querySelector("#welcome-modal .welcome-choice");
+  if (first) first.focus({ preventScroll: true });
+}
+
+// Schliessen = weiter zur Startliste (liegt bereits darunter; goHome zeichnet sie frisch).
+function closeWelcome() {
+  $("welcome-modal").classList.add("hidden");
+  goHome();
+}
+
+// Auswahl-Buttons: schreiben Trajectory + (optional) Erfahrung ueber saveProfile
+// (validiert per Enum, unbekannte Werte werden verworfen) und schliessen direkt.
+document.querySelectorAll("#welcome-modal .welcome-choice").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    saveProfile({
+      trajectory: btn.dataset.trajectory,
+      erfahrung: $("welcome-erfahrung") ? $("welcome-erfahrung").value : "",
+    });
+    closeWelcome();
+  });
+});
+$("btn-welcome-skip").addEventListener("click", closeWelcome);
+// Klick auf den abgedunkelten Hintergrund (nicht aufs Panel) = Ueberspringen.
+$("welcome-modal").addEventListener("click", (e) => {
+  if (e.target === $("welcome-modal")) closeWelcome();
+});
+
 function routeInitialView() {
   if (consumeUebenDeepLink()) return; // Uebungs-Deep-Link hat Vorrang (lokal, ohne Gate)
   const provider0 = settings.provider || "hosted";
@@ -10662,6 +10726,7 @@ function routeInitialView() {
     showView("view-onboarding");
   } else {
     goHome();
+    maybeShowWelcome(); // einmaliger Welcome-Schritt direkt nach dem ersten Login
   }
 }
 

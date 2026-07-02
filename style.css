@@ -1248,6 +1248,35 @@ button.ghost {
   padding-left: 1.2rem;
 }
 
+/* Welcome-Schritt nach dem ersten Login: drei grosse Auswahl-Karten (gestapelt,
+   funktioniert damit unveraendert auch auf schmalen Screens), darunter kompakt das
+   Erfahrungslevel und ein gleichwertig sichtbarer Ueberspringen-Knopf. */
+.welcome-modal { max-width: 440px; max-height: 88vh; overflow-y: auto; }
+.welcome-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin: 0.9rem 0 0.3rem;
+}
+.welcome-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.8rem 1rem;
+  background: var(--card-2);
+}
+.welcome-choice:hover {
+  background: var(--primary-soft);
+  border-color: var(--primary-soft-border);
+}
+.welcome-choice strong { font-size: 0.98rem; color: var(--text-strong); }
+.welcome-choice span { font-size: 0.85rem; color: var(--muted); font-weight: 400; }
+/* Ueberspringen gleichwertig prominent: volle Breite wie die Auswahl-Karten. */
+.welcome-skip { width: 100%; }
+
 .changelog-entry:last-child ul { margin-bottom: 0.4rem; }
 
 .changelog-entry li {

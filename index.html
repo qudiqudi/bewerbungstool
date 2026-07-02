@@ -626,6 +626,40 @@
       </div>
     </div>
 
+    <!-- Welcome nach dem ersten Login: eine Frage zur Personalisierung. Einmalig,
+         überspringbar, rein lokal (schreibt nur das optionale Profil, kein API-Call). -->
+    <div id="welcome-modal" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
+      <div class="modal card welcome-modal">
+        <h2 id="welcome-title">Willkommen!</h2>
+        <p id="welcome-frage">Damit dein Test zu dir passt: Wie kommst du zu dieser Stelle?</p>
+        <div class="welcome-choices" role="group" aria-labelledby="welcome-frage">
+          <button type="button" class="welcome-choice" data-trajectory="fach">
+            <strong>Fachkraft im Beruf</strong>
+            <span>Du bleibst fachlich in deiner Richtung – gleicher Beruf oder gleiches Fachgebiet.</span>
+          </button>
+          <button type="button" class="welcome-choice" data-trajectory="quer">
+            <strong>Quereinstieg</strong>
+            <span>Du wechselst in einen neuen Bereich oder eine neue Branche.</span>
+          </button>
+          <button type="button" class="welcome-choice" data-trajectory="aufstieg">
+            <strong>Aufstieg / mehr Verantwortung</strong>
+            <span>Du willst den nächsten Schritt machen, z.&nbsp;B. mehr Verantwortung übernehmen.</span>
+          </button>
+        </div>
+        <label for="welcome-erfahrung">Wie viel Berufserfahrung bringst du mit? <span class="hint">(optional)</span></label>
+        <select id="welcome-erfahrung">
+          <option value="">Keine Angabe</option>
+          <option value="einsteiger">Berufseinsteiger</option>
+          <option value="berufserfahren">Berufserfahren</option>
+          <option value="senior">Sehr erfahren (Senior)</option>
+        </select>
+        <p class="hint">Kannst du jederzeit in den Einstellungen ändern. Wird nur zur Personalisierung deiner Tests genutzt.</p>
+        <div class="row">
+          <button id="btn-welcome-skip" class="ghost welcome-skip">Überspringen</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Changelog -->
     <div id="changelog-modal" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="changelog-title">
       <div class="modal card changelog-modal">
