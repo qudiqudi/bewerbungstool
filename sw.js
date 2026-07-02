@@ -9,6 +9,7 @@ const ASSETS = [
   "style.css",
   "app.js",
   "manifest.webmanifest",
+  "demo/beispieltest.json",
   "assets/icons/icon.svg",
   "assets/icons/icon-maskable.svg",
   "assets/icons/apple-touch-icon.png",
