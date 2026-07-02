@@ -911,6 +911,11 @@ let answers = [];     // index-paralleles Array mit Antworttexten
 let current = 0;
 let mode = "lernen";  // "lernen" | "pruefung"
 let reviewing = false; // Durchgehen eines bereits bewerteten Fragebogens (keine erneute Auswertung)
+// Beispieltest ohne Login (Onboarding): ein gebuendeltes statisches Quiz laeuft ueber
+// dieselbe Lernmodus-Pipeline, darf aber NICHTS in Produktivdaten schreiben (weder
+// bewerbungstool.history noch bewerbungstool.learnSession) und loest am Ende KEINE
+// Auswertung (kein API-Call) aus, sondern einen CTA. Der Flag isoliert diesen Modus.
+let demoMode = false;
 let revealed = [];    // Lernmodus: welche Fragen bereits aufgeloest wurden
 // Reihenfolge-Aufgaben: ephemere Anzeige-Reihenfolge je Frageindex (Map index ->
 // number[] der elemente-Indizes). NICHT persistiert (analog revealed). Beim
