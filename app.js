@@ -9553,11 +9553,15 @@ document.querySelectorAll(".btn-topup").forEach((b) => {
 {
   const settingsCta = $("tier-topup-cta");
   if (settingsCta) settingsCta.addEventListener("click", () => openTopupDialog());
-  // Der Create-CTA merkt sich zusaetzlich, ob fuer diesen Test gerade Opus beabsichtigt ist,
-  // damit der Detour in die Einstellungen die Auswahl nicht still auf standard fallen laesst.
+  // Der Create-CTA IST der Opus-Upsell: er erscheint, sobald die beste-Stufe mangels Guthaben
+  // gesperrt ist — auch wenn aktuell noch standard/guenstig gewaehlt ist (die gesperrte Option
+  // laesst sich gar nicht anwaehlen). Ein Klick auf „Guthaben aufladen" ist damit die explizite
+  // Opus-Absicht; sie unbedingt merken, sodass nach dem Aufladen beste vorgewaehlt ist statt
+  // still auf standard zurueckzufallen. Nur Vorauswahl — die (bezahlte) Opus-Generierung laeuft
+  // weiterhin durch ihre eigene Bestaetigung, es entsteht kein stiller Charge.
   const createCta = $("create-tier-topup-cta");
   if (createCta) createCta.addEventListener("click", () => {
-    pendingCreateBesteIntent = selectedTier() === "beste";
+    pendingCreateBesteIntent = true;
     openTopupDialog();
   });
 }
