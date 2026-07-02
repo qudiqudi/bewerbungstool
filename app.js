@@ -2671,6 +2671,9 @@ function renderCreditsUI() {
     const cb = $("auto-use-credits");
     if (cb) cb.checked = !!settings.autoUseCredits;
   }
+  // Offener Overflow-Dialog: Guthaben-Aenderung (z. B. nach Inline-Aufladen) in den
+  // Dialogzustand uebernehmen (Aufladen-Ansicht → Bestaetigen-Ansicht).
+  updateOverflowConfirmFromCredits();
 }
 
 // Nach einer (moeglichen) Guthaben-Aenderung durch einen bezahlten Opus-Job: Cache als
@@ -2716,7 +2719,15 @@ function paddleEnv() {
 }
 function paddleConfig() { return PADDLE_CONFIG[paddleEnv()] || PADDLE_CONFIG.sandbox; }
 
-function setTopupMsg(text) { const el = $("topup-msg"); if (el) el.textContent = text || ""; }
+// Status-Meldungen des Aufladens. Ziel ist der Aufladen-Block in den Einstellungen; laeuft
+// gerade der Overflow-Dialog (Inline-Aufladen), wird die Meldung dort gespiegelt, damit der
+// Nutzer sie im sichtbaren Kontext liest (der Einstellungs-Block ist dann verdeckt).
+function setTopupMsg(text) {
+  const el = $("topup-msg"); if (el) el.textContent = text || "";
+  const o = $("overflow-topup-msg");
+  const modal = $("overflow-modal");
+  if (o && modal && !modal.classList.contains("hidden")) o.textContent = text || "";
+}
 
 let _paddleReady = null; // Promise<Paddle>, einmal geladen/initialisiert
 function loadPaddle() {
@@ -3099,8 +3110,9 @@ function hostedErrorMessage(status, code) {
         // ein defensiver Fallback, falls der Code anderswo durchschlaegt.
         return "Dein kostenloses Tageskontingent ist für heute aufgebraucht. Du kannst mit Guthaben weitermachen (in den Einstellungen aufladen) oder morgen kostenlos weiterüben.";
       case "no-credits":
-        // Guthaben deckt den Opus-Test nicht (Aufladen-Dialog folgt in P4).
-        return "Dein Guthaben reicht für die beste Qualität (Opus) nicht aus. Du kannst in den Einstellungen aufladen oder eine andere Qualitätsstufe wählen.";
+        // Guthaben deckt den Test nicht (Opus oder — nach einer Race, z. B. anderswo
+        // verbraucht — ein bestaetigter Gratis-Stufen-Overflow). Stufen-neutral formulieren.
+        return "Dein Guthaben reicht für diesen Test nicht aus. Du kannst in den Einstellungen aufladen.";
       case "needs-paid-test":
       case "no-entitlement":
         return "Auswerten und Vertiefen in bester Qualität (Opus) gehören zu einem in Opus erstellten Test. Bitte erstelle den Test zuerst in bester Qualität.";
@@ -4677,18 +4689,14 @@ async function startHostedGeneration(ctx) {
         const price = Number.isFinite(body.priceCredits) ? body.priceCredits : tierPriceCredits(tierSent);
         const have = Number.isFinite(body.credits) ? body.credits
           : (Number.isFinite(creditsState.credits) ? creditsState.credits : 0);
-        if (have < price) {
-          // Guthaben deckt keinen weiteren Test → Aufladen anbieten, NICHTS starten/abbuchen.
-          refreshBalance();
-          showError("Dein kostenloses Tageskontingent ist für heute aufgebraucht und dein Guthaben reicht für einen weiteren Test nicht aus. Du kannst in den Einstellungen aufladen.");
-          openTopupDialog();
-          return;
-        }
         // Opt-in "automatisch Guthaben verwenden": der Nutzer hat dauerhaftes Einverstaendnis
         // gegeben (Einstellung, Default aus) UND sieht den Kostenhinweis an der Stufe → kein
         // Dialog. Sonst pro Test bestaetigen (keine unbeabsichtigten Kosten, CLAUDE.md).
-        const ok = settings.autoUseCredits ? true
-          : await openOverflowConfirm({ tier: body.tier || tierSent, priceCredits: price });
+        // Reicht das Guthaben nicht, oeffnet sich der Dialog IMMER (auch mit Opt-in): er bietet
+        // das Aufladen inline an und verlangt danach weiterhin die explizite Bestaetigung —
+        // keine Sackgasse, aber auch kein automatischer Start nach dem Aufladen.
+        const ok = (have >= price && settings.autoUseCredits) ? true
+          : await openOverflowConfirm({ tier: body.tier || tierSent, priceCredits: price, credits: have });
         if (!ok) { refreshBalance(); return; } // abgebrochen → kein Test, kein Charge
         showLoading("Test wird gestartet...");
         res = await postGenerationJob(ctx, tierSent, true);
@@ -10207,28 +10215,134 @@ $("btn-confirm-replace-learn-cancel").addEventListener("click", closeConfirmRepl
 // der Server mit 402 quota-exhausted zurueck. Erst NACH ausdruecklicher Bestaetigung sendet der
 // Client den Generierungs-Request erneut mit payWithCredits:true (keine unbeabsichtigten Kosten,
 // CLAUDE.md-Leitplanke). Promise-basiert: resolve(true)=erstellen, resolve(false)=abbrechen.
+//
+// Der Dialog hat zwei Zustaende (renderOverflowConfirmState):
+//  - Guthaben deckt den Preis → Bestaetigen-Button, Preis + Guthaben danach.
+//  - Guthaben reicht nicht → Aufladen inline (3/5/10 €, kleinstes Paket als Default) im SELBEN
+//    Dialog. Nach erfolgreichem Aufladen (Paddle-Callback → refreshBalance → renderCreditsUI)
+//    wechselt der offene Dialog zurueck in die Bestaetigung — der Test startet aber NIE
+//    automatisch, es braucht weiterhin den expliziten Klick.
 let overflowConfirmResolve = null;
 let overflowConfirmReturnFocus = null;
-function openOverflowConfirm({ tier, priceCredits, lead }) {
-  const euro = formatGuthabenEuro(Number.isFinite(priceCredits) ? priceCredits : tierPriceCredits(tier));
-  // lead="opus": die bezahlte Opus-Stufe (F-1) — hier ist kein Gratis-Kontingent im Spiel, daher
-  // ohne die "Tageskontingent aufgebraucht"-Einleitung (und mit passendem Titel). Sonst der
-  // Gratis-Overflow-Fall (Default). Titel je Aufruf setzen, da das Modal geteilt wird.
-  const opus = lead === "opus";
-  const titleEl = $("overflow-title");
-  if (titleEl) titleEl.textContent = opus ? "Beste Qualität (Opus) – kostenpflichtig" : "Kostenloses Tageskontingent aufgebraucht";
-  const intro = opus ? "" : "Dein kostenloses Tageskontingent für heute ist aufgebraucht. ";
-  // euro/Label aus kontrollierten Werten (Zahl bzw. fester Stufenname) → kein XSS.
-  $("overflow-text").innerHTML =
-    `${intro}Diesen Test in Qualität ` +
-    `<strong>${tierLabelFor(tier)}</strong> für <strong>${euro}</strong> aus deinem Guthaben erstellen?`;
+// Kontext des offenen Dialogs (null = zu). credits = zuletzt bekannter Guthaben-Stand: beim
+// Oeffnen aus dem 402-Body (frischer als der Cache), danach aus refreshBalance-Aktualisierungen.
+let overflowConfirmCtx = null;
+function openOverflowConfirm({ tier, priceCredits, lead, credits }) {
+  overflowConfirmCtx = {
+    tier,
+    priceCredits: Number.isFinite(priceCredits) ? priceCredits : tierPriceCredits(tier),
+    lead,
+    credits: Number.isFinite(credits) ? credits : (Number.isFinite(creditsState.credits) ? creditsState.credits : null),
+    affordable: null, // zuletzt gerenderter Zustand (fuer den Fokus-Wechsel beim Umschalten)
+  };
+  setOverflowTopupMsgText("");
   overflowConfirmReturnFocus = document.activeElement;
+  renderOverflowConfirmState();
   $("overflow-modal").classList.remove("hidden");
-  $("btn-overflow-confirm").focus();
+  // Startfokus: Bestaetigen, im Aufladen-Zustand das vorausgewaehlte kleinste Paket.
+  const focusTarget = overflowConfirmCtx.affordable
+    ? $("btn-overflow-confirm")
+    : document.querySelector("#overflow-topup .btn-topup");
+  if (focusTarget) focusTarget.focus();
   return new Promise((resolve) => { overflowConfirmResolve = resolve; });
 }
+
+function setOverflowTopupMsgText(text) {
+  const o = $("overflow-topup-msg");
+  if (o) o.textContent = text || "";
+}
+
+// Zeichnet den Dialoginhalt aus overflowConfirmCtx. Idempotent; wird beim Oeffnen und aus
+// renderCreditsUI (Guthaben-Aenderung waehrend der Dialog offen ist, z. B. nach dem Aufladen)
+// aufgerufen. Alle interpolierten Werte sind formatierte Zahlen bzw. feste Stufennamen → kein XSS.
+function renderOverflowConfirmState() {
+  const ctx = overflowConfirmCtx;
+  if (!ctx) return;
+  const price = ctx.priceCredits;
+  const euro = formatGuthabenEuro(price);
+  const have = Number.isFinite(ctx.credits) ? ctx.credits : null;
+  // Unbekannter Stand (nur im Opus-Pfad moeglich, dort ist die Deckung vorab geprueft) zaehlt
+  // als gedeckt; der Server bleibt ohnehin die letzte Instanz und lehnt sonst mit 402 ab.
+  const affordable = have === null || have >= price;
+  // lead="opus": die bezahlte Opus-Stufe (F-1) — hier ist kein Gratis-Kontingent im Spiel, daher
+  // ohne die Kontingent-Einleitung (und mit passendem Titel). Sonst der Gratis-Overflow-Fall:
+  // bewusst als Fortschritt formuliert (der Nutzer hat heute alles Kostenlose genutzt), nicht
+  // als Limit. Titel je Aufruf setzen, da das Modal geteilt wird.
+  const opus = ctx.lead === "opus";
+  const titleEl = $("overflow-title");
+  if (titleEl) {
+    titleEl.textContent = opus ? "Beste Qualität (Opus) – kostenpflichtig" : "Stark – alle kostenlosen Tests für heute genutzt 💪";
+  }
+  const intro = opus ? "" : "Du hast dein kostenloses Tageskontingent voll ausgeschöpft – bleib dran! ";
+  const textEl = $("overflow-text");
+  if (textEl) {
+    textEl.innerHTML = affordable
+      ? `${intro}Der nächste Test in Qualität <strong>${tierLabelFor(ctx.tier)}</strong> kostet <strong>${euro}</strong> aus deinem Guthaben.`
+      : `${intro}Der nächste Test in Qualität <strong>${tierLabelFor(ctx.tier)}</strong> kostet <strong>${euro}</strong> – dein Guthaben reicht dafür noch nicht. Lade auf und mach direkt weiter:`;
+  }
+  // Guthaben-Zeile: gedeckt → Stand danach (nur bei bekanntem Stand); sonst aktueller Stand.
+  const balEl = $("overflow-balance");
+  if (balEl) {
+    if (have !== null) {
+      balEl.textContent = affordable
+        ? `Guthaben danach: ${formatGuthabenEuro(have - price)} (aktuell ${formatGuthabenEuro(have)}).`
+        : `Aktuelles Guthaben: ${formatGuthabenEuro(have)}.`;
+      balEl.classList.remove("hidden");
+    } else {
+      balEl.textContent = "";
+      balEl.classList.add("hidden");
+    }
+  }
+  // Aufladen-Pakete nur im Nicht-gedeckt-Zustand; Bestaetigen nur im gedeckten Zustand.
+  const topupEl = $("overflow-topup");
+  if (topupEl) topupEl.classList.toggle("hidden", affordable);
+  const confirmBtn = $("btn-overflow-confirm");
+  if (confirmBtn) confirmBtn.classList.toggle("hidden", !affordable);
+  // Opt-in "automatisch Guthaben verwenden": dezente Checkbox mit EXAKT der Semantik der
+  // Einstellungen (settings.autoUseCredits). Nur im gedeckten Gratis-Overflow-Zustand zeigen
+  // (im Opus-Dialog wuerde der Kontingent-Wortlaut nicht passen). Uebernommen wird der Haken
+  // NUR beim expliziten Bestaetigen — nie still.
+  const autoRow = $("overflow-auto-row");
+  if (autoRow) {
+    const showAuto = affordable && !opus;
+    autoRow.classList.toggle("hidden", !showAuto);
+    const cb = $("overflow-auto-credits");
+    if (cb && showAuto && ctx.affordable !== affordable) cb.checked = !!settings.autoUseCredits;
+  }
+  // Zustandswechsel Aufladen → gedeckt bei offenem Dialog (nach Top-up): Fokus auf den nun
+  // sichtbaren Bestaetigen-Button lenken, damit der naechste explizite Klick nahe liegt.
+  if (ctx.affordable === false && affordable && !$("overflow-modal").classList.contains("hidden")) {
+    if (confirmBtn) confirmBtn.focus();
+  }
+  ctx.affordable = affordable;
+}
+
+// Bei offenem Overflow-Dialog den Guthaben-Stand aus dem frischen creditsState nachziehen und
+// den Dialogzustand neu zeichnen (Rueckkehr in den Overflow-Kontext nach dem Aufladen). Bei
+// unbestaetigtem Stand (credits null nach Fehler/offline) den letzten bekannten Wert behalten.
+function updateOverflowConfirmFromCredits() {
+  if (!overflowConfirmCtx) return;
+  if ($("overflow-modal").classList.contains("hidden")) return;
+  if (Number.isFinite(creditsState.credits)) overflowConfirmCtx.credits = creditsState.credits;
+  renderOverflowConfirmState();
+}
+
 function closeOverflowConfirm(result) {
   $("overflow-modal").classList.add("hidden");
+  // Beim expliziten Bestaetigen einen sichtbaren, vom Nutzer gesetzten Haken "automatisch
+  // Guthaben verwenden" in die Einstellung uebernehmen (identischer Storage-Wert wie das
+  // Einstellungs-Formular). Abbrechen uebernimmt NICHTS.
+  if (result === true) {
+    const autoRow = $("overflow-auto-row");
+    const cb = $("overflow-auto-credits");
+    if (autoRow && cb && !autoRow.classList.contains("hidden") && cb.checked !== !!settings.autoUseCredits) {
+      settings = { ...settings, autoUseCredits: cb.checked };
+      saveSettings(settings);
+      renderCreditsUI(); // Einstellungs-Checkbox + Kostenhinweise sofort spiegeln
+    }
+  }
+  overflowConfirmCtx = null;
+  setOverflowTopupMsgText("");
   const resolve = overflowConfirmResolve;
   overflowConfirmResolve = null;
   if (overflowConfirmReturnFocus && typeof overflowConfirmReturnFocus.focus === "function") {

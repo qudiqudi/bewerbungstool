@@ -614,11 +614,25 @@
       </div>
     </div>
 
-    <!-- Overflow: Gratis-Tageskontingent aufgebraucht → Test gegen Guthaben (mit Bestätigung) -->
+    <!-- Overflow: Gratis-Tageskontingent aufgebraucht → Test gegen Guthaben (mit Bestätigung).
+         Reicht das Guthaben nicht, bietet DERSELBE Dialog das Aufladen inline an; nach dem
+         Aufladen wechselt er zurück in die Bestätigung (kein automatisches Erstellen). -->
     <div id="overflow-modal" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="overflow-title">
       <div class="modal card">
         <h2 id="overflow-title">Kostenloses Tageskontingent aufgebraucht</h2>
         <p id="overflow-text"></p>
+        <p id="overflow-balance" class="hint hidden"></p>
+        <div id="overflow-topup" class="hidden">
+          <div class="row wrap">
+            <button type="button" class="primary btn-topup" data-eur="3">3 € aufladen</button>
+            <button type="button" class="ghost btn-topup" data-eur="5">5 €</button>
+            <button type="button" class="ghost btn-topup" data-eur="10">10 €</button>
+          </div>
+          <p id="overflow-topup-msg" class="hint" role="status"></p>
+        </div>
+        <div id="overflow-auto-row" class="hidden">
+          <label><input type="checkbox" id="overflow-auto-credits"> Nach dem kostenlosen Tageskontingent automatisch Guthaben verwenden (ohne jedes Mal nachzufragen)</label>
+        </div>
         <div class="row">
           <button id="btn-overflow-confirm" class="primary">Mit Guthaben erstellen</button>
           <button id="btn-overflow-cancel" class="ghost">Abbrechen</button>
