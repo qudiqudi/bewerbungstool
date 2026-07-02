@@ -2915,6 +2915,16 @@ async function startTopup(euros) {
 // Bereich sichtbar machen und zum Aufladen-Block scrollen.
 function openTopupDialog() {
   if (!settings.authToken) { promptHostedLogin(); return; }
+  // Aus dem Create-Flow (oder generell ausserhalb der Einstellungen) ist der Konto-Block
+  // (#row-account → #account-loggedin → #topup) noch verborgen: der Startup ruft nur
+  // refreshBalance(), das lediglich das innere #topup umschaltet, nicht die Vorfahren. Ohne
+  // Form-Init landete der Nutzer daher in einer Einstellungs-Ansicht OHNE sichtbare Aufladen-
+  // Controls (toter Pfad). Darum denselben Oeffnungsweg wie der Einstellungen-Knopf nehmen
+  // (initSettingsForm → updateSettingsProviderUI blendet #row-account ein, renderAccountSection
+  // #account-loggedin). Sind wir schon in den Einstellungen, NICHT neu initialisieren, um ggf.
+  // ungespeicherte Formular-Eingaben nicht zu verwerfen — dort ist der Block ohnehin sichtbar.
+  settingsOrigin = "app";
+  if (currentView() !== "view-settings") initSettingsForm();
   showView("view-settings");
   const t = $("topup");
   if (t && !t.classList.contains("hidden")) { try { t.scrollIntoView({ behavior: "smooth", block: "center" }); } catch {} }
