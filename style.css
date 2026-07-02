@@ -314,6 +314,11 @@ input:focus, select:focus, textarea:focus {
 #account-balance { font-size: 0.95rem; margin: 0.3rem 0 0; }
 #account-balance .balance-credits { color: var(--muted); font-size: 0.85em; }
 
+/* Kompakter Aufladen-CTA direkt am Qualitaets-Select (nur sichtbar, wenn die beste
+   Stufe mangels Guthaben gesperrt ist). Schlanker als normale Buttons, Touch-Ziel
+   bleibt ueber die globale min-height gewahrt. */
+.tier-topup-cta { margin-top: 0.45rem; font-size: 0.85rem; padding: 0.45rem 0.9rem; }
+
 .row {
   display: flex;
   gap: 0.6rem;
