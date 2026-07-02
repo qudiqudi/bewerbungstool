@@ -6546,6 +6546,139 @@ function buildJobProgressPanel(progress, opts) {
   return panel;
 }
 
+// Themen aus dem gerade bewerteten Versuch, in denen der Nutzer schwach war:
+// Kategorien der Fragen mit wenig Punkten, schwaechste zuerst, ohne Dopplung.
+// Rein clientseitig aus dem vorliegenden Versuch abgeleitet - kein Aufruf, keine
+// Kosten. Defensiv: alte Versuche ohne ergebnisse/kategorie liefern einfach nichts.
+function weakThemesFromAttempt(att, maxN) {
+  const fragen = att && att.quiz && Array.isArray(att.quiz.fragen) ? att.quiz.fragen : [];
+  const erg = att && att.result && Array.isArray(att.result.ergebnisse) ? att.result.ergebnisse : [];
+  const rows = [];
+  fragen.forEach((f, i) => {
+    const kat = f && typeof f.kategorie === "string" ? f.kategorie.trim() : "";
+    if (!kat) return;
+    const e = erg[i] || erg.find((x) => x && Number(x.id) === Number(f.id));
+    const p = e && Number.isFinite(Number(e.punkte)) ? Number(e.punkte) : null;
+    if (p === null || p >= 6) return; // nur klar schwaechere Antworten (< 6 von 10)
+    rows.push({ kategorie: kat, punkte: p });
+  });
+  rows.sort((a, b) => a.punkte - b.punkte);
+  const seen = new Set();
+  const out = [];
+  for (const r of rows) {
+    const key = r.kategorie.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(r.kategorie);
+    if (out.length >= (maxN || 3)) break;
+  }
+  return out;
+}
+
+// Zur Detailseite einer Stelle wechseln und einen Bereich (Vertiefung bzw.
+// Startknoepfe) in den Blick ruecken. Reine Navigation - loest KEINE Generierung
+// und keinen Aufruf aus; die eigentliche Vertiefung/der Test wird erst dort per
+// weiterem, ausdruecklichem Klick gestartet (Kostenregel).
+function openJobFocus(job, selector) {
+  openJob(job);
+  requestAnimationFrame(() => {
+    const el = selector ? document.querySelector(selector) : null;
+    if (el && typeof el.scrollIntoView === "function") {
+      try { el.scrollIntoView({ behavior: "smooth", block: "center" }); }
+      catch (_) { el.scrollIntoView(); }
+    }
+  });
+}
+
+// Preis-/Guthaben-Zusatz fuer den Weiter-Nudge. NUR bei aktivem Guthaben-Flag
+// (Kostenregel): weist auf das freie Tageskontingent bzw. - wenn aufgebraucht -
+// die Kosten eines weiteren Tests hin. Rein informativ; der CTA startet nichts.
+function buildNudgeCreditHint() {
+  if (!creditsState.creditsEnabled) return null;
+  const tier = settings.tier || "standard";
+  // "beste" (Opus) hat kein freies Kontingent; den Opus-Preis zeigt der
+  // Erstellungs-Screen, wohin der CTA fuehrt - hier bewusst kein Zusatz.
+  if (tier === "beste" || !Number.isFinite(creditsState.freeRemaining)) return null;
+  const p = document.createElement("p");
+  p.className = "result-nudge-note hint";
+  const r = creditsState.freeRemaining;
+  if (r > 0) {
+    p.textContent = r === 1
+      ? "Ein weiterer Test nutzt heute deinen letzten kostenlosen Test in dieser Qualität."
+      : `Ein weiterer Test nutzt einen deiner heute noch ${r} kostenlosen Tests in dieser Qualität.`;
+  } else {
+    const euro = formatGuthabenEuro(tierPriceCredits(tier));
+    p.textContent = `Dein kostenloses Tageskontingent ist aufgebraucht - ein weiterer Test kostet ${euro} aus deinem Guthaben.`;
+  }
+  return p;
+}
+
+// Dezenter Weiter-Pfad direkt nach einer frischen Auswertung: benennt - wenn
+// vorhanden - die schwaecheren Themen dieses Versuchs und fuehrt in den
+// bestehenden Vertiefungs-/Test-Flow (Stelle vorausgewaehlt). Der Basis-CTA ist
+// immer sinnvoll und auch ohne Guthaben-Flag sichtbar; Preis-/Guthaben-Zusaetze
+// nur bei creditsEnabled. Startet nie selbst eine Generierung.
+function buildResultNudge(job, progress) {
+  if (!job || !Array.isArray(job.attempts) || !job.attempts.length) return null;
+  const latest = job.attempts[job.attempts.length - 1];
+  const themes = weakThemesFromAttempt(latest, 3);
+  const provider = settings.provider || "hosted";
+  // Vertiefungen sind nur mit Cloud-Anbieter und ab der Mindeststufe moeglich -
+  // dieselben Bedingungen wie im Vertiefungs-Bereich der Detailseite.
+  const vertiefungAvailable = provider !== "local" && progress.level >= VERTIEFUNG_MIN_LEVEL;
+
+  const box = document.createElement("div");
+  box.className = "result-nudge";
+
+  const heading = document.createElement("p");
+  heading.className = "result-nudge-title";
+  heading.textContent = vertiefungAvailable && themes.length
+    ? "Vertiefe deine Schwachstellen"
+    : "So bleibst du dran";
+  box.appendChild(heading);
+
+  const body = document.createElement("p");
+  body.className = "result-nudge-body";
+  if (themes.length) {
+    const label = themes.length === 1 ? "Dein Thema" : "Deine Themen";
+    body.textContent = vertiefungAvailable
+      ? `${label}: ${themes.join(", ")}. Ein Vertiefungsbogen geht hier gezielt tiefer.`
+      : `${label}: ${themes.join(", ")}. Übe weiter, dann sitzt auch das.`;
+  } else {
+    body.textContent = vertiefungAvailable
+      ? "Bereit für den nächsten Schritt? Vertiefe ein Themenfeld dieser Stelle."
+      : "Jeder weitere Durchgang bringt dich der Stelle ein Stück näher.";
+  }
+  box.appendChild(body);
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "result-nudge-cta";
+  if (vertiefungAvailable) {
+    btn.textContent = "Vertiefung starten";
+    btn.addEventListener("click", () => openJobFocus(job, ".vertiefung-section"));
+  } else {
+    btn.textContent = "Weiter üben";
+    btn.addEventListener("click", () => openJobFocus(job, ".start-buttons"));
+  }
+  box.appendChild(btn);
+
+  // Warum die Vertiefung (noch) nicht angeboten wird: nur wenn grundsaetzlich
+  // moeglich (Cloud-Anbieter), aber die Stufe fehlt - motiviert zum Weiterueben.
+  if (!vertiefungAvailable && provider !== "local" && progress.level < VERTIEFUNG_MIN_LEVEL) {
+    const need = Math.max(0, xpThresholdForLevel(VERTIEFUNG_MIN_LEVEL) - progress.totalXp);
+    const lock = document.createElement("p");
+    lock.className = "result-nudge-note hint";
+    lock.textContent = `Themen-Vertiefungen schaltest du ab Stufe ${VERTIEFUNG_MIN_LEVEL} frei · noch ${need} XP.`;
+    box.appendChild(lock);
+  }
+
+  const creditHint = buildNudgeCreditHint();
+  if (creditHint) box.appendChild(creditHint);
+
+  return box;
+}
+
 // Fortschrittspanel in der Auswertung; opts hebt frisch freigeschaltete
 // Level/Abzeichen hervor und sagt sie fuer Screenreader an.
 function renderResultGami(job, opts) {
@@ -6586,6 +6719,16 @@ function renderResultGami(job, opts) {
       "Stark – mehrere gute Lernläufe hintereinander. Trau dich an eine Prüfung: " +
       "mit Zeitlimit und ohne Auflösen. Die Leistungsabzeichen gibt es nur dort.";
     container.appendChild(tip);
+  }
+
+  // Weiter-Pfad direkt nach einer FRISCHEN Auswertung - der motivationsstaerkste
+  // Moment. Fuehrt nur in den bestehenden Flow (Vertiefung bzw. weiterer Test),
+  // startet aber NIE selbst eine Generierung (Kostenregel). Im Review-Modus
+  // (reviewing=true, openAttempt) bewusst ausgeblendet, damit das erneute Ansehen
+  // nicht so wirkt, als koste oder bewerte es etwas.
+  if (!reviewing) {
+    const nudge = buildResultNudge(job, progress);
+    if (nudge) container.appendChild(nudge);
   }
 
   // Echter Stufenaufstieg: eskalierende Feier als Overlay. Nur bei frischer
