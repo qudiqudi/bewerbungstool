@@ -962,6 +962,7 @@ function syncCreateTierSelect() {
   sel.value = selectedTier();
   updateTierOptions(g);   // setzt ggf. beste sichtbar/gesperrt und korrigiert den Wert
   updateFreeTierHint(g);
+  updateCreateTierContextHint();
 }
 
 function currentView() {
@@ -2542,12 +2543,12 @@ function tierForHostedCall(payload) {
 // settings.tier (persistiert) bzw. den transienten Pro-Test-Override.
 const TIER_CONTROLS = {
   settings: {
-    sel: "tier", besteHint: "tier-beste-hint", freeHint: "tier-free-hint",
+    sel: "tier", besteHint: "tier-beste-hint", freeHint: "tier-free-hint", topupCta: "tier-topup-cta",
     read: () => settings.tier || "standard",
     write: (t) => { if (settings.tier !== t) { settings = { ...settings, tier: t }; saveSettings(settings); } },
   },
   create: {
-    sel: "create-tier", besteHint: "create-tier-beste-hint", freeHint: "create-tier-free-hint",
+    sel: "create-tier", besteHint: "create-tier-beste-hint", freeHint: "create-tier-free-hint", topupCta: "create-tier-topup-cta",
     read: () => selectedTier(),
     write: (t) => { formTierOverride = t; },
   },
@@ -2559,6 +2560,39 @@ function renderTierControls() {
   updateFreeTierHint(TIER_CONTROLS.settings);
   updateTierOptions(TIER_CONTROLS.create);
   updateFreeTierHint(TIER_CONTROLS.create);
+  updateCreateTierContextHint();
+}
+
+// Basis-Beschriftungen der Qualitaetsstufen (muessen den statischen Optionen in index.html
+// entsprechen). Preise werden bei aktivem Credits-Flag als Suffix angehaengt und hier immer
+// frisch aus der Basis aufgebaut — nie aus dem DOM weitergereicht (idempotent bei Flag-Wechsel).
+const TIER_OPTION_LABELS = {
+  standard: "Standard – empfohlen",
+  guenstig: "Günstig – schneller und sparsamer",
+  beste: "Beste (Opus) – höchste Qualität",
+};
+
+// Preis-Anker direkt in den Option-Beschriftungen (P7): Opus zeigt bei aktivem Flag immer
+// seinen Preis (NUR der Server-Wert; ohne ihn bleibt die Basis-Beschriftung — keine
+// Client-Konstante in einem echten Preisstring). Standard/Guenstig bekommen ihren Preis erst,
+// wenn das Gratis-Kontingent aufgebraucht ist (freeRemaining === 0) — vorher waere ein Preis
+// irrefuehrend, denn die Tests sind gratis. Ohne Flag (dormant) exakt die Basis-Labels.
+function applyTierOptionPriceLabels(sel) {
+  const priced = creditsState.loaded && creditsState.creditsEnabled;
+  for (const opt of sel.options) {
+    const base = TIER_OPTION_LABELS[opt.value];
+    if (!base) continue; // unbekannte/zukuenftige Option: nie anfassen
+    let label = base;
+    if (priced) {
+      if (opt.value === "beste") {
+        const c = serverOpusCredits();
+        if (c !== null) label = `${base} · ${formatGuthabenEuro(c)}`;
+      } else if (creditsState.freeRemaining === 0) {
+        label = `${base} · ${formatGuthabenEuro(tierPriceCredits(opt.value))}`;
+      }
+    }
+    if (opt.textContent !== label) opt.textContent = label;
+  }
 }
 
 function updateTierOptions(group) {
@@ -2566,6 +2600,7 @@ function updateTierOptions(group) {
   if (!sel) return; // Selektor (noch) nicht im DOM (z. B. create-tier vor Erst-Render)
   const beste = sel.querySelector('option[value="beste"]');
   if (!beste) return;
+  applyTierOptionPriceLabels(sel); // Preis-Suffixe in den Beschriftungen (nur bei aktivem Flag)
   const intent = group.read();
   // Entitlement noch unbekannt (kein bestaetigter Server-Stand): NICHTS erzwingen, sonst
   // fiele eine gespeicherte beste-Auswahl beim Oeffnen der Einstellungen still auf standard.
@@ -2600,13 +2635,18 @@ function updateTierOptions(group) {
 }
 
 // Hinweistext unter dem Qualitaets-Select: Kostenhinweis bei aktiver Opus-Auswahl bzw.
-// Aufladen-Aufforderung, wenn die Option mangels Guthaben gesperrt ist.
+// Aufladen-Aufforderung, wenn die Option mangels Guthaben gesperrt ist. Der kompakte
+// Aufladen-Button (topupCta) direkt am Select erscheint NUR im Gesperrt-Fall — nach einem
+// erfolgreichen Aufladen zeichnet der Balance-Refresh (renderCreditsUI → renderTierControls)
+// alles neu, die Option wird waehlbar und der Button verschwindet automatisch.
 function updateTierHint(group) {
   const sel = $(group.sel);
   const hint = $(group.besteHint);
   if (!sel || !hint) return;
+  const cta = $(group.topupCta);
+  const showCta = (on) => { if (cta) cta.classList.toggle("hidden", !on); };
   const beste = sel.querySelector('option[value="beste"]');
-  if (!beste || beste.hidden) { hint.classList.add("hidden"); hint.textContent = ""; return; }
+  if (!beste || beste.hidden) { hint.classList.add("hidden"); hint.textContent = ""; showCta(false); return; }
   if (sel.value === "beste" && !beste.disabled) {
     // Ausgewaehlt und gedeckt → Kostenhinweis. Preis ausschliesslich aus dem Server-Wert; liegt
     // er (noch) nicht vor, einen neutralen Platzhalter zeigen statt der Client-Konstante (F-2).
@@ -2615,17 +2655,17 @@ function updateTierHint(group) {
       ? "Beste Qualität (Opus): <strong>Preis wird geladen …</strong>"
       : `Beste Qualität (Opus) kostet etwa <strong>${formatGuthabenEuro(c)} pro Test</strong>.`;
     hint.classList.remove("hidden");
+    showCta(false);
   } else if (beste.disabled) {
-    // Gesperrt (ausgewaehlt oder nur sichtbar) → Guthaben fehlt; Aufladen anbieten. Den Link
-    // INNERHALB des Hint-Elements ansprechen (nicht per globaler id), damit beide Selektoren
-    // ihren eigenen Aufladen-Link bekommen, ohne doppelte ids im DOM.
-    hint.innerHTML = 'Beste Qualität (Opus) braucht mehr Guthaben. <a href="#">Aufladen</a>';
+    // Gesperrt (ausgewaehlt oder nur sichtbar) → Guthaben fehlt; Aufladen anbieten. Statt eines
+    // Text-Links uebernimmt der kompakte Aufladen-Button direkt am Select die Aktion (P7).
+    hint.textContent = "Beste Qualität (Opus) braucht mehr Guthaben.";
     hint.classList.remove("hidden");
-    const link = hint.querySelector("a");
-    if (link) link.onclick = (e) => { e.preventDefault(); openTopupDialog(); };
+    showCta(true);
   } else {
     hint.classList.add("hidden");
     hint.textContent = "";
+    showCta(false);
   }
 }
 
@@ -2653,6 +2693,59 @@ function updateFreeTierHint(group) {
       : `Dein kostenloses Tageskontingent ist aufgebraucht. Jeder weitere Test in dieser Qualität kostet <strong>${euro}</strong> aus deinem Guthaben (mit Bestätigung).`;
   }
   hint.classList.remove("hidden");
+}
+
+// --- Kontextueller Qualitaets-Hinweis in der Erstell-Maske (P7) ---------------------------
+// Rein clientseitiger Keyword-Check auf Stellentext/Gespraechsstufe: bei anspruchsvollen
+// Verfahren (Assessment-Center, Fuehrungs-/Leitungsrollen, Traineeprogramme) dezent die beste
+// Qualitaet empfehlen. NUR ein Hinweis — keine automatische Tier-Umschaltung, kein API-Call.
+// Kurze, neutrale Liste aus Wort-ANFAENGEN (\b + Stamm), damit z. B. "Anleitung" NICHT als
+// "leitung" durchschlaegt, "Leitungserfahrung"/"Fuehrungsposition" aber schon. Gepruft wird
+// gegen einen umlaut-gefalteten Text (ä→ae, ü→ue …), damit die ASCII-Schreibweise
+// ("Fuehrungskraft") ebenso trifft wie "Führungskraft".
+const OPUS_CONTEXT_KEYWORDS = /\b(assessment|fuehrung|leitung|teamleitung|abteilungsleitung|trainee)/;
+// Nur den Anfang des Textes pruefen — genug Signal, und der Check bleibt auch bei sehr
+// langen Anzeigen billig (laeuft debounced waehrend des Tippens).
+const OPUS_CONTEXT_SCAN_CAP = 20000;
+
+// Deutsche Umlaute/ß auf ihre ASCII-Digraphen falten, damit beide Schreibweisen matchen.
+function foldGerman(s) {
+  return s.toLowerCase()
+    .replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue").replace(/ß/g, "ss");
+}
+
+function opusContextMatch() {
+  const stufe = $("gespraechsstufe");
+  if (stufe && stufe.value === "assessment") return true;
+  const ta = $("job-text");
+  const text = ta && typeof ta.value === "string" ? ta.value.slice(0, OPUS_CONTEXT_SCAN_CAP) : "";
+  return OPUS_CONTEXT_KEYWORDS.test(foldGerman(text));
+}
+
+// Hinweis unter dem Pro-Test-Qualitaets-Select zeichnen. Sichtbar nur, wenn Credits live sind
+// (Flag bestaetigt an — dormant exakt heutiges Verhalten), die beste Stufe nicht ohnehin schon
+// gewaehlt ist und der Kontext passt. Idempotent, von allen Auffrisch-Stellen aufrufbar.
+function updateCreateTierContextHint() {
+  const hint = $("create-tier-context-hint");
+  if (!hint) return;
+  const show = creditsState.loaded
+    && creditsState.creditsEnabled
+    && selectedTier() !== "beste"
+    && opusContextMatch();
+  if (show) {
+    hint.textContent = "Tipp: Für Assessment-Center und Führungspositionen empfehlen wir die beste Qualität.";
+    hint.classList.remove("hidden");
+  } else {
+    hint.classList.add("hidden");
+    hint.textContent = "";
+  }
+}
+
+// Debounce fuers Tippen im Stellentext — der Keyword-Check darf die Eingabe nie ausbremsen.
+let _opusContextTimer = null;
+function scheduleCreateTierContextHint() {
+  clearTimeout(_opusContextTimer);
+  _opusContextTimer = setTimeout(updateCreateTierContextHint, 400);
 }
 
 // Balance-Zeile + Tier-Optionen + Aufladen-Bereich aus dem aktuellen creditsState zeichnen.
@@ -9426,12 +9519,20 @@ $("create-tier").addEventListener("change", () => {
   if (sel) formTierOverride = sel.value;
   updateTierOptions(g);
   updateFreeTierHint(g);
+  updateCreateTierContextHint();
   const ni = $("num-questions"); if (ni && ni.refreshMax) ni.refreshMax();
 });
 
 // Aufladen-Buttons (3/5/10 €) → Paddle-Checkout.
 document.querySelectorAll(".btn-topup").forEach((b) => {
   b.addEventListener("click", () => startTopup(Number(b.dataset.eur)));
+});
+
+// Kompakter Aufladen-CTA direkt am Qualitaets-Select (sichtbar nur, wenn Opus mangels
+// Guthaben gesperrt ist) → bestehender Aufladen-Flow in den Einstellungen.
+["tier-topup-cta", "create-tier-topup-cta"].forEach((id) => {
+  const b = $(id);
+  if (b) b.addEventListener("click", () => openTopupDialog());
 });
 
 $("btn-load-models").addEventListener("click", async () => {
@@ -9975,6 +10076,10 @@ initNumStepper();
 // Beim Tippen einer neuen URL den alten Import-Status (z. B. Fehler) ausblenden.
 $("job-url").addEventListener("input", () => { clearImportStatus(); scheduleDraftSave(); });
 $("job-text").addEventListener("input", scheduleDraftSave);
+// Kontextueller Qualitaets-Hinweis (P7): debounced auf Tipp-Eingaben, sofort bei der
+// Gespraechsstufe (diskreter Wechsel, kein Tippen).
+$("job-text").addEventListener("input", scheduleCreateTierContextHint);
+$("gespraechsstufe").addEventListener("change", updateCreateTierContextHint);
 
 // Wechselt zum Text-Tab, damit das Einfuege-Feld sichtbar ist - die Eskalation,
 // wenn das Laden per URL nicht klappt (Fehler/Tageslimit/LinkedIn). Die bereits
