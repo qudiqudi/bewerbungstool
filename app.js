@@ -941,6 +941,9 @@ function showView(id) {
   // ein Wiedereintritt sauber den globalen settings.tier als Default zeigt.
   if (id !== "view-input") formTierOverride = null;
   views.forEach((v) => $(v).classList.toggle("hidden", v !== id));
+  // P4: Auf der Startseite zeigt die Job-Karte den Fertig-Zustand selbst — der
+  // (redundante) "Dein Test ist fertig"-Banner verschwindet dort.
+  if (id === "view-home") hideJobReadyBanner();
   // Eingabe-Bildschirm: Pro-Test-Tier-Selektor auf die aktuelle Absicht setzen und den
   // Fragen-Stepper an die Stufe anpassen (guenstig deckelt niedriger). Ein evtl. unter "standard"
   // gesetzter hoeherer Wert wird heruntergeklemmt.
@@ -1102,6 +1105,37 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && loadingTicker && !_wakeLock) acquireWakeLock();
 });
 
+// "Wusstest du?"-Hinweise fuer laengere Wartezeiten im Lade-Overlay (P4): rein statische,
+// lokale Texte zu oeffentlichen Produkt-Features — kein API-Call, kein Server-Zustand.
+// Sie erscheinen erst nach LOADING_TIP_DELAY_S (kurze Ladevorgaenge bleiben ruhig) und
+// rotieren dann. Waehrend einer sichtbaren Turnstile-Challenge liegt deren Vollbild-
+// Overlay (z-index 1000) ohnehin ueber dem Panel — die Tipps koennen sie nie verdecken.
+const LOADING_TIPS = [
+  "Wusstest du? Im Lernmodus kannst du jede Frage sofort auflösen und aus der Erklärung lernen – ideal zum Einstieg.",
+  "Wusstest du? Mit den Gesprächsstufen (z. B. Telefoninterview oder Fachgespräch) passt sich dein Test der anstehenden Runde an.",
+  "Wusstest du? Ein kurzes Profil in den Einstellungen macht deine Tests persönlicher – etwa passend zu deinem Quereinstieg.",
+  "Wusstest du? Zahlenreihen, Konzentration und Figuren kannst du jederzeit kostenlos üben – über „Module üben“ auf der Startseite.",
+  "Wusstest du? Aufgaben aus deinen Tests landen im Stapel „Fällige Übungen“ und werden dir im richtigen Abstand erneut vorgelegt.",
+  "Wusstest du? Der Prüfungsmodus simuliert Zeitdruck wie im echten Auswahlverfahren – im Lernmodus hast du alle Zeit der Welt.",
+  "Wusstest du? In der Historie kannst du alte Versuche jederzeit noch einmal durchsehen – ohne dass neu bewertet wird.",
+];
+const LOADING_TIP_DELAY_S = 7;   // erst nach dieser Wartezeit den ersten Tipp zeigen
+const LOADING_TIP_ROTATE_S = 8;  // danach im Abstand weiterrotieren
+
+// Tipp-Zeile setzen bzw. mit null wieder ausblenden. Defensiv (Element kann in
+// eingebetteten/alten Markup-Staenden fehlen); Text nur bei Aenderung schreiben.
+function setLoadingTip(text) {
+  const el = $("loading-tip");
+  if (!el) return;
+  if (!text) {
+    el.textContent = "";
+    el.classList.add("hidden");
+    return;
+  }
+  if (el.textContent !== text) el.textContent = text;
+  el.classList.remove("hidden");
+}
+
 function showLoading(text) {
   $("loading-text").textContent = text;
   $("loading-progress").classList.add("hidden");
@@ -1112,9 +1146,17 @@ function showLoading(text) {
 
   const started = Date.now();
   $("loading-elapsed").textContent = "";
+  setLoadingTip(null);
+  // Zufaelliger Startpunkt, damit nicht jeder Wartevorgang mit demselben Tipp beginnt.
+  const tipOffset = Math.floor(Math.random() * LOADING_TIPS.length);
   clearInterval(loadingTicker);
   loadingTicker = setInterval(() => {
-    $("loading-elapsed").textContent = Math.round((Date.now() - started) / 1000) + " s";
+    const sec = Math.round((Date.now() - started) / 1000);
+    $("loading-elapsed").textContent = sec + " s";
+    if (sec >= LOADING_TIP_DELAY_S && LOADING_TIPS.length) {
+      const idx = (tipOffset + Math.floor((sec - LOADING_TIP_DELAY_S) / LOADING_TIP_ROTATE_S)) % LOADING_TIPS.length;
+      setLoadingTip(LOADING_TIPS[idx]);
+    }
   }, 1000);
 }
 
@@ -1136,6 +1178,7 @@ function hideLoading() {
   clearInterval(loadingTicker);
   loadingTicker = null;
   hideAbortButton();
+  setLoadingTip(null); // Tipp-Zeile nicht in den naechsten Wartevorgang durchscheinen lassen
   $("loading").classList.add("hidden");
   releaseWakeLock();
 }
@@ -4642,6 +4685,7 @@ async function startHostedGeneration(ctx) {
     return;
   }
   actionRunning = true;
+  hideJobReadyBanner(); // P4: ein evtl. noch offener Hinweis gehoert zum ERSETZTEN Ready-Job
   showLoading("Test wird gestartet...");
   try {
     // Stufe einmal bestimmen und konsistent fuer Body UND Provenienz verwenden.
@@ -4814,6 +4858,14 @@ async function pollActiveJob() {
       }
     } catch { /* reines Komfort-Update: Fehler ignorieren, saveAttempt schreibt spaeter */ }
     renderActiveJobCard("ready");
+    // P4: Ist der Nutzer gerade woanders (z. B. beim Ueben in view-sr), sieht er die fertige
+    // Karte auf der Startseite nicht → dezenter, nicht-blockierender Hinweis mit CTA. NICHT
+    // auf der Startseite (die Karte zeigt es dort schon) und NICHT im laufenden Fragebogen
+    // (ein Klick wuerde den laufenden Versuch durch den neuen Test ersetzen).
+    {
+      const v = currentView();
+      if (v !== "view-home" && v !== "view-quiz") showJobReadyBanner();
+    }
     // Bezahlter Opus-Job fertig → Guthaben-Cache nachziehen (Anzeige + naechste Opus-Pruefung).
     refreshCreditsAfterJob(job.ctx);
   } else if (data.status === "done") {
@@ -4859,11 +4911,53 @@ function resumeActiveJob() {
 }
 
 function startReadyJob() {
+  hideJobReadyBanner(); // P4: Hinweis ist mit dem Start (von Karte ODER Banner) erledigt
   const job = loadActiveJob();
   if (!job || !job.quiz) return;
   clearActiveJob();
   renderActiveJobCard(null);
   finalizeQuiz(job.quiz, { ...job.ctx, jobId: job.jobId, genCost: null, genTokens: null, isLocal: false });
+}
+
+// Wartezeit nutzen (P4): waehrend der Test im Hintergrund entsteht, in der Pending-Karte
+// eine kurze LOKALE Uebung anbieten (bestehender Uebungs-Hub: kostenlos, komplett auf dem
+// Geraet, kein API-Call). Der Vorschlag rotiert zufaellig ueber die Module, bleibt aber
+// fuer einen laufenden Job stabil (die Karte wird bei jedem Poll neu gerendert). Das
+// Angebot erscheint erst NACH der Turnstile-/Startphase — eine sichtbare Challenge kann
+// hier also nie verdeckt oder abgelenkt werden. Das Polling laeuft view-unabhaengig
+// weiter, die Uebung unterbricht die Erstellung nicht.
+let _pendingPracticeTyp = null;
+function renderPendingPracticeOffer(show) {
+  const box = $("active-job-practice");
+  if (!box) return;
+  if (!show) {
+    box.classList.add("hidden");
+    _pendingPracticeTyp = null;
+    return;
+  }
+  // Bereits sichtbar mit gewaehltem Modul: stehen lassen (kein Springen bei jedem Poll).
+  if (_pendingPracticeTyp && !box.classList.contains("hidden")) return;
+  _pendingPracticeTyp = UEB_TYPEN[Math.floor(Math.random() * UEB_TYPEN.length)].typ;
+  const textEl = $("active-job-practice-text");
+  if (textEl) {
+    textEl.textContent = "Während dein Test entsteht: " + uebLabel(_pendingPracticeTyp)
+      + " üben? Läuft direkt auf deinem Gerät – die Erstellung geht im Hintergrund weiter.";
+  }
+  box.classList.remove("hidden");
+}
+
+// P4: nicht-blockierender Hinweis, wenn der Test fertig wird, waehrend der Nutzer gerade
+// NICHT auf der Startseite ist (z. B. mitten in einer Uebungsaufgabe — die darf er in Ruhe
+// zu Ende machen). Kein Fokus-Diebstahl (role="status", nichts wird fokussiert); liegt per
+// CSS unter Lade-Overlay und Turnstile-Challenge, kann also nie eine Sicherheitsabfrage
+// verdecken.
+function showJobReadyBanner() {
+  const b = $("job-ready-banner");
+  if (b) b.classList.remove("hidden");
+}
+function hideJobReadyBanner() {
+  const b = $("job-ready-banner");
+  if (b) b.classList.add("hidden");
 }
 
 // Status-Karte fuer den Hintergrund-Job auf der Startliste. state: "pending"|"ready"|"error"|null.
@@ -4872,6 +4966,7 @@ function renderActiveJobCard(state) {
   if (!card) return;
   if (!state) {
     card.classList.add("hidden");
+    renderPendingPracticeOffer(false); // Modul-Wahl zuruecksetzen, Angebot schliessen
     renderHome(); // Empty-Hinweis/Liste wieder korrekt herstellen
     return;
   }
@@ -4904,6 +4999,7 @@ function renderActiveJobCard(state) {
   }
   if (spin) spin.classList.toggle("hidden", state !== "pending");
   if (startBtn) startBtn.classList.toggle("hidden", !ready);
+  renderPendingPracticeOffer(state === "pending"); // P4: Wartezeit-Uebungsangebot
   card.classList.remove("hidden");
 }
 
@@ -10108,6 +10204,17 @@ $("btn-new-job").addEventListener("click", () => {
   showView("view-input");
 });
 $("active-job-start").addEventListener("click", startReadyJob);
+// P4: Wartezeit nutzen — vorgeschlagenes Modul direkt starten (rein lokal, kein API-Call;
+// die Hintergrund-Erstellung laeuft unabhaengig weiter). Defensiv: ohne gemerktes Modul
+// in den Picker.
+$("active-job-practice-btn").addEventListener("click", () => {
+  if (_pendingPracticeTyp) startPractice(_pendingPracticeTyp);
+  else openPracticePicker();
+});
+// P4: Fertig-Banner — "Jetzt starten" nutzt denselben Pfad wie die Karte (startReadyJob
+// blendet den Banner selbst aus), "Spaeter" schliesst nur den Hinweis (Karte bleibt).
+$("job-ready-start").addEventListener("click", startReadyJob);
+$("job-ready-later").addEventListener("click", hideJobReadyBanner);
 $("resume-continue").addEventListener("click", resumeLearnSession);
 $("resume-discard").addEventListener("click", discardLearnSession);
 

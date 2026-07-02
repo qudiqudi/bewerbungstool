@@ -2445,3 +2445,29 @@ button.danger:hover { background: var(--red-soft); border-color: var(--red); }
 
 /* Offener-Lerntest-Karte (Punkt 3): Aktionen rechts gruppiert */
 .resume-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+/* Wartezeit nutzen (P4): Uebungs-Angebot als eigene Zeile unter dem Pending-Status.
+   flex-basis 100% erzwingt den Umbruch in der flex-wrap-Karte, auch auf Desktop. */
+.active-job-practice {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  border-top: 1px dashed var(--primary-soft-border);
+  padding-top: 0.6rem;
+}
+
+/* "Dein Test ist fertig"-Hinweis (P4): bewusst UNTER dem Lade-Overlay (z-index 10) und
+   der Turnstile-Challenge (z-index 1000) — der Banner darf NIE eine laufende Anzeige
+   oder eine Sicherheitsabfrage verdecken. */
+.update-banner.job-ready-banner { z-index: 9; }
+
+/* "Wusstest du?"-Hinweis im Lade-Overlay (P4): dezent unter dem Sekundenzaehler. */
+.loading-tip {
+  font-size: 0.85rem;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.78);
+  max-width: 320px;
+}

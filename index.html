@@ -338,6 +338,12 @@
           <p id="active-job-text" class="active-job-text"></p>
         </div>
         <button id="active-job-start" class="primary hidden">Loslegen</button>
+        <!-- Wartezeit nutzen: waehrend der Test im Hintergrund entsteht, eine kurze lokale
+             Uebung anbieten (kostenlos, komplett auf dem Geraet; die Erstellung laeuft weiter). -->
+        <div id="active-job-practice" class="active-job-practice hidden">
+          <p id="active-job-practice-text" class="active-job-text"></p>
+          <button id="active-job-practice-btn" class="ghost" type="button">Kurz üben</button>
+        </div>
       </div>
       <!-- Offener Lerntest (Punkt 3): verlassener Fragebogen, spaeter fortsetzbar. -->
       <div id="resume-card" class="active-job-card hidden">
@@ -775,6 +781,9 @@
         <p id="loading-text" role="status" aria-live="polite">Wird geladen...</p>
         <div id="loading-progress" class="loading-bar hidden"><div id="loading-fill"></div></div>
         <p id="loading-elapsed" class="loading-elapsed" aria-hidden="true"></p>
+        <!-- Rotierender "Wusstest du?"-Hinweis bei laengeren Wartezeiten (rein statisch, lokal).
+             Bewusst OHNE aria-live: die Rotation soll Screenreader nicht wiederholt unterbrechen. -->
+        <p id="loading-tip" class="loading-tip hidden"></p>
         <button id="loading-abort" class="loading-abort hidden" type="button">Stoppen &amp; verwenden</button>
       </div>
     </div>
@@ -784,6 +793,15 @@
       <span>Eine neue Version ist verfügbar.</span>
       <button id="btn-update-reload" class="primary">Jetzt aktualisieren</button>
       <button id="btn-update-later" class="ghost">Später</button>
+    </div>
+
+    <!-- Fertig-Hinweis: der im Hintergrund erstellte Test wurde fertig, waehrend der Nutzer
+         nicht auf der Startseite ist (z. B. beim Ueben). Nicht-blockierend, stiehlt keinen
+         Fokus und liegt per CSS UNTER Lade-Overlay und Turnstile-Challenge. -->
+    <div id="job-ready-banner" class="update-banner job-ready-banner hidden" role="status">
+      <span>Dein Test ist fertig.</span>
+      <button id="job-ready-start" class="primary" type="button">Jetzt starten</button>
+      <button id="job-ready-later" class="ghost" type="button">Später</button>
     </div>
 
     <!-- Fehleranzeige -->
