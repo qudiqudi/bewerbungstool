@@ -3677,6 +3677,12 @@ function saveDraft() {
   } catch {
     // localStorage voll oder gesperrt: Entwurf ist nur Komfort, nicht kritisch
   }
+  // Investment-first: Ist bereits eine Eingabe fuer den Login gesichert, sie mit dem
+  // aktuellen Formular gleichziehen, damit nach dem Login der NEUESTE Stand wiederkommt
+  // und ein aelterer Snapshot einen zwischenzeitlich bearbeiteten Entwurf nicht
+  // ueberschreibt. Aktualisiert NUR eine schon vorhandene Sicherung, legt nie eine neue
+  // an (das bleibt den Login-ausloesenden Aktionen vorbehalten).
+  refreshPendingJobInputIfPresent();
 }
 
 // Entwurf verzoegert sichern, damit nicht jeder Tastendruck schreibt
@@ -3761,6 +3767,18 @@ function readPendingJobInput() {
 
 function clearPendingJobInput() {
   try { localStorage.removeItem(PENDING_JOB_INPUT_KEY); } catch { /* egal */ }
+}
+
+// Eine BEREITS gesicherte Eingabe mit dem aktuellen Formular aktualisieren, solange sie
+// besteht (aus saveDraft aufgerufen). Verhindert, dass nach einer unterbrochenen Anmeldung
+// (Nutzer editiert nach ausgeloestem Login weiter) ein aelterer Snapshot den neueren Stand
+// ueberschreibt. Legt bewusst NIE eine neue Sicherung an — sonst wuerde blosses Tippen den
+// Investment-first-Ruecksprung zur Eingabe faelschlich scharfschalten.
+function refreshPendingJobInputIfPresent() {
+  let exists = false;
+  try { exists = localStorage.getItem(PENDING_JOB_INPUT_KEY) !== null; }
+  catch { return; } // Storage gesperrt: nur Komfort, nicht kritisch
+  if (exists) savePendingJobInput();
 }
 
 // Nach erfolgreichem Login: gesicherte Eingabe ins Formular zuruecklegen und die
