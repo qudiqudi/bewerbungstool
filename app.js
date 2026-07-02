@@ -2438,10 +2438,25 @@ function clearAuthToken() {
 // signierten Checkout-Intent, nicht ueber ein client-geliefertes customData.user_id.)
 // freeRemaining = vom Server (/api/balance) gemeldete heute noch verfuegbaren GRATIS-Tests in
 // den Gratis-Stufen (Overflow-Signal); null = unbekannt/Server liefert es (noch) nicht.
-let creditsState = { credits: null, creditsEnabled: false, opusTestCredits: null, freeRemaining: null, loaded: false, dirty: false };
+// firstTopupBonus = optionales additives Server-Signal (/api/balance): { eligible, credits } des
+// Erstkauf-Bonus (P9). null = Server bewirbt keinen Bonus (Feature aus ODER Nutzer nicht mehr
+// berechtigt ODER Feld fehlt/alt-Server). Rein defensiv gelesen; die Zahl kommt ausschliesslich
+// vom Server (keine Client-Konstante). Nach dem ersten Aufladen meldet der Server eligible=false
+// → der Hinweis verschwindet beim naechsten Balance-Refresh.
+let creditsState = { credits: null, creditsEnabled: false, opusTestCredits: null, freeRemaining: null, firstTopupBonus: null, loaded: false, dirty: false };
 
 function resetCreditsState() {
-  creditsState = { credits: null, creditsEnabled: false, opusTestCredits: null, freeRemaining: null, loaded: false, dirty: false };
+  creditsState = { credits: null, creditsEnabled: false, opusTestCredits: null, freeRemaining: null, firstTopupBonus: null, loaded: false, dirty: false };
+}
+
+// Defensiv: das optionale Server-Feld firstTopupBonus nur akzeptieren, wenn es AKTIV einen Bonus
+// bewirbt — Objekt mit eligible === true UND einer positiven ganzen Credits-Zahl. Alles andere
+// (Feld fehlt, eligible false, kaputter/negativer Wert) → null, damit nie ein Hinweis erscheint,
+// den der Server nicht deckt. Gibt { eligible:true, credits:<n> } oder null zurueck.
+function parseFirstTopupBonus(v) {
+  if (!v || typeof v !== "object" || v.eligible !== true) return null;
+  const c = v.credits;
+  return Number.isInteger(c) && c > 0 ? { eligible: true, credits: c } : null;
 }
 
 // Festpreis je Test und Stufe (Credits). Forward-kompatible Fallback-Werte fuer den
@@ -2663,6 +2678,17 @@ function renderCreditsUI() {
   // Login-Zustand (Block liegt in #account-loggedin).
   const topup = $("topup");
   if (topup) topup.classList.toggle("hidden", !creditsState.creditsEnabled);
+  // Erstkauf-Bonus-Hinweis (P9): nur bei aktivem Credits-Flag UND wenn der Server einen Bonus
+  // bewirbt (firstTopupBonus.eligible + credits). Die Zahl stammt ausschliesslich vom Server.
+  // Fehlt das Signal → Hinweis verborgen (kein Bruch fuer alt-Server/Feature aus). Nach dem
+  // ersten Aufladen meldet /api/balance eligible=false → firstTopupBonus=null → Hinweis weg.
+  const bonusEl = $("topup-bonus");
+  if (bonusEl) {
+    const b = creditsState.firstTopupBonus;
+    const show = creditsState.creditsEnabled && b && b.eligible && b.credits > 0;
+    bonusEl.classList.toggle("hidden", !show);
+    bonusEl.textContent = show ? `+${b.credits.toLocaleString("de-DE")} Credits Startbonus beim ersten Aufladen` : "";
+  }
   // Opt-in "automatisch Guthaben verwenden": nur bei aktivem Flag sichtbar; Haken aus dem
   // gespeicherten settings.autoUseCredits spiegeln.
   const autoRow = $("auto-credits-row");
@@ -2864,18 +2890,22 @@ async function refreshBalance() {
         creditsEnabled: d.creditsEnabled === true,
         opusTestCredits: Number.isFinite(d.opusTestCredits) ? d.opusTestCredits : null,
         freeRemaining: Number.isFinite(d.freeRemaining) ? d.freeRemaining : null,
+        // Erstkauf-Bonus (P9): nur uebernehmen, wenn der Server ihn AKTIV bewirbt (eligible === true
+        // und eine positive ganze Credits-Zahl). Fehlt das Feld (alt-Server/Feature aus) oder ist der
+        // Nutzer nicht mehr berechtigt → null (kein Hinweis). Zahl bleibt server-hoheitlich.
+        firstTopupBonus: parseFirstTopupBonus(d.firstTopupBonus),
         loaded: true,
         dirty: false, // frisch bestaetigt
       };
     } else {
       // Kein frischer Stand bestaetigt (5xx/…) → den alten Geldstand NICHT als aktuell stehen
       // lassen, sondern als unbekannt ausblenden (gerade nach einer Abbuchung/Kauf). Auch
-      // freeRemaining leeren, sonst koennte der Hinweis ein veraltetes Gratis-Kontingent zeigen.
-      creditsState = { ...creditsState, credits: null, freeRemaining: null };
+      // freeRemaining/Bonus leeren, sonst koennte ein veraltetes Signal stehen bleiben.
+      creditsState = { ...creditsState, credits: null, freeRemaining: null, firstTopupBonus: null };
     }
   } catch {
     if (settings.authToken !== tok) return creditsState;
-    creditsState = { ...creditsState, credits: null, freeRemaining: null }; // offline: Stand unbekannt, nicht stale zeigen
+    creditsState = { ...creditsState, credits: null, freeRemaining: null, firstTopupBonus: null }; // offline: Stand unbekannt, nicht stale zeigen
   }
   renderCreditsUI();
   return creditsState;
