@@ -1050,6 +1050,10 @@ function restoreView(state) {
     // Einrichtungs-Gates (Login/Onboarding) nicht per Zurueck erneut zeigen, wenn
     // der Anbieter inzwischen nutzbar eingerichtet ist - dann auf die Startliste.
     else if ((id === "view-login" || id === "view-onboarding") && isProviderConfigured()) goHome();
+    // Zurueck/Vorwaerts IN view-login (Login noch noetig): ueber promptHostedLogin fuehren,
+    // nicht direkt showView — sonst umgeht diese Wiederherstellung den Once-pro-Anzeige-Gate
+    // der login-shown-Telemetrie (P10).
+    else if (id === "view-login") promptHostedLogin();
     else showView(id);
   } finally {
     _poppingHistory = false;
