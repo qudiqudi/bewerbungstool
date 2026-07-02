@@ -9437,7 +9437,16 @@ $("create-tier").addEventListener("change", () => {
   const ni = $("num-questions"); if (ni && ni.refreshMax) ni.refreshMax();
 });
 
-// Aufladen-Buttons (3/5/10 €) → Paddle-Checkout.
+// Aufladen-Buttons (3/5/10 €) → Paddle-Checkout. Der Selektor erfasst BEIDE Vorkommen:
+// den Aufladen-Block der Einstellungen UND die Inline-Pakete im Overflow-Dialog (gleiche
+// .btn-topup/data-eur-Semantik) — der Overflow-Dialog braucht daher keine eigene Verdrahtung.
+// Nach erfolgreichem Kauf zieht der Guthaben-Stand ueber den bestehenden Paddle-Pfad nach:
+// onPaddleEvent("checkout.completed") → pollBalanceAfterPurchase → refreshBalance (setzt
+// creditsState.credits + ruft renderCreditsUI) → updateOverflowConfirmFromCredits →
+// renderOverflowConfirmState. Steht der Dialog gerade im "Guthaben reicht nicht"-Zustand,
+// wechselt er dadurch in die Bestaetigung — der Test startet aber NIE automatisch, es bleibt
+// der explizite Klick auf "Mit Guthaben erstellen". Scheitert der Refresh (5xx/offline),
+// bleibt credits null → der letzte bekannte (nicht ausreichende) Stand steht, kein Fehl-Freischalten.
 document.querySelectorAll(".btn-topup").forEach((b) => {
   b.addEventListener("click", () => startTopup(Number(b.dataset.eur)));
 });
