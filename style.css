@@ -347,6 +347,26 @@ input:focus, select:focus, textarea:focus {
 }
 .space-between { justify-content: space-between; }
 
+/* Beispieltest ohne Login: hervorgehobener Einstieg auf der Login-Karte. */
+.demo-callout {
+  margin: 1rem 0 1.25rem;
+  padding: 1rem;
+  border: 1px solid var(--primary-soft-border);
+  border-radius: var(--radius);
+  background: var(--primary-soft);
+}
+.demo-callout-lead {
+  margin: 0 0 0.25rem;
+  font-weight: 700;
+  color: var(--accent-text);
+}
+.demo-callout-text {
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+.demo-cta { width: 100%; }
+
 .field-inline {
   display: flex;
   align-items: center;

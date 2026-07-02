@@ -1,0 +1,124 @@
+{
+  "titel": "Beispieltest: Kaufmann/-frau im Einzelhandel",
+  "arbeitgeber": "Beispielmarkt (Musterfirma)",
+  "arbeitsort": "Musterstadt",
+  "empfohlene_zeit_minuten": 10,
+  "fragen": [
+    {
+      "id": 1,
+      "typ": "multiple_choice",
+      "kategorie": "Fachwissen: Kaufrecht",
+      "schwierigkeit": "leicht",
+      "frage": "Wie lange gilt beim Kauf neuer Waren durch Verbraucher die gesetzliche Gewährleistung (Mängelhaftung)?",
+      "optionen": [
+        "6 Monate",
+        "1 Jahr",
+        "2 Jahre",
+        "5 Jahre"
+      ],
+      "korrekte_antwort": "2 Jahre",
+      "korrekte_indizes": [2],
+      "erklaerungen": [
+        "Zu kurz. 6 Monate ist nur die Frist der Beweislastumkehr bei gebrauchten Sachen – nicht die Gewährleistung selbst.",
+        "Zu kurz. Ein Jahr ist die Mindestfrist, auf die die Gewährleistung bei Gebrauchtwaren vertraglich verkürzt werden darf, nicht die Regelfrist für Neuware.",
+        "Richtig. Nach § 438 Abs. 1 Nr. 3 BGB verjähren Mängelansprüche bei beweglichen Neuwaren in zwei Jahren ab Übergabe.",
+        "Zu lang. Fünf Jahre gelten für Mängel an Bauwerken, nicht für den Warenverkauf im Einzelhandel."
+      ],
+      "lerninfo": "Gewährleistung ist gesetzlich vorgeschrieben (2 Jahre bei Neuware) und betrifft Mängel, die schon bei Übergabe vorlagen. Sie ist nicht mit der freiwilligen Garantie des Herstellers zu verwechseln. In den ersten 12 Monaten wird zugunsten des Verbrauchers vermutet, dass der Mangel von Anfang an bestand.",
+      "quellen": [
+        { "titel": "§ 438 BGB – Verjährung der Mängelansprüche", "url": "https://www.gesetze-im-internet.de/bgb/__438.html" },
+        { "titel": "Verbraucherzentrale: Gewährleistung und Garantie", "url": "https://www.verbraucherzentrale.de/wissen/vertraege-reklamation/kundenrechte/gewaehrleistung-und-garantie-die-unterschiede-13278" }
+      ]
+    },
+    {
+      "id": 2,
+      "typ": "multiple_choice",
+      "kategorie": "Fachwissen: Verkauf & Kundenservice",
+      "schwierigkeit": "mittel",
+      "frage": "Eine Kundin möchte einwandfreie, nicht reduzierte Ware ohne Reklamationsgrund umtauschen. Was gilt rechtlich?",
+      "optionen": [
+        "Der Händler ist gesetzlich verpflichtet, mangelfreie Ware umzutauschen.",
+        "Bei mangelfreier Ware besteht im Ladengeschäft kein gesetzlicher Umtauschanspruch – es ist Kulanz.",
+        "Umtausch ist nur mit Kassenbon gesetzlich erzwingbar.",
+        "Der Händler muss den Kaufpreis in bar zurückzahlen."
+      ],
+      "korrekte_antwort": "Bei mangelfreier Ware besteht im Ladengeschäft kein gesetzlicher Umtauschanspruch – es ist Kulanz.",
+      "korrekte_indizes": [1],
+      "erklaerungen": [
+        "Falsch. Für mangelfreie Ware gibt es im stationären Handel keine gesetzliche Umtauschpflicht.",
+        "Richtig. Im Ladengeschäft ist der Umtausch einwandfreier Ware eine freiwillige Kulanzleistung; ein gesetzliches Widerrufsrecht gibt es nur im Fernabsatz (z. B. Online-Kauf).",
+        "Falsch. Der Kassenbon erleichtert den Nachweis, begründet aber keinen Umtauschanspruch bei mangelfreier Ware.",
+        "Falsch. Gewähren Händler kulanterweise einen Umtausch, dürfen sie die Form (z. B. Gutschein statt Bargeld) selbst festlegen."
+      ],
+      "lerninfo": "Wichtig ist die Unterscheidung: Reklamation (Mangel) fällt unter die Gewährleistung, der Umtausch einwandfreier Ware im Laden ist dagegen Kulanz. Ein gesetzliches 14-tägiges Widerrufsrecht besteht nur bei Fernabsatz- und Haustürgeschäften, nicht im Ladenlokal.",
+      "quellen": [
+        { "titel": "Verbraucherzentrale: Umtausch und Rückgabe im Geschäft", "url": "https://www.verbraucherzentrale.de/wissen/vertraege-reklamation/kundenrechte/umtausch-und-rueckgabe-1367" }
+      ]
+    },
+    {
+      "id": 3,
+      "typ": "multiple_choice",
+      "kategorie": "Rechnen im Handel: Prozente",
+      "schwierigkeit": "leicht",
+      "frage": "Ein Artikel kostet regulär 80 €. Im Schlussverkauf wird er um 25 % reduziert. Wie viel zahlt die Kundin?",
+      "optionen": [
+        "55 €",
+        "60 €",
+        "65 €",
+        "75 €"
+      ],
+      "korrekte_antwort": "60 €",
+      "korrekte_indizes": [1],
+      "erklaerungen": [
+        "Falsch. Das wären 31,25 % Rabatt, nicht 25 %.",
+        "Richtig. 25 % von 80 € sind 20 € Rabatt; 80 € − 20 € = 60 €.",
+        "Falsch. 65 € entspräche nur 18,75 % Nachlass.",
+        "Falsch. 75 € wäre lediglich ein Rabatt von 5 € bzw. 6,25 %."
+      ],
+      "lerninfo": "Prozentrechnung gehört zum Handelsalltag (Rabatte, Aufschläge, Mehrwertsteuer). Trick: 25 % = ein Viertel. Ein Viertel von 80 sind 20, also bleiben 60. So lassen sich glatte Prozentsätze im Kopf schnell prüfen.",
+      "quellen": [
+        { "titel": "IHK: Kaufmännisches Rechnen – Grundlagen", "url": "https://www.ihk.de/" }
+      ]
+    },
+    {
+      "id": 4,
+      "typ": "sprachlogik",
+      "kategorie": "Sprachlogik: Analogien",
+      "schwierigkeit": "mittel",
+      "frage": "Buch verhält sich zu Kapitel wie Jahr zu …?",
+      "optionen": [
+        "Woche",
+        "Monat",
+        "Stunde",
+        "Kalender"
+      ],
+      "korrekte_antwort": "Monat",
+      "korrekte_indizes": [1],
+      "erklaerungen": [
+        "Nicht die beste Wahl. Ein Buch besteht in erster Ordnung aus Kapiteln; das direkte Gliederungsstück eines Jahres ist der Monat, nicht die Woche.",
+        "Richtig. Ein Buch gliedert sich in Kapitel wie ein Jahr sich in Monate gliedert – jeweils die nächstkleinere, gleichrangige Einheit.",
+        "Falsch. Die Stunde ist eine Untereinheit des Tages, nicht die direkte Gliederung des Jahres.",
+        "Falsch. Der Kalender bildet das Jahr ab, ist aber kein Bestandteil davon – die Analogie verlangt einen Teil des Jahres."
+      ],
+      "lerninfo": "Analogieaufgaben prüfen, ob man die Beziehung zwischen zwei Begriffen erkennt und auf ein neues Paar überträgt. Hier ist die Relation ‚Ganzes → nächstkleinere Gliederungseinheit‘. Erst die Beziehung in Worte fassen, dann die passende Option suchen.",
+      "quellen": [
+        { "titel": "Arbeitsagentur BERUFENET: Einstellungstests vorbereiten", "url": "https://www.arbeitsagentur.de/" }
+      ]
+    },
+    {
+      "id": 5,
+      "typ": "zahlenreihe",
+      "kategorie": "Logisches Denken: Zahlenreihen",
+      "schwierigkeit": "leicht",
+      "frage": "Setze die Zahlenreihe logisch fort: 2, 4, 8, 16, ?",
+      "optionen": [],
+      "korrekte_antwort": "32",
+      "korrekte_indizes": [],
+      "erklaerungen": [],
+      "lerninfo": "Bei Zahlenreihen zuerst die Differenzen oder Faktoren zwischen benachbarten Zahlen prüfen. Hier verdoppelt sich jede Zahl (×2): 2, 4, 8, 16, also folgt 32. Neben Verdopplung sind häufige Muster: feste Addition, wechselnde Differenzen oder zwei verschachtelte Reihen.",
+      "quellen": [
+        { "titel": "Arbeitsagentur BERUFENET: Einstellungstests vorbereiten", "url": "https://www.arbeitsagentur.de/" }
+      ]
+    }
+  ]
+}

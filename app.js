@@ -911,6 +911,11 @@ let answers = [];     // index-paralleles Array mit Antworttexten
 let current = 0;
 let mode = "lernen";  // "lernen" | "pruefung"
 let reviewing = false; // Durchgehen eines bereits bewerteten Fragebogens (keine erneute Auswertung)
+// Beispieltest ohne Login (Onboarding): ein gebuendeltes statisches Quiz laeuft ueber
+// dieselbe Lernmodus-Pipeline, darf aber NICHTS in Produktivdaten schreiben (weder
+// bewerbungstool.history noch bewerbungstool.learnSession) und loest am Ende KEINE
+// Auswertung (kein API-Call) aus, sondern einen CTA. Der Flag isoliert diesen Modus.
+let demoMode = false;
 let revealed = [];    // Lernmodus: welche Fragen bereits aufgeloest wurden
 // Reihenfolge-Aufgaben: ephemere Anzeige-Reihenfolge je Frageindex (Map index ->
 // number[] der elemente-Indizes). NICHT persistiert (analog revealed). Beim
@@ -4548,6 +4553,7 @@ function finalizeQuiz(result, ctx) {
   sortDisplay = {};
   current = 0;
   reviewing = false;
+  demoMode = false; // echter Test: den Beispieltest-Modus sicher verlassen
   startTime = Date.now();
   mode = ctx.mode || mode;
   if (mode === "pruefung") {
@@ -4924,7 +4930,10 @@ function loadLearnSession() {
 }
 let _learnSaveWarned = false;
 function saveLearnSession() {
-  if (!learnSessionActive || mode !== "lernen" || !quiz || reviewing) return false;
+  // demoMode: der Beispieltest ohne Login darf NIE eine fortsetzbare Sitzung in
+  // die Produktivdaten schreiben (learnSessionActive ist ohnehin false, dieser
+  // Guard ist die zweite, explizite Sicherung).
+  if (!learnSessionActive || demoMode || mode !== "lernen" || !quiz || reviewing) return false;
   try {
     localStorage.setItem(LEARN_SESSION_KEY, JSON.stringify({
       quiz, answers, revealed, current, savedAt: Date.now(),
@@ -4966,6 +4975,7 @@ function resumeLearnSession() {
   current = Number.isInteger(s.current) ? Math.min(Math.max(0, s.current), n - 1) : 0;
   mode = "lernen";
   reviewing = false;
+  demoMode = false; // echte Sitzung: Beispieltest-Modus verlassen
   startTime = Date.now();
   learnSessionActive = true;
   stopTimer();
@@ -4997,6 +5007,71 @@ function renderResumeCard() {
   // Widerspricht dem Leer-Hinweis; diesen ausblenden, solange die Karte sichtbar ist.
   $("home-empty").classList.add("hidden");
   card.classList.remove("hidden");
+}
+
+/* ---------- Beispieltest ohne Login (Onboarding P2) ---------- */
+// Ein gebuendeltes statisches Quiz (demo/beispieltest.json) laeuft ueber die
+// BESTEHENDE Lernmodus-Pipeline (renderQuestion/Aufloesen/Erklaerungen/Quellen) —
+// komplett lokal: kein API-Call, kein Login, kein Turnstile. Schreibt NICHTS in
+// Produktivdaten (weder bewerbungstool.history noch bewerbungstool.learnSession) und
+// loest am Ende KEINE Auswertung (kein /api/evaluate) aus, sondern zeigt nur einen
+// Abschluss-CTA. Der demoMode-Flag isoliert diesen Modus (siehe evaluateQuiz/renderQuestion).
+let _demoQuizCache = null;
+async function startDemoTest() {
+  if (actionRunning) return;
+  const btn = $("btn-demo-test");
+  try {
+    if (btn) btn.disabled = true;
+    let data = _demoQuizCache;
+    if (!data) {
+      const res = await fetch("demo/beispieltest.json", { cache: "force-cache" });
+      if (!res.ok) throw new Error("demo fetch " + res.status);
+      data = await res.json();
+      _demoQuizCache = data;
+    }
+    beginDemoTest(data);
+  } catch {
+    showError("Der Beispieltest lässt sich gerade nicht laden. Bitte später erneut versuchen.");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// Setzt den Quiz-Zustand fuer den Beispieltest auf und springt in die Frageansicht.
+// Bewusst KEINE Wiederverwendung von finalizeQuiz: kein Anhaengen einer zufaelligen
+// Figural-Frage (Demo soll deterministisch die kuratierten Fragen zeigen), kein
+// jobText/urlKey (viewRecordKey bleibt null -> keine Job-/History-Verknuepfung) und
+// keine learnSession. normalizeQuizData liefert dieselbe defensive Normalisierung wie
+// bei echten Tests (u. a. Optionen-Mischen); daher eine frische tiefe Kopie, damit der
+// Cache fuer "noch einmal ansehen" unveraendert bleibt.
+function beginDemoTest(data) {
+  demoMode = true;
+  learnSessionActive = false; // NIE als fortsetzbare Sitzung sichern
+  reviewing = false;
+  mode = "lernen";
+  quiz = normalizeQuizData(JSON.parse(JSON.stringify(data)), "");
+  enrichTried = new Set();
+  enrichingIdx = -1;
+  answers = new Array(quiz.fragen.length).fill("");
+  revealed = new Array(quiz.fragen.length).fill(false);
+  sortDisplay = {};
+  current = 0;
+  startTime = Date.now();
+  stopTimer();
+  timer.overtime = false; timer.limitMin = 0; timer.deadline = 0;
+  $("quiz-timer").classList.add("hidden");
+  setQuizNotice("");
+  renderQuestion();
+  showView("view-quiz");
+}
+
+function openDemoEnd() {
+  $("demo-end-modal").classList.remove("hidden");
+  const el = $("btn-demo-end-create");
+  if (el) el.focus();
+}
+function closeDemoEnd() {
+  $("demo-end-modal").classList.add("hidden");
 }
 
 /* ---------- Timer (Prüfungsmodus) ---------- */
@@ -5329,10 +5404,14 @@ function renderQuestion() {
   // frueh aus). Rein lokal, loest keinen API-Call aus.
   const reportArea = $("report-area");
   reportArea.innerHTML = "";
-  // answersSecret: im aktiven Pruefungsmodus (vor der Auswertung) darf die
-  // Meldung die korrekte Antwort NICHT mitspeichern - sonst koennte man eine Frage
-  // melden und die Loesung ueber Export/localStorage vor der Bewertung auslesen.
-  appendReportButton(reportArea, q, { ...reportKontextAktiv(), answersSecret: mode === "pruefung" && !reviewing });
+  // Im Beispieltest ohne Login gibt es kein "Frage melden" (die Meldung wuerde an
+  // das Backend gehen und bezieht sich auf ein generisches Demo-Quiz).
+  if (!demoMode) {
+    // answersSecret: im aktiven Pruefungsmodus (vor der Auswertung) darf die
+    // Meldung die korrekte Antwort NICHT mitspeichern - sonst koennte man eine Frage
+    // melden und die Loesung ueber Export/localStorage vor der Bewertung auslesen.
+    appendReportButton(reportArea, q, { ...reportKontextAktiv(), answersSecret: mode === "pruefung" && !reviewing });
+  }
 
   $("btn-prev").disabled = current === 0;
   $("btn-next").textContent =
@@ -5782,6 +5861,10 @@ function prevQuestion() {
 
 async function evaluateQuiz() {
   if (actionRunning) return;
+  // Beispieltest ohne Login: KEINE Auswertung (kein /api/evaluate, keine Kosten),
+  // stattdessen der Abschluss-CTA. Einziger Kostenpfad-Choke-Point des Demos —
+  // nextQuestion() ruft im Lernmodus auf der letzten Frage hierher.
+  if (demoMode) { openDemoEnd(); return; }
   // Aufgeloeste Fragen im Lernmodus zaehlen nicht als unbeantwortet: wer die
   // Loesung bewusst angesehen hat, hat die Frage nicht versehentlich
   // uebersprungen. Sie gehen in der Auswertung als aufgeloest ohne eigene
@@ -8868,6 +8951,7 @@ function openJob(job) {
 }
 
 function goHome() {
+  demoMode = false; // Beispieltest-Modus beim Verlassen sicher zuruecksetzen
   renderHome();
   showView("view-home");
 }
@@ -8921,6 +9005,7 @@ function openAttempt(job, att) {
   // echten Lerntest mit den Daten dieses alten Versuchs ueberschreiben.
   learnSessionActive = false;
   reviewing = true;
+  demoMode = false; // gespeicherter Versuch: Beispieltest-Modus verlassen
   quiz = JSON.parse(JSON.stringify(att.quiz));
   enrichTried = new Set();
   enrichingIdx = -1;
@@ -9331,6 +9416,21 @@ $("login-magic-form").addEventListener("submit", async (e) => {
 // kein Anbieter noetig. WICHTIG: nur die generische Praxis ist no-login – die gehostete,
 // stellenbezogene Testerstellung bleibt hinter der Anmeldung (hostedNeedsLogin()).
 $("btn-login-practice").addEventListener("click", () => openPracticePicker());
+
+// Beispieltest ohne Login: lokal abspielen (kein API-Call/Login/Turnstile).
+$("btn-demo-test").addEventListener("click", startDemoTest);
+// Abschluss-CTA: eigenen Test erstellen -> zurueck ans Login-Gate (Erstellen ist
+// anmeldepflichtig). demoMode explizit loesen, bevor der normale Fluss weiterlaeuft.
+$("btn-demo-end-create").addEventListener("click", () => {
+  closeDemoEnd();
+  demoMode = false;
+  promptHostedLogin();
+});
+$("btn-demo-end-repeat").addEventListener("click", () => {
+  closeDemoEnd();
+  if (_demoQuizCache) beginDemoTest(_demoQuizCache);
+  else startDemoTest();
+});
 
 $("btn-login-google").addEventListener("click", async () => {
   const btn = $("btn-login-google");

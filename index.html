@@ -125,6 +125,11 @@
     <section id="view-login" class="card hidden">
       <h2>Kostenlos nutzen – einmal anmelden</h2>
       <p>jobreif.de macht aus jeder Stellenanzeige einen Übungs-Einstellungstest und gibt dir danach Feedback zu deinen Antworten. Für den kostenlosen gehosteten Modus melde dich einmal an – mit Google oder über einen Anmeldelink an deine E-Mail.</p>
+      <div class="demo-callout">
+        <p class="demo-callout-lead">Neugierig, wie ein Test aussieht?</p>
+        <p class="demo-callout-text">Spiel einen kompletten Beispieltest mit Lösungen, Erklärungen und Quellen durch – ganz ohne Konto und ohne Kosten.</p>
+        <button id="btn-demo-test" type="button" class="primary demo-cta">So sieht ein Test aus – Beispiel durchspielen</button>
+      </div>
       <div class="row">
         <button id="btn-login-google" type="button" class="primary">Mit Google anmelden</button>
       </div>
@@ -610,6 +615,18 @@
         <div class="row">
           <button id="btn-confirm-replace-learn" class="primary">Neuen Test starten</button>
           <button id="btn-confirm-replace-learn-cancel" class="ghost">Abbrechen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Ende des Beispieltests (ohne Login): CTA zum eigenen Test -->
+    <div id="demo-end-modal" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="demo-end-title">
+      <div class="modal card">
+        <h2 id="demo-end-title">Das war der Beispieltest</h2>
+        <p>Das war ein generisches Beispiel. Erstell dir jetzt einen Test, der genau auf deine Wunsch-Stelle zugeschnitten ist – mit Feedback zu deinen Antworten. Kostenlos.</p>
+        <div class="row">
+          <button id="btn-demo-end-create" class="primary">Test für meine Stelle erstellen</button>
+          <button id="btn-demo-end-repeat" class="ghost">Beispiel noch einmal ansehen</button>
         </div>
       </div>
     </div>
