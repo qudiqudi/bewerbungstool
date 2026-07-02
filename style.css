@@ -2150,6 +2150,42 @@ button.danger:hover { background: var(--red-soft); border-color: var(--red); }
   line-height: 1.4;
 }
 
+/* Weiter-Nudge nach der Auswertung: dezente Karte mit Akzentkante, gefuehrt in
+   den bestehenden Vertiefungs-/Test-Flow. Nur bei frischer Auswertung sichtbar. */
+.result-nudge {
+  margin: 0.7rem 0 0;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--primary);
+  border-radius: 10px;
+  background: var(--card-2);
+}
+.result-nudge-title {
+  margin: 0 0 0.25rem;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: var(--text);
+}
+.result-nudge-body {
+  margin: 0 0 0.55rem;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  color: var(--text);
+}
+.result-nudge-cta {
+  width: 100%;
+  border: 1px solid var(--primary);
+  color: var(--primary);
+  background: transparent;
+  border-radius: 10px;
+  padding: 0.6rem 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.result-nudge-cta:hover { background: var(--primary-soft); }
+.result-nudge-note { margin: 0.5rem 0 0; font-size: 0.8rem; }
+
 /* ---------- Stufenaufstieg-Feier (Overlay) ----------
    Eskalierende Level-Up-Animation aus dem jobreif-Design "Level-Up".
    Die Bühne ist eine in sich geschlossene, warme Feier-Karte mit festen
