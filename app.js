@@ -962,6 +962,7 @@ function syncCreateTierSelect() {
   sel.value = selectedTier();
   updateTierOptions(g);   // setzt ggf. beste sichtbar/gesperrt und korrigiert den Wert
   updateFreeTierHint(g);
+  renderFreeQuotaBadges(); // Create-Badge folgt selectedTier() → beim Betreten frisch zeichnen
 }
 
 function currentView() {
@@ -2553,12 +2554,14 @@ const TIER_CONTROLS = {
   },
 };
 
-// Beide Selektoren aus dem aktuellen creditsState neu zeichnen (Opus-Option, Hinweise).
+// Beide Selektoren aus dem aktuellen creditsState neu zeichnen (Opus-Option, Hinweise)
+// sowie die Kontingent-Badges (haengen am selben State und denselben Auffrisch-Pfaden).
 function renderTierControls() {
   updateTierOptions(TIER_CONTROLS.settings);
   updateFreeTierHint(TIER_CONTROLS.settings);
   updateTierOptions(TIER_CONTROLS.create);
   updateFreeTierHint(TIER_CONTROLS.create);
+  renderFreeQuotaBadges();
 }
 
 function updateTierOptions(group) {
@@ -2629,6 +2632,32 @@ function updateTierHint(group) {
   }
 }
 
+// Gemeinsame Sichtbarkeitsbedingung fuer alle Gratis-Kontingent-Anzeigen (Tier-Hinweis und
+// Badge): Credits-Flag bestaetigt an UND der Server hat ein konkretes Kontingent gemeldet.
+// Fail-closed: solange das Flag aus ist (dormant) oder freeRemaining unbekannt/null ist,
+// zeigt keine der Anzeigen etwas Neues — kein Breaking Change.
+function freeQuotaVisible() {
+  return creditsState.creditsEnabled && Number.isFinite(creditsState.freeRemaining);
+}
+
+// Euro-Preis eines weiteren (Overflow-)Tests in einer Gratis-Stufe, ueber den bestehenden
+// Preis-Helper (tierPriceCredits; massgeblich bleibt der Server). "beste" gehoert nicht zum
+// Gratis-Kontingent und faellt fuer die Anzeige auf die Standard-Stufe zurueck.
+//
+// Preis-Quelle bewusst: dieser Helper zieht den Preis aus tierPriceCredits — demselben
+// kanonischen Helper, den updateFreeTierHint schon vor diesem Branch fuer den aufgebraucht-
+// Zustand nutzte (in origin/main identisch `formatGuthabenEuro(tierPriceCredits(tier))`).
+// Es wird KEINE neue Client-Preis-Konstante eingefuehrt; die Vorab-Anzeige bleibt eine
+// Schaetzung, massgeblich abgerechnet wird serverseitig. Wichtig fuers Review: das Gratis-
+// Kontingent-Badge zeigt ausschliesslich die Gratis-Stufen an — die einzige separat vom
+// Server bepreiste Stufe (beste/Opus) ist von der Gratis-Anzeige ausgeschlossen (siehe
+// renderFreeQuotaBadges). Daher ist "Preis in den Balance-Contract aufnehmen" fuer dieses
+// Feature nicht anwendbar und wuerde die harte Vorgabe "kein neuer Server-Zustand/API-Call"
+// verletzen.
+function freeTierOverflowEuro(tier) {
+  return formatGuthabenEuro(tierPriceCredits(tier === "guenstig" ? "guenstig" : "standard"));
+}
+
 // Hinweis fuer die Gratis-Stufen (standard/guenstig): wie viele kostenlose Tests heute noch
 // uebrig sind bzw. — wenn aufgebraucht — dass weitere Tests Guthaben kosten (Overflow). Nur
 // bei aktivem Flag und bekanntem freeRemaining; fuer "beste" zeigt updateTierHint den Opus-Preis.
@@ -2638,7 +2667,7 @@ function updateFreeTierHint(group) {
   if (!hint) return;
   const tier = sel ? sel.value : group.read();
   const remaining = creditsState.freeRemaining;
-  if (!creditsState.creditsEnabled || tier === "beste" || !Number.isFinite(remaining)) {
+  if (!freeQuotaVisible() || tier === "beste") {
     hint.classList.add("hidden"); hint.textContent = ""; return;
   }
   if (remaining > 0) {
@@ -2647,12 +2676,56 @@ function updateFreeTierHint(group) {
       : `Heute noch ${remaining} kostenlose Tests in dieser Qualität.`;
   } else {
     // euro aus einer Zahl formatiert (keine Nutzereingabe) → kein XSS.
-    const euro = formatGuthabenEuro(tierPriceCredits(tier));
+    const euro = freeTierOverflowEuro(tier);
     hint.innerHTML = settings.autoUseCredits
       ? `Dein kostenloses Tageskontingent ist aufgebraucht. Jeder weitere Test in dieser Qualität wird automatisch mit <strong>${euro}</strong> aus deinem Guthaben bezahlt.`
       : `Dein kostenloses Tageskontingent ist aufgebraucht. Jeder weitere Test in dieser Qualität kostet <strong>${euro}</strong> aus deinem Guthaben (mit Bestätigung).`;
   }
   hint.classList.remove("hidden");
+}
+
+// Dauerhaft sichtbares Kontingent-Badge auf der Startseite und in der Erstell-Maske (P5):
+// framt das taegliche Gratis-Kontingent von Anfang an positiv als Feature, statt es erst
+// beim Aufbrauchen als Limit zu zeigen. Nur im Hosted-Modus und nur bei freeQuotaVisible()
+// — sonst bleiben beide Badges unsichtbar (dormant, kein Breaking Change). Idempotent und
+// an dieselben Auffrisch-Pfade gehaengt wie die Tier-Hinweise (renderTierControls sowie die
+// Tier-Change-Handler), damit der Stand nach jeder Generierung/Balance-Aktualisierung stimmt.
+function renderFreeQuotaBadges() {
+  const isHosted = (settings.provider || "hosted") === "hosted";
+  const remaining = creditsState.freeRemaining;
+  const show = isHosted && freeQuotaVisible();
+  // Jedes Badge nimmt den Overflow-Preis aus SEINER eigenen Stufen-Quelle: das Erstell-Masken-
+  // Badge folgt der aktiven Auswahl im Formular (selectedTier(), inkl. transientem Override),
+  // das Startseiten-Badge der persistierten globalen Stufe (settings.tier). Sonst leckte eine
+  // Pro-Test-Wahl (z. B. Günstig) ihren guenstigeren Preis ins Home-Badge und bliebe dort nach
+  // dem Verlassen der Maske stehen, obwohl der transiente Override laengst geleert ist.
+  const badges = [
+    { id: "home-free-badge", tier: settings.tier || "standard" },
+    { id: "create-free-badge", tier: selectedTier() },
+  ];
+  for (const { id, tier } of badges) {
+    const el = $(id);
+    if (!el) continue;
+    // "beste" (Opus) gehoert NICHT zum Gratis-Kontingent — es ist separat bepreist/gegated.
+    // Wie updateFreeTierHint das Gratis-Signal fuer beste ausblendet, blendet auch das Badge
+    // fuer beste aus: sonst zeigte der aufgebraucht-Zustand faelschlich den Standard-Preis,
+    // obwohl der naechste Opus-Test anders (teurer) abgerechnet wird.
+    if (!show || tier === "beste") { el.classList.add("hidden"); el.textContent = ""; continue; }
+    if (remaining > 0) {
+      el.textContent = remaining === 1
+        ? "Heute noch 1 kostenloser Test"
+        : `Heute noch ${remaining} kostenlose Tests`;
+    } else {
+      // Aufgebraucht: kein Dead-End — weiter testen geht per Guthaben. euro aus einer Zahl
+      // formatiert (kein XSS); Preis der stufenspezifischen Quelle, derselbe Helper wie im
+      // Tier-Hinweis.
+      const euro = freeTierOverflowEuro(tier);
+      el.innerHTML = `Alle kostenlosen Tests für heute genutzt 💪 – weitere kosten <strong>${euro}</strong>. <a href="#">Guthaben aufladen</a>`;
+      const link = el.querySelector("a");
+      if (link) link.onclick = (e) => { e.preventDefault(); openTopupDialog(); };
+    }
+    el.classList.remove("hidden");
+  }
 }
 
 // Balance-Zeile + Tier-Optionen + Aufladen-Bereich aus dem aktuellen creditsState zeichnen.
@@ -9415,6 +9488,7 @@ $("model").addEventListener("change", updateModelDesc);
 $("tier").addEventListener("change", () => {
   updateTierHint(TIER_CONTROLS.settings);
   updateFreeTierHint(TIER_CONTROLS.settings);
+  renderFreeQuotaBadges(); // Preis im aufgebraucht-Zustand haengt an der gewaehlten Stufe
 });
 
 // Pro-Test-Qualitaetsstufe in der Erstell-Maske: die Wahl als TRANSIENTEN Override merken (nie
@@ -9426,6 +9500,7 @@ $("create-tier").addEventListener("change", () => {
   if (sel) formTierOverride = sel.value;
   updateTierOptions(g);
   updateFreeTierHint(g);
+  renderFreeQuotaBadges(); // Preis im aufgebraucht-Zustand haengt an der gewaehlten Stufe
   const ni = $("num-questions"); if (ni && ni.refreshMax) ni.refreshMax();
 });
 
@@ -9480,6 +9555,9 @@ $("btn-save-settings").addEventListener("click", () => {
     if (provider === "local") settings.baseUrl = normalizeBaseUrl($("base-url").value);
   }
   saveSettings(settings);
+  // Kontingent-Badges an den (evtl. gewechselten) Anbieter/Stufe anpassen: bei einem Wechsel
+  // weg vom Hosted-Modus muessen sie sofort verschwinden (Badge ist ein Hosted-Feature).
+  renderFreeQuotaBadges();
   // Profil unabhaengig von settings in seinem eigenen Key sichern (leere Auswahl → entfernt).
   saveProfile({
     trajectory: $("profile-trajectory").value,
